@@ -36,6 +36,7 @@ export const repoInputSchema = z.object({
   autoReviewFeedback: z.boolean().default(false),
   autoResolveMergeConflicts: z.boolean().default(false),
   includeProgressReplies: z.boolean().default(false),
+  autoDecompose: z.boolean().default(false),
   readyLabels: jsonStringArray('["ready","ready-for-agent","ready-to-work"]'),
   blockingLabels: jsonStringArray(
     '["blocked","question","needs-human","needs-discussion","wontfix","duplicate","invalid"]',

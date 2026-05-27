@@ -5,14 +5,25 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
+import type { IssueSubtask } from "@/lib/db/schema";
 import type { IssueDetail } from "@/lib/github/gh";
 import {
   commentIssueAction,
   editIssueAction,
+  listSubtasksAction,
   setIssueLabelsAction,
   setIssueStateAction,
   viewIssueAction,
 } from "@/lib/issues/actions";
+
+/** Display label and tone for each subtask lifecycle state. */
+const SUBTASK_DISPLAY: Record<string, { label: string; symbol: string }> = {
+  pending: { label: "Pending", symbol: "○" },
+  in_progress: { label: "In progress", symbol: "◐" },
+  done: { label: "Done", symbol: "✓" },
+  skipped: { label: "Skipped", symbol: "⊘" },
+  deferred: { label: "Deferred", symbol: "⏸" },
+};
 
 export function IssueDetailModal({
   repoId,
@@ -26,6 +37,7 @@ export function IssueDetailModal({
   onClose: () => void;
 }) {
   const [detail, setDetail] = useState<IssueDetail | null>(null);
+  const [subtasks, setSubtasks] = useState<IssueSubtask[]>([]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [comment, setComment] = useState("");
@@ -38,6 +50,7 @@ export function IssueDetailModal({
     if (!open || issueNumber === null) return;
     setError(null);
     setDetail(null);
+    setSubtasks([]);
     viewIssueAction(repoId, issueNumber)
       .then((d) => {
         setDetail(d);
@@ -45,6 +58,9 @@ export function IssueDetailModal({
         setBody(d.body);
       })
       .catch((e) => setError(e.message));
+    listSubtasksAction(repoId, issueNumber)
+      .then(setSubtasks)
+      .catch(() => setSubtasks([]));
   }, [open, issueNumber, repoId]);
 
   function reload() {
@@ -52,6 +68,9 @@ export function IssueDetailModal({
     viewIssueAction(repoId, issueNumber)
       .then(setDetail)
       .catch((e) => setError(e.message));
+    listSubtasksAction(repoId, issueNumber)
+      .then(setSubtasks)
+      .catch(() => setSubtasks([]));
   }
 
   function setState(next: "open" | "closed") {
@@ -158,6 +177,36 @@ export function IssueDetailModal({
               </Button>
             </div>
           </div>
+
+          {subtasks.length > 0 && (
+            <div>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Subtasks ({subtasks.filter((s) => s.status === "done").length}/{subtasks.length})
+              </p>
+              <ol className="space-y-1">
+                {subtasks.map((s) => {
+                  const display = SUBTASK_DISPLAY[s.status] ?? { label: s.status, symbol: "○" };
+                  const muted = s.status === "done" || s.status === "skipped";
+                  return (
+                    <li
+                      key={s.id}
+                      className="flex items-center gap-2 rounded-md border border-card-border bg-background px-2 py-1 text-sm"
+                    >
+                      <span className="text-muted-foreground" aria-hidden>
+                        {display.symbol}
+                      </span>
+                      <span className={muted ? "text-muted-foreground line-through" : ""}>
+                        {s.title}
+                      </span>
+                      <span className="ml-auto">
+                        <Badge>{display.label}</Badge>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          )}
 
           <div>
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">

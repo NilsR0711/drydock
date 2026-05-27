@@ -9,6 +9,7 @@ import {
   setQueueLabelLocal,
   syncIssuesFromGh,
 } from "@/lib/issues/service";
+import { listSubtasks } from "@/lib/issues/subtasks";
 import { createJob } from "@/lib/orchestrator/jobs";
 
 /** Fetch all open issues from GitHub and cache them (backlog + queue). */
@@ -67,6 +68,11 @@ export async function viewIssueAction(repoId: number, issueNumber: number) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
   return getForge(repo).viewIssue(issueNumber);
+}
+
+/** The tracked subtasks of a decomposed issue, in order (empty if none). */
+export async function listSubtasksAction(repoId: number, issueNumber: number) {
+  return listSubtasks(repoId, issueNumber);
 }
 
 /** Edit issue title and/or body. */

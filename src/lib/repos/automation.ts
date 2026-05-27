@@ -8,6 +8,7 @@ export interface RepoAutomation {
   autoReviewFeedback: boolean;
   autoResolveMergeConflicts: boolean;
   includeProgressReplies: boolean;
+  autoDecompose: boolean;
   readyLabels: string[];
   blockingLabels: string[];
   autoLabelWhitelist: string[];
@@ -39,6 +40,7 @@ export function repoAutomation(repo: Repo): RepoAutomation {
     autoReviewFeedback: repo.autoReviewFeedback,
     autoResolveMergeConflicts: repo.autoResolveMergeConflicts,
     includeProgressReplies: repo.includeProgressReplies,
+    autoDecompose: repo.autoDecompose,
     readyLabels: parseStringArray(repo.readyLabels),
     blockingLabels: parseStringArray(repo.blockingLabels),
     autoLabelWhitelist: parseStringArray(repo.autoLabelWhitelist),

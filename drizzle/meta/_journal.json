@@ -71,6 +71,13 @@
       "when": 1779920550688,
       "tag": "0009_redundant_lethal_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1779924686728,
+      "tag": "0010_thick_madame_masque",
+      "breakpoints": true
     }
   ]
 }

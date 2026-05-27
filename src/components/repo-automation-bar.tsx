@@ -36,6 +36,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoProcess, setAutoProcess] = useState(repo.autoProcessEnabled);
   const [autoHeal, setAutoHeal] = useState(repo.autoHealCi);
   const [autoFeedback, setAutoFeedback] = useState(repo.autoReviewFeedback);
+  const [autoDecompose, setAutoDecompose] = useState(repo.autoDecompose);
   const [resolveConflicts, setResolveConflicts] = useState(repo.autoResolveMergeConflicts);
   const [progressReplies, setProgressReplies] = useState(repo.includeProgressReplies);
   const [ready, setReady] = useState(parseList(repo.readyLabels).join(", "));
@@ -137,6 +138,17 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
           />
           Address PR review feedback
         </label>
+        <label className="flex items-center gap-1.5 text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={autoDecompose}
+            onChange={(e) => {
+              setAutoDecompose(e.target.checked);
+              persist({ autoDecompose: e.target.checked });
+            }}
+          />
+          Decompose large issues
+        </label>
         {pending && <span className="text-xs text-muted-foreground">Saving…</span>}
         {saved && <span className="text-xs text-success">Saved</span>}
       </div>
@@ -146,7 +158,9 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
         whitelisted labels; auto-processing works issues that are <em>ready</em> and not blocked;
         auto-heal attempts bounded, verified fixes for failing CI (never external or AI-review
         checks). PR review feedback is applied only for trusted reviewers (bots ignored) and runs
-        the mechanical iteration for you. Drydock never auto-merges — a human always reviews the PR.
+        the mechanical iteration for you. Decomposing large issues splits them into ordered, tracked
+        subtasks (checklist/heading heuristics, with an agent fallback for prose). Drydock never
+        auto-merges — a human always reviews the PR.
       </p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
