@@ -22,12 +22,17 @@ function gh(number: number, title: string): GhIssue {
   return { number, title, labels: [{ name: "drydock:queue" }] };
 }
 
+function defined<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("expected a value");
+  return value;
+}
+
 describe("issues service", () => {
   it("inserts synced issues in fetch order with ascending priority", () => {
     syncIssuesFromGh(repoId, [gh(5, "five"), gh(7, "seven")], db);
     const list = listIssues(repoId, db);
     expect(list.map((i) => i.number)).toEqual([5, 7]);
-    expect(list[0]!.priority).toBeLessThan(list[1]!.priority);
+    expect(defined(list[0]).priority).toBeLessThan(defined(list[1]).priority);
   });
 
   it("preserves priority of existing issues across re-sync", () => {
@@ -66,15 +71,15 @@ describe("issues service", () => {
     );
     const all = listIssues(repoId, db);
     expect(all).toHaveLength(2);
-    expect(JSON.parse(all.find((i) => i.number === 1)!.labels)).toEqual([]);
-    expect(JSON.parse(all.find((i) => i.number === 2)!.labels)).toContain("drydock:queue");
+    expect(JSON.parse(defined(all.find((i) => i.number === 1)).labels)).toEqual([]);
+    expect(JSON.parse(defined(all.find((i) => i.number === 2)).labels)).toContain("drydock:queue");
   });
 
   it("setQueueLabelLocal adds and removes the queue label in the cached row", () => {
     syncIssuesFromGh(repoId, [{ number: 7, title: "X", labels: [] }], db);
     setQueueLabelLocal(repoId, 7, "drydock:queue", true, db);
-    expect(JSON.parse(listIssues(repoId, db)[0]!.labels)).toContain("drydock:queue");
+    expect(JSON.parse(defined(listIssues(repoId, db)[0]).labels)).toContain("drydock:queue");
     setQueueLabelLocal(repoId, 7, "drydock:queue", false, db);
-    expect(JSON.parse(listIssues(repoId, db)[0]!.labels)).not.toContain("drydock:queue");
+    expect(JSON.parse(defined(listIssues(repoId, db)[0]).labels)).not.toContain("drydock:queue");
   });
 });

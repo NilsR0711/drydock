@@ -3,10 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "dev": "next dev -H 127.0.0.1 -p 3737",
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3737",
+    "lint": "biome ci .",
+    "format": "biome check --write .",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
@@ -44,11 +51,6 @@
     "vitest": "^2.1.8"
   },
   "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild",
-      "@biomejs/biome",
-      "sharp"
-    ]
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild", "@biomejs/biome", "sharp"]
   }
 }
