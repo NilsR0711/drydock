@@ -21,7 +21,7 @@ const assistantEvent = z.object({
   type: z.literal("assistant"),
   message: z.object({
     role: z.literal("assistant"),
-    content: z.array(z.record(z.unknown())),
+    content: z.array(z.record(z.string(), z.unknown())),
     usage: usageSchema.optional(),
   }),
 });
@@ -30,7 +30,7 @@ const userEvent = z.object({
   type: z.literal("user"),
   message: z.object({
     role: z.literal("user"),
-    content: z.array(z.record(z.unknown())),
+    content: z.array(z.record(z.string(), z.unknown())),
   }),
 });
 

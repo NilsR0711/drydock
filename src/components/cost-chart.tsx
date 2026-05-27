@@ -21,7 +21,7 @@ export function CostChart({ data }: { data: DailyCost[] }) {
               color: "hsl(var(--popover-foreground))",
               fontSize: 12,
             }}
-            formatter={(v: number) => `$${Number(v).toFixed(4)}`}
+            formatter={(v) => `$${Number(v).toFixed(4)}`}
           />
           <Bar
             dataKey="costUsd"
