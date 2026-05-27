@@ -72,7 +72,10 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
         });
         if (verdict.decision !== "approved") continue;
         if (hasOpenJob(db, repo.id, gh.number)) continue;
-        createJob({ repoId: repo.id, issueNumber: gh.number, model: repo.defaultModel }, db);
+        createJob(
+          { repoId: repo.id, issueNumber: gh.number, model: repo.defaultModel, agent: repo.agent },
+          db,
+        );
       }
     } catch (err) {
       console.error(`[driver] issue sync failed for ${repo.name}`, err);

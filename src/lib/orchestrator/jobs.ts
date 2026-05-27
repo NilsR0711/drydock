@@ -4,7 +4,13 @@ import { issues, type Job, jobEvents, jobs } from "@/lib/db/schema";
 import { assertTransition, type JobStatus } from "./state-machine";
 
 export function createJob(
-  input: { repoId: number; issueNumber: number; model?: string; maxTurns?: number },
+  input: {
+    repoId: number;
+    issueNumber: number;
+    model?: string;
+    agent?: string;
+    maxTurns?: number;
+  },
   db: DB = getDb(),
 ): Job {
   return db
@@ -14,6 +20,7 @@ export function createJob(
       issueNumber: input.issueNumber,
       status: "queued",
       model: input.model,
+      agent: input.agent ?? "claude",
       maxTurns: input.maxTurns ?? 40,
     })
     .returning()
