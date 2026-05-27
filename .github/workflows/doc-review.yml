@@ -1,0 +1,104 @@
+name: Doc Review Reminder
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+# Re-evaluate only the latest push per PR.
+concurrency:
+  group: doc-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  doc-review:
+    name: Check for accompanying docs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect source-only changes
+        id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          src_changed=false
+          docs_changed=false
+          if echo "$changed" | grep -qE '^src/'; then
+            src_changed=true
+          fi
+          if echo "$changed" | grep -qE '^docs/'; then
+            docs_changed=true
+          fi
+          echo "src_changed=$src_changed" >> "$GITHUB_OUTPUT"
+          echo "docs_changed=$docs_changed" >> "$GITHUB_OUTPUT"
+
+      - name: Post or update reminder
+        uses: actions/github-script@v9
+        env:
+          SRC_CHANGED: ${{ steps.diff.outputs.src_changed }}
+          DOCS_CHANGED: ${{ steps.diff.outputs.docs_changed }}
+        with:
+          script: |
+            const marker = '<!-- doc-review-reminder -->';
+            const srcChanged = process.env.SRC_CHANGED === 'true';
+            const docsChanged = process.env.DOCS_CHANGED === 'true';
+            const needsReminder = srcChanged && !docsChanged;
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number, per_page: 100 },
+            );
+            const existing = comments.find(
+              (c) => c.user?.type === 'Bot' && c.body?.includes(marker),
+            );
+
+            if (!needsReminder) {
+              // Nothing to remind about. Clean up a stale reminder if docs
+              // were added in a later push so the thread stays tidy.
+              if (existing && srcChanged && docsChanged) {
+                const resolved = `${marker}\n\n✅ Docs were updated alongside the source changes — thanks!`;
+                if (existing.body !== resolved) {
+                  await github.rest.issues.updateComment({
+                    owner, repo, comment_id: existing.id, body: resolved,
+                  });
+                }
+              }
+              return;
+            }
+
+            const body = [
+              marker,
+              '',
+              '📝 **Documentation reminder**',
+              '',
+              'This PR changes files under `src/` but does not touch `docs/`.',
+              'If the change affects behaviour, configuration, or public surface,',
+              'please update the relevant docs. This is a reminder, not a blocker.',
+            ].join('\n');
+
+            if (existing) {
+              if (existing.body !== body) {
+                await github.rest.issues.updateComment({
+                  owner, repo, comment_id: existing.id, body,
+                });
+              }
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number, body,
+              });
+            }
