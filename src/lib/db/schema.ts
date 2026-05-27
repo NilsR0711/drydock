@@ -22,6 +22,22 @@ export const repos = sqliteTable("repos", {
   autoProcessEnabled: integer("auto_process_enabled", { mode: "boolean" }).notNull().default(false),
   // Opt-in CI auto-healing (default off). See ADR 017.
   autoHealCi: integer("auto_heal_ci", { mode: "boolean" }).notNull().default(false),
+  // Opt-in PR review-feedback lifecycle (default off). See ADR 019.
+  autoReviewFeedback: integer("auto_review_feedback", { mode: "boolean" }).notNull().default(false),
+  // Bounded merge-conflict repair within the feedback loop (default off).
+  autoResolveMergeConflicts: integer("auto_resolve_merge_conflicts", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  // Post incremental "working on it" replies (default off, to avoid noise).
+  includeProgressReplies: integer("include_progress_replies", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  // JSON string arrays; parsed via repoAutomation(). Only trusted reviewers'
+  // feedback is acted on; ignored bots are never acted on.
+  trustedReviewers: text("trusted_reviewers").notNull().default("[]"),
+  ignoredBots: text("ignored_bots")
+    .notNull()
+    .default('["dependabot[bot]","github-actions[bot]","codecov[bot]"]'),
   // JSON string arrays; parsed via repoAutomation(). Any ready label triggers,
   // any blocking label vetoes; triage may only apply whitelisted labels.
   readyLabels: text("ready_labels")
@@ -189,6 +205,36 @@ export const healingAttempts = sqliteTable(
   }),
 );
 
+/**
+ * One PR review-feedback item (issue #18): a single review thread from a
+ * trusted reviewer that Drydock tracks through the feedback lifecycle. The
+ * `(jobId, threadId)` pair is unique so a thread re-seen on a later sweep
+ * reuses its row and current `status` (a FeedbackStatus). `classification` is
+ * actionable | question | out_of_scope; `attempts` counts agent fix attempts.
+ */
+export const reviewFeedbackItems = sqliteTable(
+  "review_feedback_items",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    jobId: integer("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    prNumber: integer("pr_number").notNull(),
+    threadId: text("thread_id").notNull(),
+    reviewer: text("reviewer").notNull(),
+    classification: text("classification").notNull(),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    detail: text("detail"),
+    createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    jobIdx: index("review_feedback_job_idx").on(t.jobId),
+    jobThreadUnique: uniqueIndex("review_feedback_job_thread_unique").on(t.jobId, t.threadId),
+  }),
+);
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -208,3 +254,5 @@ export type HealingSession = typeof healingSessions.$inferSelect;
 export type NewHealingSession = typeof healingSessions.$inferInsert;
 export type HealingAttempt = typeof healingAttempts.$inferSelect;
 export type NewHealingAttempt = typeof healingAttempts.$inferInsert;
+export type ReviewFeedbackItem = typeof reviewFeedbackItems.$inferSelect;
+export type NewReviewFeedbackItem = typeof reviewFeedbackItems.$inferInsert;

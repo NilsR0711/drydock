@@ -5,10 +5,15 @@ export interface RepoAutomation {
   autoTriageEnabled: boolean;
   autoProcessEnabled: boolean;
   autoHealCi: boolean;
+  autoReviewFeedback: boolean;
+  autoResolveMergeConflicts: boolean;
+  includeProgressReplies: boolean;
   readyLabels: string[];
   blockingLabels: string[];
   autoLabelWhitelist: string[];
   priorityAuthors: string[];
+  trustedReviewers: string[];
+  ignoredBots: string[];
   minAuthorAssociation: "approved" | "any";
   maxAttempts: number;
 }
@@ -31,10 +36,15 @@ export function repoAutomation(repo: Repo): RepoAutomation {
     autoTriageEnabled: repo.autoTriageEnabled,
     autoProcessEnabled: repo.autoProcessEnabled,
     autoHealCi: repo.autoHealCi,
+    autoReviewFeedback: repo.autoReviewFeedback,
+    autoResolveMergeConflicts: repo.autoResolveMergeConflicts,
+    includeProgressReplies: repo.includeProgressReplies,
     readyLabels: parseStringArray(repo.readyLabels),
     blockingLabels: parseStringArray(repo.blockingLabels),
     autoLabelWhitelist: parseStringArray(repo.autoLabelWhitelist),
     priorityAuthors: parseStringArray(repo.priorityAuthors),
+    trustedReviewers: parseStringArray(repo.trustedReviewers),
+    ignoredBots: parseStringArray(repo.ignoredBots),
     minAuthorAssociation: repo.minAuthorAssociation === "any" ? "any" : "approved",
     maxAttempts: repo.maxAttempts,
   };
