@@ -1,7 +1,7 @@
 "use server";
 
 import { getRepo } from "@/lib/db/queries";
-import { GhClient } from "@/lib/github/gh";
+import { getGh } from "@/lib/issues/gh-factory";
 import {
   listIssues,
   reorderIssues,
@@ -11,18 +11,11 @@ import {
 import { createJob } from "@/lib/orchestrator/jobs";
 import { revalidatePath } from "next/cache";
 
-type GhFactory = (cwd: string) => GhClient;
-let makeGh: GhFactory = (cwd) => new GhClient(cwd);
-/** Test seam: override how GhClient instances are created. */
-export function __setGhFactory(factory: GhFactory) {
-  makeGh = factory;
-}
-
 /** Fetch all open issues from GitHub and cache them (backlog + queue). */
 export async function syncRepoIssuesAction(repoId: number) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  const gh = makeGh(repo.path);
+  const gh = getGh(repo.path);
   const fetched = await gh.listAllIssues();
   syncIssuesFromGh(repoId, fetched);
   revalidatePath(`/repos/${repoId}`);
@@ -48,7 +41,7 @@ export async function startIssueAction(repoId: number, issueNumber: number) {
 export async function addToQueueAction(repoId: number, issueNumber: number) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  await makeGh(repo.path).addLabels(issueNumber, [repo.queueLabel]);
+  await getGh(repo.path).addLabels(issueNumber, [repo.queueLabel]);
   setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true);
   revalidatePath(`/repos/${repoId}`);
   return listIssues(repoId);
@@ -58,7 +51,7 @@ export async function addToQueueAction(repoId: number, issueNumber: number) {
 export async function removeFromQueueAction(repoId: number, issueNumber: number) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  await makeGh(repo.path).removeLabels(issueNumber, [repo.queueLabel]);
+  await getGh(repo.path).removeLabels(issueNumber, [repo.queueLabel]);
   setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, false);
   revalidatePath(`/repos/${repoId}`);
   return listIssues(repoId);
@@ -68,7 +61,7 @@ export async function removeFromQueueAction(repoId: number, issueNumber: number)
 export async function viewIssueAction(repoId: number, issueNumber: number) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  return makeGh(repo.path).viewIssue(issueNumber);
+  return getGh(repo.path).viewIssue(issueNumber);
 }
 
 /** Edit issue title and/or body. */
@@ -79,7 +72,7 @@ export async function editIssueAction(
 ) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  await makeGh(repo.path).editIssue(issueNumber, patch);
+  await getGh(repo.path).editIssue(issueNumber, patch);
   revalidatePath(`/repos/${repoId}`);
 }
 
@@ -87,7 +80,7 @@ export async function editIssueAction(
 export async function commentIssueAction(repoId: number, issueNumber: number, body: string) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  await makeGh(repo.path).commentIssue(issueNumber, body);
+  await getGh(repo.path).commentIssue(issueNumber, body);
 }
 
 /** Add or remove labels on an issue (GitHub + local cache for the queue label). */
@@ -99,7 +92,7 @@ export async function setIssueLabelsAction(
 ) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  const gh = makeGh(repo.path);
+  const gh = getGh(repo.path);
   if (add.length) await gh.addLabels(issueNumber, add);
   if (remove.length) await gh.removeLabels(issueNumber, remove);
   if (add.includes(repo.queueLabel)) setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true);
@@ -116,7 +109,7 @@ export async function setIssueStateAction(
 ) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  const gh = makeGh(repo.path);
+  const gh = getGh(repo.path);
   if (state === "closed") await gh.closeIssue(issueNumber);
   else await gh.reopenIssue(issueNumber);
   revalidatePath(`/repos/${repoId}`);

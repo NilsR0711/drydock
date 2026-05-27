@@ -3,7 +3,6 @@ process.env.DRYDOCK_DB = ":memory:";
 import { getDb } from "@/lib/db/client";
 import { issues, repos } from "@/lib/db/schema";
 import {
-  __setGhFactory,
   addToQueueAction,
   commentIssueAction,
   editIssueAction,
@@ -11,6 +10,7 @@ import {
   setIssueStateAction,
   viewIssueAction,
 } from "@/lib/issues/actions";
+import { __setGhFactory } from "@/lib/issues/gh-factory";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
