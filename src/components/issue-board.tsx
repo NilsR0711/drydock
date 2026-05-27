@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState, useTransition } from "react";
 import { IssueDetailModal } from "@/components/issue-detail-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,6 @@ import {
   reorderIssuesAction,
   syncRepoIssuesAction,
 } from "@/lib/issues/actions";
-import { useEffect, useState, useTransition } from "react";
 
 function parseLabels(raw: string): string[] {
   try {
@@ -185,6 +185,7 @@ export function IssueBoard({
       {error && <p className="text-xs text-destructive">{error}</p>}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop target for the backlog column */}
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={dropToBacklog}
@@ -203,6 +204,7 @@ export function IssueBoard({
           </ul>
         </div>
 
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop target for the queue column */}
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={dropToQueue}

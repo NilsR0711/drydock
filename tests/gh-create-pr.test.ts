@@ -1,6 +1,6 @@
+import { describe, expect, it } from "vitest";
 import type { CommandRunner } from "@/lib/exec/runner";
 import { GhClient, GhError } from "@/lib/github/gh";
-import { describe, expect, it } from "vitest";
 
 describe("GhClient.createPr", () => {
   it("creates a PR and parses the number from the URL", async () => {

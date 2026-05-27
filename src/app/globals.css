@@ -184,7 +184,10 @@ body {
 
 /* ---- Smooth reorder + hover transitions for the issue queue ---- */
 .issue-row {
-  transition: background-color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    transform 0.15s ease,
+    opacity 0.15s ease;
 }
 .issue-row.dragging {
   opacity: 0.6;

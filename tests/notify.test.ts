@@ -1,7 +1,7 @@
-import { type DB, createDb } from "@/lib/db/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createDb, type DB } from "@/lib/db/client";
 import { type NotifySender, notify } from "@/lib/notify/service";
 import { saveSettings } from "@/lib/settings/service";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let db: DB;
 beforeEach(() => {

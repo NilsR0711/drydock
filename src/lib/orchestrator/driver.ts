@@ -1,6 +1,6 @@
+import { eq, inArray } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
-import { eq, inArray } from "drizzle-orm";
 import { recordEvent } from "./jobs";
 import type { JobStatus } from "./state-machine";
 

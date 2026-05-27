@@ -1,9 +1,9 @@
-import { type DB, createDb } from "@/lib/db/client";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createDb, type DB } from "@/lib/db/client";
 import { repos } from "@/lib/db/schema";
 import type { GhIssue } from "@/lib/github/gh";
 import { reorderIssues, syncIssuesFromGh } from "@/lib/issues/service";
 import { createJob, nextQueuedJob } from "@/lib/orchestrator/jobs";
-import { beforeEach, describe, expect, it } from "vitest";
 
 let db: DB;
 let repoId: number;

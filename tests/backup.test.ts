@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RETENTION_DAYS, runBackup } from "@/lib/backup/backup";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
+import { RETENTION_DAYS, runBackup } from "@/lib/backup/backup";
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "ac-backup-"));

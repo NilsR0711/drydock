@@ -14,7 +14,11 @@ function StatCard({
   label,
   value,
   tone = "neutral",
-}: { label: string; value: number; tone?: Tone }) {
+}: {
+  label: string;
+  value: number;
+  tone?: Tone;
+}) {
   // Zero values stay muted; a non-zero count lights up in its tone.
   const active = value > 0 && tone !== "neutral";
   return (

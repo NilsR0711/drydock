@@ -1,7 +1,7 @@
+import { and, asc, eq, inArray, max } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { type Issue, issues } from "@/lib/db/schema";
 import type { GhIssue } from "@/lib/github/gh";
-import { and, asc, eq, inArray, max } from "drizzle-orm";
 
 /** Issues for a repo, ordered by manual priority (then number as tiebreak). */
 export function listIssues(repoId: number, db: DB = getDb()): Issue[] {

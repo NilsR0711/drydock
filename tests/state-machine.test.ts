@@ -1,10 +1,10 @@
+import { describe, expect, it } from "vitest";
 import {
-  InvalidTransitionError,
   assertTransition,
   canTransition,
+  InvalidTransitionError,
   isJobStatus,
 } from "@/lib/orchestrator/state-machine";
-import { describe, expect, it } from "vitest";
 
 describe("state machine", () => {
   it("allows the happy path", () => {

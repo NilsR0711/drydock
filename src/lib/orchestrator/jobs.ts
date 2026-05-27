@@ -1,7 +1,7 @@
-import { type DB, getDb } from "@/lib/db/client";
-import { type Job, issues, jobEvents, jobs } from "@/lib/db/schema";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { type JobStatus, assertTransition } from "./state-machine";
+import { type DB, getDb } from "@/lib/db/client";
+import { issues, type Job, jobEvents, jobs } from "@/lib/db/schema";
+import { assertTransition, type JobStatus } from "./state-machine";
 
 export function createJob(
   input: { repoId: number; issueNumber: number; model?: string; maxTurns?: number },

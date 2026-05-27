@@ -1,5 +1,5 @@
-import { startDriverLoop, stopDriverLoop } from "@/lib/orchestrator/driver-loop";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { startDriverLoop, stopDriverLoop } from "@/lib/orchestrator/driver-loop";
 
 afterEach(() => stopDriverLoop());
 

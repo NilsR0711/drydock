@@ -1,5 +1,5 @@
-import { cn } from "@/lib/utils";
 import * as React from "react";
+import { cn } from "@/lib/utils";
 
 type Variant = "default" | "secondary" | "outline" | "destructive" | "ghost";
 type Size = "default" | "sm" | "lg" | "icon";

@@ -1,13 +1,13 @@
 "use client";
 
+import Editor from "@monaco-editor/react";
+import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
 import { loadTemplateAction, saveTemplateAction } from "@/lib/prompts/actions";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
-import { SUPPORTED_VARIABLES, renderTemplate } from "@/lib/prompts/render";
-import Editor from "@monaco-editor/react";
-import { useState, useTransition } from "react";
+import { renderTemplate, SUPPORTED_VARIABLES } from "@/lib/prompts/render";
 
 interface RepoOption {
   id: number;

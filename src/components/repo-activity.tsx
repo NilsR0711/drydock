@@ -1,8 +1,8 @@
+import Link from "next/link";
 import { type LogLine, LogViewer } from "@/components/log-viewer";
 import { Badge } from "@/components/ui/badge";
 import type { Job } from "@/lib/db/schema";
 import { modelLabel } from "@/lib/models";
-import Link from "next/link";
 
 export function RepoActivity({
   activeJob,

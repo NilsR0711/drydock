@@ -1,8 +1,8 @@
-import { type DB, createDb } from "@/lib/db/client";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createDb, type DB } from "@/lib/db/client";
 import { costByModel, dailyCosts, todayCost, topJobs } from "@/lib/db/cost-queries";
 import { jobs } from "@/lib/db/schema";
 import { addRepo } from "@/lib/repos/service";
-import { beforeEach, describe, expect, it } from "vitest";
 
 let db: DB;
 let repoId: number;

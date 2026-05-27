@@ -1,5 +1,5 @@
-import { type Subscriber, getBroker } from "@/lib/stream/broker";
 import type { NextRequest } from "next/server";
+import { getBroker, type Subscriber } from "@/lib/stream/broker";
 
 export const dynamic = "force-dynamic";
 

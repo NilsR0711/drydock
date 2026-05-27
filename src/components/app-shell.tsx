@@ -1,10 +1,10 @@
 "use client";
 
-import { ThemeToggle } from "@/components/theme-toggle";
-import { cn } from "@/lib/utils";
 import { Anchor, PauseCircle } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { cn } from "@/lib/utils";
 
 const NAV: { href: string; label: string }[] = [
   { href: "/", label: "Dashboard" },

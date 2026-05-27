@@ -1,4 +1,5 @@
-import { type DB, createDb } from "@/lib/db/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createDb, type DB } from "@/lib/db/client";
 import { followupIssues } from "@/lib/db/schema";
 import type { PrCheck } from "@/lib/github/gh";
 import { GhClient } from "@/lib/github/gh";
@@ -6,7 +7,6 @@ import { ciBabysitter, classifyChecks } from "@/lib/orchestrator/ci-babysitter";
 import { buildResumeArgs } from "@/lib/orchestrator/claude-session";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { addRepo } from "@/lib/repos/service";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let db: DB;
 let repoId: number;

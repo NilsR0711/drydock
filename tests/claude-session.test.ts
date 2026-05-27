@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type DB, createDb } from "@/lib/db/client";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createDb, type DB } from "@/lib/db/client";
 import type { StreamCallbacks, StreamHandle, StreamRunner } from "@/lib/exec/stream-runner";
 import { buildClaudeArgs, spawnClaudeSession } from "@/lib/orchestrator/claude-session";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
 import { addRepo } from "@/lib/repos/service";
 import { LogBroker } from "@/lib/stream/broker";
-import { beforeEach, describe, expect, it } from "vitest";
 
 function fixture(name: string): string {
   return readFileSync(

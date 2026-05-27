@@ -1,8 +1,8 @@
 "use client";
 
-import { cn } from "@/lib/utils";
 import { CheckCircle2, Info, X, XCircle } from "lucide-react";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { cn } from "@/lib/utils";
 
 type ToastVariant = "success" | "error" | "info";
 

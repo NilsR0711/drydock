@@ -1,5 +1,5 @@
-import { estimateCost, priceForModel } from "@/lib/orchestrator/pricing";
 import { describe, expect, it } from "vitest";
+import { estimateCost, priceForModel } from "@/lib/orchestrator/pricing";
 
 describe("pricing", () => {
   it("knows Opus 4.7, Sonnet 4.5 and Haiku 4.5 rates", () => {

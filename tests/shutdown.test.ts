@@ -1,8 +1,8 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jobEvents } from "@/lib/db/schema";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { registerActiveJob, unregisterActiveJob } from "@/lib/orchestrator/runtime";
 import { addRepo } from "@/lib/repos/service";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // gracefulShutdown reads the default getDb() singleton, so point it at memory.
 beforeEach(() => {

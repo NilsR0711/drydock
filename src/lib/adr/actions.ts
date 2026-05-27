@@ -1,9 +1,9 @@
 "use server";
 
-import { getDb } from "@/lib/db/client";
-import { adrs } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { getDb } from "@/lib/db/client";
+import { adrs } from "@/lib/db/schema";
 import { setAdrStatus } from "./service";
 
 export async function approveAdrAction(id: number) {

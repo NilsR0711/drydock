@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -12,7 +13,6 @@ import {
   setIssueStateAction,
   viewIssueAction,
 } from "@/lib/issues/actions";
-import { useEffect, useState, useTransition } from "react";
 
 export function IssueDetailModal({
   repoId,
@@ -164,9 +164,9 @@ export function IssueDetailModal({
               Comments
             </p>
             <ul className="space-y-2">
-              {detail.comments.map((c, i) => (
+              {detail.comments.map((c) => (
                 <li
-                  key={`${c.author}-${i}`}
+                  key={`${c.author}-${c.createdAt}`}
                   className="rounded-md border border-card-border bg-background p-2 text-sm"
                 >
                   <p className="text-xs text-muted-foreground">

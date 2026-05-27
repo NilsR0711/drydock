@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   listAdrs,
   parseAdrTitle,
@@ -8,9 +9,8 @@ import {
   registerAdr,
   setAdrStatus,
 } from "@/lib/adr/service";
-import { type DB, createDb } from "@/lib/db/client";
+import { createDb, type DB } from "@/lib/db/client";
 import { addRepo } from "@/lib/repos/service";
-import { beforeEach, describe, expect, it } from "vitest";
 
 let db: DB;
 beforeEach(() => {

@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
-import { browseDirectory, suggestRepoName } from "@/lib/fs/browse";
 import { describe, expect, it } from "vitest";
+import { browseDirectory, suggestRepoName } from "@/lib/fs/browse";
 
 function tree(): string {
   const root = mkdtempSync(join(tmpdir(), "ac-browse-"));

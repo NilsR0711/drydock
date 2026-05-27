@@ -1,5 +1,8 @@
 "use client";
 
+import { Plus } from "lucide-react";
+import Link from "next/link";
+import { useState, useTransition } from "react";
 import { DirectoryPicker } from "@/components/directory-picker";
 import { ModelSelect } from "@/components/model-select";
 import { Badge } from "@/components/ui/badge";
@@ -10,9 +13,6 @@ import { useToast } from "@/components/ui/toast";
 import type { RepoWithStats } from "@/lib/db/queries";
 import { DEFAULT_MODEL } from "@/lib/models";
 import { addRepoAction, removeRepoAction } from "@/lib/repos/actions";
-import { Plus } from "lucide-react";
-import Link from "next/link";
-import { useState, useTransition } from "react";
 
 export function RepoList({ repos }: { repos: RepoWithStats[] }) {
   const [showAdd, setShowAdd] = useState(false);

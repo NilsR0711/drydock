@@ -1,12 +1,12 @@
 import { fileURLToPath } from "node:url";
-import { type DB, createDb } from "@/lib/db/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createDb, type DB } from "@/lib/db/client";
 import { jobEvents } from "@/lib/db/schema";
 import { spawnRunner } from "@/lib/exec/runner";
 import { recoverInterruptedJobs } from "@/lib/orchestrator/driver";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { runMockSession } from "@/lib/orchestrator/session";
 import { addRepo } from "@/lib/repos/service";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const MOCK_CLAUDE = fileURLToPath(new URL("./fixtures/mock-claude.js", import.meta.url));
 

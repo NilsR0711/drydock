@@ -1,4 +1,5 @@
-import { type DB, createDb } from "@/lib/db/client";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createDb, type DB } from "@/lib/db/client";
 import { repos } from "@/lib/db/schema";
 import type { GhIssue } from "@/lib/github/gh";
 import {
@@ -7,7 +8,6 @@ import {
   setQueueLabelLocal,
   syncIssuesFromGh,
 } from "@/lib/issues/service";
-import { beforeEach, describe, expect, it } from "vitest";
 
 let db: DB;
 let repoId: number;

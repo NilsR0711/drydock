@@ -1,5 +1,5 @@
-import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
 import { z } from "zod";
+import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
 
 export const ghIssueSchema = z.object({
   number: z.number(),

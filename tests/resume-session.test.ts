@@ -1,4 +1,6 @@
-import { type DB, createDb } from "@/lib/db/client";
+import { eq } from "drizzle-orm";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createDb, type DB } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
 import type { StreamCallbacks, StreamHandle, StreamRunner } from "@/lib/exec/stream-runner";
 import { resumeClaudeSession } from "@/lib/orchestrator/claude-session";
@@ -7,8 +9,6 @@ import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { saveTemplate } from "@/lib/prompts/templates";
 import { addRepo } from "@/lib/repos/service";
 import { LogBroker } from "@/lib/stream/broker";
-import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
 
 let db: DB;
 let repoId: number;

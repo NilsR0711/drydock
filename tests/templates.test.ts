@@ -1,15 +1,15 @@
-import { type DB, createDb } from "@/lib/db/client";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createDb, type DB } from "@/lib/db/client";
 import { DEFAULT_TEMPLATES, TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import {
-  MAX_VERSIONS,
   getActiveTemplate,
   listVersions,
+  MAX_VERSIONS,
   renderTemplate,
   resolveTemplateContent,
   saveTemplate,
 } from "@/lib/prompts/templates";
 import { addRepo } from "@/lib/repos/service";
-import { beforeEach, describe, expect, it } from "vitest";
 
 let db: DB;
 let repoId: number;

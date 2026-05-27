@@ -1,7 +1,7 @@
 "use client";
 
-import type { DailyCost } from "@/lib/db/cost-queries";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import type { DailyCost } from "@/lib/db/cost-queries";
 
 export function CostChart({ data }: { data: DailyCost[] }) {
   const chronological = [...data].reverse();
