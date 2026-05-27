@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { DirectoryPicker } from "@/components/directory-picker";
+import { ForgeSelect } from "@/components/forge-select";
 import { ModelSelect } from "@/components/model-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import type { RepoWithStats } from "@/lib/db/queries";
+import type { ForgeId } from "@/lib/forge/types";
 import { DEFAULT_MODEL } from "@/lib/models";
 import { addRepoAction, removeRepoAction } from "@/lib/repos/actions";
 
@@ -81,6 +83,7 @@ function RepoCard({ repo }: { repo: RepoWithStats }) {
           {repo.workingCount > 0 && <Badge status="working">running</Badge>}
         </div>
         <div className="flex flex-wrap gap-1.5">
+          {repo.platform === "gitlab" && <Badge tone="primary">GitLab</Badge>}
           <Badge tone="neutral">{repo.queuedCount} queued</Badge>
           <Badge tone="primary">{repo.workingCount} running</Badge>
           <Badge tone="success">{repo.mergedCount} merged</Badge>
@@ -123,6 +126,9 @@ function AddRepoForm({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [model, setModel] = useState(DEFAULT_MODEL);
+  const [platform, setPlatform] = useState<ForgeId>("github");
+  const [apiBaseUrl, setApiBaseUrl] = useState("");
+  const [apiToken, setApiToken] = useState("");
   const [picking, setPicking] = useState(false);
 
   return (
@@ -132,7 +138,14 @@ function AddRepoForm({ onDone }: { onDone: () => void }) {
           className="grid gap-2 sm:grid-cols-2"
           action={() => {
             start(async () => {
-              await addRepoAction({ path, name, defaultModel: model });
+              await addRepoAction({
+                path,
+                name,
+                defaultModel: model,
+                platform,
+                apiBaseUrl: platform === "gitlab" ? apiBaseUrl.trim() || null : null,
+                apiToken: platform === "gitlab" ? apiToken.trim() || null : null,
+              });
               onDone();
             });
           }}
@@ -161,6 +174,28 @@ function AddRepoForm({ onDone }: { onDone: () => void }) {
             <span className="text-muted-foreground">Model:</span>
             <ModelSelect value={model} onChange={setModel} />
           </label>
+          {/* biome-ignore lint/a11y/noLabelWithoutControl: the control is the ForgeSelect child */}
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <span className="text-muted-foreground">Platform:</span>
+            <ForgeSelect value={platform} onChange={setPlatform} />
+          </label>
+          {platform === "gitlab" && (
+            <>
+              <input
+                value={apiBaseUrl}
+                onChange={(e) => setApiBaseUrl(e.target.value)}
+                placeholder="API base URL (e.g. https://gitlab.com)"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:col-span-2"
+              />
+              <input
+                value={apiToken}
+                onChange={(e) => setApiToken(e.target.value)}
+                type="password"
+                placeholder="Access token (stored locally)"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:col-span-2"
+              />
+            </>
+          )}
           <Button type="submit" disabled={pending || !path} className="sm:col-span-2">
             Save
           </Button>
