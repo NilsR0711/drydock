@@ -1,4 +1,6 @@
 import { listAdrs } from "@/lib/adr/service";
+import { getAgentProvider } from "@/lib/agents/registry";
+import type { AgentProvider } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
@@ -8,13 +10,16 @@ import { listIssues } from "@/lib/issues/service";
 import { notify } from "@/lib/notify/service";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
+import { getSettings } from "@/lib/settings/service";
+import { type AgentSessionResult, resumeAgentSession, spawnAgentSession } from "./agent-session";
 import { ciBabysitter } from "./ci-babysitter";
-import {
-  type ClaudeSessionResult,
-  resumeClaudeSession,
-  spawnClaudeSession,
-} from "./claude-session";
 import { getJob, recordEvent, transitionJob } from "./jobs";
+
+/** CLI path override for an agent, from global settings. */
+function commandForAgent(provider: AgentProvider, db: DB): string {
+  const s = getSettings(db);
+  return provider.id === "codex" ? s.codexPath : s.claudePath;
+}
 
 interface WorktreeApi {
   prepare(repo: Repo, jobId: number, issueNumber?: number): Promise<Worktree>;
@@ -25,7 +30,7 @@ interface WorktreeApi {
 export interface RunJobDeps {
   db?: DB;
   worktrees?: WorktreeApi;
-  runSession?: (job: Job, prompt: string, cwd: string) => Promise<ClaudeSessionResult>;
+  runSession?: (job: Job, prompt: string, cwd: string) => Promise<AgentSessionResult>;
   createPr?: (input: {
     head: string;
     base: string;
@@ -68,8 +73,11 @@ async function runJobCore(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
 
   const worktrees = deps.worktrees ?? new WorktreeManager();
   const gh = new GhClient(repo.path);
+  const provider = getAgentProvider(job.agent);
+  const command = commandForAgent(provider, db);
   const runSession =
-    deps.runSession ?? ((j, prompt, cwd) => spawnClaudeSession(j, prompt, cwd, { db }));
+    deps.runSession ??
+    ((j, prompt, cwd) => spawnAgentSession(j, prompt, cwd, { db, provider, command }));
   const createPr = deps.createPr ?? ((input) => gh.createPr(input));
   const runBabysitter =
     deps.runBabysitter ??
@@ -78,7 +86,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
         gh,
         db,
         resumeSession: (rj, sessionId, failedLog) =>
-          resumeClaudeSession(rj, sessionId, failedLog, repo.path, { db }).then(() => undefined),
+          resumeAgentSession(rj, sessionId, failedLog, repo.path, { db, provider, command }).then(
+            () => undefined,
+          ),
       }));
 
   let wt: Worktree | undefined;
@@ -93,7 +103,12 @@ async function runJobCore(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
     });
     const session = await runSession(getJob(job.id, db) as Job, prompt, wt.path);
     if (session.exitCode !== 0) {
-      return transitionJob(job.id, "needs_human", { errorMessage: "claude exited non-zero" }, db);
+      return transitionJob(
+        job.id,
+        "needs_human",
+        { errorMessage: `${provider.label} exited non-zero` },
+        db,
+      );
     }
 
     // Per-repo ADR gate: hold the merge while ADRs await review (SPEC opt-in).
