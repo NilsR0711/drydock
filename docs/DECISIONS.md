@@ -11,3 +11,4 @@
 - [008](adr/008-cost-tracking-source.md) — Cost tracking source of truth (Phase 4)
 - [009](adr/009-ci-retry-strategy.md) — CI babysitter & retry strategy (Phase 5)
 - [010](adr/010-prompt-template-versioning.md) — Prompt template versioning & substitution (Phase 6)
+- [011](adr/011-adr-watcher-and-review.md) — ADR detection via chokidar + review queue (Phase 7)

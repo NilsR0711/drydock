@@ -1,0 +1,73 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  listAdrs,
+  parseAdrTitle,
+  pendingCount,
+  registerAdr,
+  setAdrStatus,
+} from "@/lib/adr/service";
+import { type DB, createDb } from "@/lib/db/client";
+import { beforeEach, describe, expect, it } from "vitest";
+
+let db: DB;
+beforeEach(() => {
+  db = createDb(":memory:");
+});
+
+describe("parseAdrTitle", () => {
+  it("uses the first markdown heading", () => {
+    expect(parseAdrTitle("# ADR 042: Use Foo\n\nbody", "x.md")).toBe("ADR 042: Use Foo");
+  });
+  it("falls back to the filename", () => {
+    expect(parseAdrTitle("no heading here", "docs/adr/007-thing.md")).toBe("007-thing.md");
+  });
+});
+
+describe("ADR registration", () => {
+  it("registers a pending ADR", () => {
+    const adr = registerAdr({ filePath: "/r/docs/adr/001.md", content: "# Title" }, db);
+    expect(adr.status).toBe("pending_review");
+    expect(adr.title).toBe("Title");
+    expect(pendingCount(db)).toBe(1);
+  });
+
+  it("is idempotent per file path", () => {
+    registerAdr({ filePath: "/r/docs/adr/001.md", content: "# A" }, db);
+    registerAdr({ filePath: "/r/docs/adr/001.md", content: "# A again" }, db);
+    expect(listAdrs(undefined, db)).toHaveLength(1);
+  });
+
+  it("approve / reject transitions", () => {
+    const adr = registerAdr({ filePath: "/r/docs/adr/002.md", content: "# B" }, db);
+    expect(setAdrStatus(adr.id, "approved", db).status).toBe("approved");
+    expect(pendingCount(db)).toBe(0);
+    const adr2 = registerAdr({ filePath: "/r/docs/adr/003.md", content: "# C" }, db);
+    expect(setAdrStatus(adr2.id, "rejected", db).status).toBe("rejected");
+  });
+});
+
+describe("chokidar watcher", () => {
+  it("registers a new ADR file written into the watched dir", async () => {
+    const { watchAdrDirs } = await import("@/lib/adr/watcher");
+    const repoRoot = mkdtempSync(join(tmpdir(), "ac-adr-"));
+    const adrDir = join(repoRoot, "docs/adr");
+    mkdirSync(adrDir, { recursive: true });
+
+    process.env.AUTOCLAUDE_DB = ":memory:";
+    const watchers = watchAdrDirs([{ path: repoRoot }]);
+    await new Promise<void>((resolve) => {
+      watchers[0]?.on("ready", () => resolve());
+    });
+    writeFileSync(join(adrDir, "001-test.md"), "# ADR 001: Watched decision\n");
+    // wait for the add event to fire
+    await new Promise((r) => setTimeout(r, 400));
+    await Promise.all(watchers.map((w) => w.close()));
+
+    // The watcher uses the default getDb() singleton (AUTOCLAUDE_DB=:memory:).
+    const { getDb } = await import("@/lib/db/client");
+    const rows = listAdrs(undefined, getDb());
+    expect(rows.some((r) => r.title === "ADR 001: Watched decision")).toBe(true);
+  }, 10000);
+});
