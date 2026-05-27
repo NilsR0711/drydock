@@ -45,6 +45,12 @@ export interface ForgeClient {
   failedRunLog(prNumber: number): Promise<string>;
   mergePr(prNumber: number): Promise<void>;
   createPr(input: { head: string; base: string; title: string; body: string }): Promise<number>;
+  /**
+   * Refresh rate-limit accounting before a background sweep. Optional and
+   * best-effort: only the GitHub forge meters a shared API budget (see the
+   * rate-limit governor); other forges omit it.
+   */
+  refreshRateLimit?(): Promise<void>;
 }
 
 /** Connection settings needed to construct a forge client for a repo. */
