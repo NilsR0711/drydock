@@ -58,6 +58,21 @@ export class WorktreeManager {
     return { path, branch };
   }
 
+  /**
+   * Add a worktree that checks out an *existing* remote branch (issue #18). The
+   * branch is fetched first so a PR opened in an earlier process is visible,
+   * then checked out under a feedback-scoped path. Used to apply review
+   * feedback on a PR's own branch rather than a fresh job branch.
+   */
+  async prepareForBranch(repo: Repo, branch: string, key: string): Promise<Worktree> {
+    const path = join(worktreeHome(), "worktrees", sanitize(repo.name), `fb-${sanitize(key)}`);
+    await this.withRepoLock(repo.path, async () => {
+      await this.git(["-C", repo.path, "fetch", "origin", branch]);
+      await this.git(["-C", repo.path, "worktree", "add", path, branch]);
+    });
+    return { path, branch };
+  }
+
   async commitAndPush(wt: Worktree, message: string): Promise<void> {
     await this.git(["add", "-A"], wt.path);
     await this.git(["commit", "-m", message], wt.path);

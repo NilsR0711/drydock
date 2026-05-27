@@ -64,6 +64,13 @@
       "when": 1779917422717,
       "tag": "0008_round_jack_power",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1779920550688,
+      "tag": "0009_redundant_lethal_legion",
+      "breakpoints": true
     }
   ]
 }

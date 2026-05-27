@@ -1,4 +1,12 @@
-import type { GhIssue, IssueComment, IssueDetail, PrCheck } from "@/lib/github/gh";
+import type {
+  GhIssue,
+  IssueComment,
+  IssueDetail,
+  PrCheck,
+  ReactionContent,
+  ReviewThread,
+  ReviewThreadComment,
+} from "@/lib/github/gh";
 
 /**
  * Platform-neutral aliases for the data shapes exchanged with a git forge.
@@ -6,7 +14,14 @@ import type { GhIssue, IssueComment, IssueDetail, PrCheck } from "@/lib/github/g
  * re-exports them under neutral names so call sites read platform-agnostically.
  */
 export type ForgeIssue = GhIssue;
-export type { IssueComment, IssueDetail, PrCheck };
+export type {
+  IssueComment,
+  IssueDetail,
+  PrCheck,
+  ReactionContent,
+  ReviewThread,
+  ReviewThreadComment,
+};
 
 /** Supported git forge platforms. */
 export type ForgeId = "github" | "gitlab";
@@ -51,6 +66,20 @@ export interface ForgeClient {
    * rate-limit governor); other forges omit it.
    */
   refreshRateLimit?(): Promise<void>;
+
+  // --- PR review-feedback lifecycle (issue #18) ---------------------------
+  // Optional: only forges that support review threads (currently GitHub)
+  // implement these, and the feature is gated on their presence.
+  /** List the PR's review threads with their comments and resolution state. */
+  listReviewThreads?(prNumber: number): Promise<ReviewThread[]>;
+  /** Post a reply on a review thread. */
+  replyToReviewThread?(threadId: string, body: string): Promise<void>;
+  /** Edit one of our prior replies in place (idempotent status updates). */
+  updateReviewComment?(commentId: string, body: string): Promise<void>;
+  /** Mark a review thread as resolved. */
+  resolveReviewThread?(threadId: string): Promise<void>;
+  /** Acknowledge a review comment with a reaction. */
+  reactToReviewComment?(commentId: string, content: ReactionContent): Promise<void>;
 }
 
 /** Connection settings needed to construct a forge client for a repo. */

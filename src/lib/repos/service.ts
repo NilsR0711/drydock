@@ -33,12 +33,17 @@ export const repoInputSchema = z.object({
   autoTriageEnabled: z.boolean().default(false),
   autoProcessEnabled: z.boolean().default(false),
   autoHealCi: z.boolean().default(false),
+  autoReviewFeedback: z.boolean().default(false),
+  autoResolveMergeConflicts: z.boolean().default(false),
+  includeProgressReplies: z.boolean().default(false),
   readyLabels: jsonStringArray('["ready","ready-for-agent","ready-to-work"]'),
   blockingLabels: jsonStringArray(
     '["blocked","question","needs-human","needs-discussion","wontfix","duplicate","invalid"]',
   ),
   autoLabelWhitelist: jsonStringArray('["bug","enhancement","documentation","ready"]'),
   priorityAuthors: jsonStringArray("[]"),
+  trustedReviewers: jsonStringArray("[]"),
+  ignoredBots: jsonStringArray('["dependabot[bot]","github-actions[bot]","codecov[bot]"]'),
   minAuthorAssociation: z.enum(["approved", "any"]).default("approved"),
   maxAttempts: z.number().int().positive().default(3),
 });

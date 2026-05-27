@@ -19,3 +19,4 @@
 - [016](adr/016-autonomous-issue-triage.md) — Opt-in autonomous issue triage & auto-processing
 - [017](adr/017-ci-auto-heal.md) — Opt-in CI auto-healing (classify → fix → verify, with budgets)
 - [018](adr/018-rate-limit-governor.md) — Priority-aware GitHub API rate-limit budgeting
+- [019](adr/019-pr-review-feedback.md) — Opt-in PR review-feedback lifecycle

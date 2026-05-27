@@ -35,10 +35,15 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoTriage, setAutoTriage] = useState(repo.autoTriageEnabled);
   const [autoProcess, setAutoProcess] = useState(repo.autoProcessEnabled);
   const [autoHeal, setAutoHeal] = useState(repo.autoHealCi);
+  const [autoFeedback, setAutoFeedback] = useState(repo.autoReviewFeedback);
+  const [resolveConflicts, setResolveConflicts] = useState(repo.autoResolveMergeConflicts);
+  const [progressReplies, setProgressReplies] = useState(repo.includeProgressReplies);
   const [ready, setReady] = useState(parseList(repo.readyLabels).join(", "));
   const [blocking, setBlocking] = useState(parseList(repo.blockingLabels).join(", "));
   const [whitelist, setWhitelist] = useState(parseList(repo.autoLabelWhitelist).join(", "));
   const [authors, setAuthors] = useState(parseList(repo.priorityAuthors).join(", "));
+  const [reviewers, setReviewers] = useState(parseList(repo.trustedReviewers).join(", "));
+  const [bots, setBots] = useState(parseList(repo.ignoredBots).join(", "));
   const [minAssoc, setMinAssoc] = useState(repo.minAuthorAssociation);
   const [maxAttempts, setMaxAttempts] = useState(repo.maxAttempts);
   const [pending, start] = useTransition();
@@ -63,7 +68,13 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
     label: string,
     value: string,
     setter: (v: string) => void,
-    key: "readyLabels" | "blockingLabels" | "autoLabelWhitelist" | "priorityAuthors",
+    key:
+      | "readyLabels"
+      | "blockingLabels"
+      | "autoLabelWhitelist"
+      | "priorityAuthors"
+      | "trustedReviewers"
+      | "ignoredBots",
   ) => (
     <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor={id}>
       {label}
@@ -115,6 +126,17 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
           />
           Auto-heal failing CI
         </label>
+        <label className="flex items-center gap-1.5 text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={autoFeedback}
+            onChange={(e) => {
+              setAutoFeedback(e.target.checked);
+              persist({ autoReviewFeedback: e.target.checked });
+            }}
+          />
+          Address PR review feedback
+        </label>
         {pending && <span className="text-xs text-muted-foreground">Saving…</span>}
         {saved && <span className="text-xs text-success">Saved</span>}
       </div>
@@ -123,7 +145,8 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
         Opt-in. All stages are off by default and consume paid agent usage. Triage may only apply
         whitelisted labels; auto-processing works issues that are <em>ready</em> and not blocked;
         auto-heal attempts bounded, verified fixes for failing CI (never external or AI-review
-        checks). Drydock never auto-merges — a human always reviews the PR.
+        checks). PR review feedback is applied only for trusted reviewers (bots ignored) and runs
+        the mechanical iteration for you. Drydock never auto-merges — a human always reviews the PR.
       </p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -137,6 +160,14 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
           "autoLabelWhitelist",
         )}
         {labelField("priority-authors", "Priority authors", authors, setAuthors, "priorityAuthors")}
+        {labelField(
+          "trusted-reviewers",
+          "Trusted reviewers (feedback)",
+          reviewers,
+          setReviewers,
+          "trustedReviewers",
+        )}
+        {labelField("ignored-bots", "Ignored bots (feedback)", bots, setBots, "ignoredBots")}
         <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="min-assoc">
           Act on authors
           <select
@@ -151,6 +182,36 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
             <option value="approved">Owners / members / collaborators</option>
             <option value="any">Anyone (public participation)</option>
           </select>
+        </label>
+        <label
+          className="flex items-center gap-1.5 text-xs text-muted-foreground"
+          htmlFor="resolve-conflicts"
+        >
+          <input
+            id="resolve-conflicts"
+            type="checkbox"
+            checked={resolveConflicts}
+            onChange={(e) => {
+              setResolveConflicts(e.target.checked);
+              persist({ autoResolveMergeConflicts: e.target.checked });
+            }}
+          />
+          Repair trivial merge conflicts
+        </label>
+        <label
+          className="flex items-center gap-1.5 text-xs text-muted-foreground"
+          htmlFor="progress-replies"
+        >
+          <input
+            id="progress-replies"
+            type="checkbox"
+            checked={progressReplies}
+            onChange={(e) => {
+              setProgressReplies(e.target.checked);
+              persist({ includeProgressReplies: e.target.checked });
+            }}
+          />
+          Post progress replies
         </label>
         <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="max-attempts">
           Max attempts
