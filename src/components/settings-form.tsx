@@ -39,7 +39,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
           step="0.5"
           value={s.dailyCostLimitUsd}
           onChange={(e) => set("dailyCostLimitUsd", Number(e.target.value))}
-          className="rounded border px-2 py-1 text-sm"
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         />
       </Field>
       <Field label="Poll interval (sec)">
@@ -47,7 +47,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
           type="number"
           value={s.pollIntervalSec}
           onChange={(e) => set("pollIntervalSec", Number(e.target.value))}
-          className="rounded border px-2 py-1 text-sm"
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         />
       </Field>
       <Field label="Max turns">
@@ -55,28 +55,28 @@ export function SettingsForm({ initial }: { initial: Settings }) {
           type="number"
           value={s.maxTurns}
           onChange={(e) => set("maxTurns", Number(e.target.value))}
-          className="rounded border px-2 py-1 text-sm"
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         />
       </Field>
       <Field label="Default model">
         <input
           value={s.defaultModel}
           onChange={(e) => set("defaultModel", e.target.value)}
-          className="rounded border px-2 py-1 text-sm"
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         />
       </Field>
       <Field label="claude CLI path">
         <input
           value={s.claudePath}
           onChange={(e) => set("claudePath", e.target.value)}
-          className="rounded border px-2 py-1 text-sm"
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         />
       </Field>
       <Field label="gh CLI path">
         <input
           value={s.ghPath}
           onChange={(e) => set("ghPath", e.target.value)}
-          className="rounded border px-2 py-1 text-sm"
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         />
       </Field>
       <Field label="Max parallel jobs">
@@ -84,13 +84,13 @@ export function SettingsForm({ initial }: { initial: Settings }) {
           type="number"
           value={s.maxParallelJobs}
           onChange={(e) => set("maxParallelJobs", Number(e.target.value))}
-          className="rounded border px-2 py-1 text-sm"
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         />
       </Field>
       <Button type="submit" disabled={pending}>
         Save settings
       </Button>
-      {saved && <span className="ml-2 text-xs text-green-600">Saved</span>}
+      {saved && <span className="ml-2 text-xs text-success">Saved</span>}
     </form>
   );
 }

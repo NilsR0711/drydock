@@ -1,30 +1,188 @@
 @import "tailwindcss";
 
+/* class-based dark mode (driven by next-themes) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---- Design tokens (adapted from the PatchDeck design language) ---- */
 :root {
-  --background: #fafafa;
-  --foreground: #0a0a0a;
+  --background: 0 0% 100%;
+  --foreground: 222 47% 7%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 7%;
+  --card-border: 220 14% 91%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 7%;
+
+  --primary: 231 70% 56%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 14% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 215 16% 40%;
+  --accent: 220 14% 94%;
+  --accent-foreground: 222 47% 11%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+
+  --success: 142 64% 36%;
+  --success-foreground: 142 72% 22%;
+  --success-muted: 142 44% 95%;
+  --success-border: 142 32% 70%;
+  --warning: 38 92% 38%;
+  --warning-foreground: 38 78% 26%;
+  --warning-muted: 38 100% 95%;
+  --warning-border: 38 78% 70%;
+
+  --border: 220 14% 91%;
+  --input: 220 14% 88%;
+  --ring: 231 70% 56%;
+
+  --sidebar: 220 14% 98%;
+  --sidebar-foreground: 222 47% 7%;
+  --sidebar-border: 220 14% 91%;
+  --sidebar-accent: 220 14% 94%;
+  --sidebar-accent-foreground: 222 47% 7%;
+
+  --chart-1: 231 70% 56%;
+  --chart-2: 142 64% 36%;
+  --chart-3: 38 92% 38%;
+  --chart-4: 199 89% 48%;
+  --chart-5: 280 65% 60%;
+
+  --elevate-1: rgba(15, 23, 42, 0.03);
+  --elevate-2: rgba(15, 23, 42, 0.06);
 }
 
+.dark {
+  --background: 240 6% 6%;
+  --foreground: 240 5% 93%;
+  --card: 240 6% 8%;
+  --card-foreground: 240 5% 93%;
+  --card-border: 240 5% 14%;
+  --popover: 240 6% 8%;
+  --popover-foreground: 240 5% 93%;
+
+  --primary: 231 75% 66%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 5% 14%;
+  --secondary-foreground: 240 5% 93%;
+  --muted: 240 5% 12%;
+  --muted-foreground: 240 5% 60%;
+  --accent: 240 5% 14%;
+  --accent-foreground: 240 5% 93%;
+  --destructive: 0 65% 60%;
+  --destructive-foreground: 0 0% 100%;
+
+  --success: 142 65% 55%;
+  --success-foreground: 142 76% 80%;
+  --success-muted: 142 30% 12%;
+  --success-border: 142 40% 32%;
+  --warning: 38 92% 58%;
+  --warning-foreground: 38 96% 82%;
+  --warning-muted: 38 42% 12%;
+  --warning-border: 38 50% 32%;
+
+  --border: 240 5% 16%;
+  --input: 240 5% 20%;
+  --ring: 231 75% 66%;
+
+  --sidebar: 240 6% 7%;
+  --sidebar-foreground: 240 5% 93%;
+  --sidebar-border: 240 5% 14%;
+  --sidebar-accent: 240 5% 14%;
+  --sidebar-accent-foreground: 240 5% 93%;
+
+  --elevate-1: rgba(255, 255, 255, 0.04);
+  --elevate-2: rgba(255, 255, 255, 0.08);
+}
+
+/* ---- Map tokens to Tailwind v4 theme utilities ---- */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-}
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-card-border: hsl(var(--card-border));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #fafafa;
-  }
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-success-muted: hsl(var(--success-muted));
+  --color-success-border: hsl(var(--success-border));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-warning-muted: hsl(var(--warning-muted));
+  --color-warning-border: hsl(var(--warning-border));
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+
+  --radius-sm: 0.1875rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5625rem;
+  --radius-xl: 0.875rem;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Smooth reorder + hover transitions for the issue queue */
+/* ---- Elevate hover system (PatchDeck signature interaction) ---- */
+.hover-elevate,
+.active-elevate-2 {
+  position: relative;
+}
+.hover-elevate::after,
+.active-elevate-2::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background-color: transparent;
+  transition: background-color 0.15s ease;
+}
+.hover-elevate:hover::after {
+  background-color: var(--elevate-1);
+}
+.active-elevate-2:active::after,
+.hover-elevate:active::after {
+  background-color: var(--elevate-2);
+}
+
+/* ---- Smooth reorder + hover transitions for the issue queue ---- */
 .issue-row {
   transition:
     background-color 0.15s ease,

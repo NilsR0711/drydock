@@ -1,33 +1,57 @@
 import { cn } from "@/lib/utils";
 import type * as React from "react";
 
-const STATUS_COLORS: Record<string, string> = {
-  queued: "bg-neutral-200 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100",
-  working: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100",
-  ci_running: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100",
-  ci_failed: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100",
-  retrying: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100",
-  merged: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
-  needs_human: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
-  aborted: "bg-neutral-300 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200",
-  interrupted: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100",
+export type Tone = "neutral" | "primary" | "success" | "warning" | "destructive";
+
+const TONES: Record<Tone, string> = {
+  neutral: "border-border bg-secondary text-secondary-foreground",
+  primary: "border-primary/40 bg-primary/10 text-primary",
+  success: "border-success-border bg-success-muted text-success-foreground",
+  warning: "border-warning-border bg-warning-muted text-warning-foreground",
+  destructive: "border-destructive/40 bg-destructive/10 text-destructive",
 };
+
+/** Map a job/issue/CI status to a visual tone. */
+const STATUS_TONE: Record<string, Tone> = {
+  queued: "neutral",
+  working: "primary",
+  ci_running: "warning",
+  ci_failed: "destructive",
+  retrying: "warning",
+  merged: "success",
+  needs_human: "destructive",
+  aborted: "neutral",
+  interrupted: "warning",
+};
+
+/** Statuses that represent live, in-flight work — rendered with a pulsing dot. */
+const ACTIVE_STATUSES = new Set(["working", "ci_running", "retrying"]);
 
 export function Badge({
   className,
   status,
+  tone,
+  children,
   ...props
-}: React.HTMLAttributes<HTMLSpanElement> & { status?: string }) {
+}: React.HTMLAttributes<HTMLSpanElement> & { status?: string; tone?: Tone }) {
+  const resolvedTone: Tone = tone ?? (status ? (STATUS_TONE[status] ?? "neutral") : "neutral");
+  const showDot = status !== undefined && ACTIVE_STATUSES.has(status);
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-        status
-          ? (STATUS_COLORS[status] ?? "bg-neutral-200 text-neutral-800")
-          : "bg-neutral-200 text-neutral-800",
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-0.5 text-[11px] font-semibold leading-4",
+        TONES[resolvedTone],
         className,
       )}
       {...props}
-    />
+    >
+      {showDot && (
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-60" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
+        </span>
+      )}
+      {children ?? status?.replace(/_/g, " ")}
+    </span>
   );
 }
