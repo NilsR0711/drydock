@@ -5,6 +5,8 @@ import { issues, type Job, jobs, type Repo } from "@/lib/db/schema";
 import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient } from "@/lib/forge/types";
 import type { GhIssue } from "@/lib/github/gh";
+import { withPriority } from "@/lib/github/priority";
+import { RateLimitError } from "@/lib/github/rate-limit";
 import { evaluateIssue } from "@/lib/issues/evaluator";
 import { syncIssuesFromGh } from "@/lib/issues/service";
 import { type TriageResult, triageRepo } from "@/lib/issues/triage";
@@ -124,37 +126,59 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
 
   const triage = deps.triage ?? triageRepo;
   for (const repo of repos) {
+    // The background sweep runs at `low` priority so its GitHub calls yield the
+    // rate-limit budget to interactive routes and active jobs (which run at the
+    // default `high`). A gated sweep simply skips this repo until the budget
+    // recovers — that is the intended back-pressure, not an error.
     try {
-      const forge = deps.forgeFor?.(repo) ?? getForge(repo);
-      const fetch = deps.fetchIssues ?? ((_p, _label) => forge.listAllIssues());
-      const fetched = await fetch(repo.path, repo.queueLabel);
-      syncIssuesFromGh(repo.id, fetched, db);
+      await withPriority("low", async () => {
+        const forge = deps.forgeFor?.(repo) ?? getForge(repo);
+        // Default fetch refreshes the rate-limit budget (free probe) right
+        // before listing; an injected fetcher owns its own metering.
+        const fetch =
+          deps.fetchIssues ??
+          (async (_p: string, _label: string) => {
+            await forge.refreshRateLimit?.();
+            return forge.listAllIssues();
+          });
+        const fetched = await fetch(repo.path, repo.queueLabel);
+        syncIssuesFromGh(repo.id, fetched, db);
 
-      const cfg = repoAutomation(repo);
-      if (cfg.autoTriageEnabled) {
-        await triage(repo, forge, fetched, db);
-      }
-
-      for (const gh of fetched) {
-        const labelNames = gh.labels.map((l) => l.name);
-        const manual = labelNames.includes(repo.queueLabel);
-        const auto = cfg.autoProcessEnabled
-          ? await autoEligible(repo, cfg, forge, gh, labelNames, db)
-          : false;
-        if (!manual && !auto) continue; // backlog issues aren't scheduled
-        const verdict = evaluateIssue({ number: gh.number, title: gh.title, labels: labelNames });
-        if (verdict.decision !== "approved") continue;
-        if (hasOpenJob(db, repo.id, gh.number)) continue;
-        if (auto && gh.author && cfg.priorityAuthors.includes(gh.author)) {
-          boostPriority(db, repo.id, gh.number);
+        const cfg = repoAutomation(repo);
+        if (cfg.autoTriageEnabled) {
+          await triage(repo, forge, fetched, db);
         }
-        createJob(
-          { repoId: repo.id, issueNumber: gh.number, model: repo.defaultModel, agent: repo.agent },
-          db,
-        );
-      }
+
+        for (const gh of fetched) {
+          const labelNames = gh.labels.map((l) => l.name);
+          const manual = labelNames.includes(repo.queueLabel);
+          const auto = cfg.autoProcessEnabled
+            ? await autoEligible(repo, cfg, forge, gh, labelNames, db)
+            : false;
+          if (!manual && !auto) continue; // backlog issues aren't scheduled
+          const verdict = evaluateIssue({ number: gh.number, title: gh.title, labels: labelNames });
+          if (verdict.decision !== "approved") continue;
+          if (hasOpenJob(db, repo.id, gh.number)) continue;
+          if (auto && gh.author && cfg.priorityAuthors.includes(gh.author)) {
+            boostPriority(db, repo.id, gh.number);
+          }
+          createJob(
+            {
+              repoId: repo.id,
+              issueNumber: gh.number,
+              model: repo.defaultModel,
+              agent: repo.agent,
+            },
+            db,
+          );
+        }
+      });
     } catch (err) {
-      console.error(`[driver] issue sync failed for ${repo.name}`, err);
+      if (err instanceof RateLimitError) {
+        console.debug(`[driver] ${repo.name} sweep yielded: ${err.message}`);
+      } else {
+        console.error(`[driver] issue sync failed for ${repo.name}`, err);
+      }
     }
   }
 

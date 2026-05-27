@@ -18,3 +18,4 @@
 - [015](adr/015-gitlab-forge-support.md) — Pluggable forge platforms (github + gitlab)
 - [016](adr/016-autonomous-issue-triage.md) — Opt-in autonomous issue triage & auto-processing
 - [017](adr/017-ci-auto-heal.md) — Opt-in CI auto-healing (classify → fix → verify, with budgets)
+- [018](adr/018-rate-limit-governor.md) — Priority-aware GitHub API rate-limit budgeting
