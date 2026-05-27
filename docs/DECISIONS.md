@@ -5,3 +5,5 @@
 - [002](adr/002-vendored-ui-primitives.md) — Vendor UI primitives instead of shadcn CLI (Phase 0)
 - [003](adr/003-db-migrations-and-test-parity.md) — Drizzle migrations uniform in prod/tests (Phase 1)
 - [004](adr/004-injectable-command-runner.md) — Injectable command runner for CLI subprocesses (Phase 1)
+- [005](adr/005-job-state-machine.md) — Explicit job state machine (Phase 2)
+- [006](adr/006-process-singleton.md) — Orchestrator instrumentation singleton (Phase 2)

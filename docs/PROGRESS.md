@@ -6,7 +6,7 @@ Phase tracking. Continuously maintained; survives context compaction.
 
 - [x] Phase 0 – Bootstrap
 - [x] Phase 1 – DB + Repos CRUD
-- [ ] Phase 2 – Orchestrator skeleton + job lifecycle (mock Claude)
+- [x] Phase 2 – Orchestrator skeleton + job lifecycle (mock Claude)
 - [ ] Phase 3 – Stream-JSON parser + SSE broker
 - [ ] Phase 4 – Real Claude subprocess + cost tracking
 - [ ] Phase 5 – CI babysitter + auto-merge
@@ -16,12 +16,12 @@ Phase tracking. Continuously maintained; survives context compaction.
 
 ## Current focus
 
-Phase 1 complete. Next: Phase 2 (orchestrator skeleton, state machine, mock-claude job lifecycle).
+Phase 2 complete. Next: Phase 3 (stream-json parser + SSE broker + live log viewer).
 
 ## Last 5 actions
 
-- Full Drizzle schema (7 tables) + generated migration 0000.
-- createDb factory (in-memory for tests), queries, repos service (add/update/remove).
-- GhClient wrapper with injectable runner; Server Actions for CRUD + issue sync.
-- Vendored UI primitives (button/card/badge), RepoList + dashboard wired.
-- ADR 003/004; 12 tests green; biome + build green. Tag phase-1.
+- State machine (allow-list transitions) + transitionJob writer logging events.
+- Jobs service (create/get/transition/next-queued); mock-claude.js fixture.
+- runMockSession lifecycle + crash recovery (in-flight -> interrupted).
+- Job-detail page (status + timeline); singleton runs recovery on start.
+- ADR 005/006; 22 tests green; biome + build green. Tag phase-2.
