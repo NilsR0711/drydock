@@ -7,3 +7,4 @@
 - [004](adr/004-injectable-command-runner.md) — Injectable command runner for CLI subprocesses (Phase 1)
 - [005](adr/005-job-state-machine.md) — Explicit job state machine (Phase 2)
 - [006](adr/006-process-singleton.md) — Orchestrator instrumentation singleton (Phase 2)
+- [007](adr/007-sse-over-websocket.md) — SSE over WebSocket + stream parser strategy (Phase 3)

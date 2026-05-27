@@ -1,3 +1,4 @@
+import { LogViewer } from "@/components/log-viewer";
 import { Badge } from "@/components/ui/badge";
 import { getDb } from "@/lib/db/client";
 import { jobEvents } from "@/lib/db/schema";
@@ -29,14 +30,11 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         </div>
       </dl>
       <section>
-        <h2 className="mb-2 font-semibold">Timeline</h2>
-        <ul className="space-y-1 text-xs font-mono">
-          {events.map((e) => (
-            <li key={e.id}>
-              <span className="text-neutral-500">{e.type}</span> {e.payload}
-            </li>
-          ))}
-        </ul>
+        <h2 className="mb-2 font-semibold">Live log</h2>
+        <LogViewer
+          jobId={job.id}
+          initial={events.map((e) => ({ id: e.id, type: e.type, payload: JSON.parse(e.payload) }))}
+        />
       </section>
     </div>
   );

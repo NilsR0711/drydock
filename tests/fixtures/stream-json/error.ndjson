@@ -1,0 +1,22 @@
+{"type":"system","subtype":"init","session_id":"sess-err-5","model":"claude-sonnet-4-5"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Investigating the build error."}],"usage":{"input_tokens":800,"output_tokens":120}}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_b0","name":"Bash","input":{"command":"pnpm build #0"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_b0","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_b1","name":"Bash","input":{"command":"pnpm build #1"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_b1","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_b2","name":"Bash","input":{"command":"pnpm build #2"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_b2","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_b3","name":"Bash","input":{"command":"pnpm build #3"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_b3","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_b4","name":"Bash","input":{"command":"pnpm build #4"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_b4","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_b5","name":"Bash","input":{"command":"pnpm build #5"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_b5","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_b6","name":"Bash","input":{"command":"pnpm build #6"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_b6","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_b7","name":"Bash","input":{"command":"pnpm build #7"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_b7","is_error":true,"content":"error"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_b8","name":"Bash","input":{"command":"pnpm build #8"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_b8","is_error":true,"content":"error"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Unable to resolve the dependency conflict within turn budget."}],"usage":{"input_tokens":800,"output_tokens":120}}}
+{"type":"result","subtype":"error_max_turns","session_id":"sess-abc-123","is_error":true,"total_cost_usd":0.0388,"usage":{"input_tokens":13800,"output_tokens":1900}}

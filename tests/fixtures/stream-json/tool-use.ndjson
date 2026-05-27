@@ -1,0 +1,31 @@
+{"type":"system","subtype":"init","session_id":"sess-tool-9","model":"claude-sonnet-4-5"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_0","name":"Grep","input":{"arg":0}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_0","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Read","input":{"arg":1}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_2","name":"Edit","input":{"arg":2}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_2","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_3","name":"Bash","input":{"arg":3}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_3","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_4","name":"Write","input":{"arg":4}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_4","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_5","name":"Grep","input":{"arg":5}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_5","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_6","name":"Read","input":{"arg":6}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_6","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_7","name":"Edit","input":{"arg":7}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_7","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_8","name":"Bash","input":{"arg":8}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_8","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_9","name":"Write","input":{"arg":9}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_9","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_10","name":"Grep","input":{"arg":10}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_10","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_11","name":"Read","input":{"arg":11}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_11","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_12","name":"Edit","input":{"arg":12}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_12","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"All edits applied. Opening PR."}],"usage":{"input_tokens":800,"output_tokens":120}}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_pr","name":"Bash","input":{"command":"gh pr create"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_pr","is_error":false,"content":"ok"}]}}
+{"type":"result","subtype":"success","session_id":"sess-abc-123","is_error":false,"total_cost_usd":0.0712,"usage":{"input_tokens":24000,"output_tokens":4100}}

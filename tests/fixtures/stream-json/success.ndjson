@@ -1,0 +1,22 @@
+{"type":"system","subtype":"init","session_id":"sess-abc-123","model":"claude-sonnet-4-5"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me read the failing test."}],"usage":{"input_tokens":800,"output_tokens":120}}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_r0","name":"Read","input":{"file_path":"src/mod0.ts"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_r0","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_r1","name":"Read","input":{"file_path":"src/mod1.ts"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_r1","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_r2","name":"Read","input":{"file_path":"src/mod2.ts"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_r2","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_r3","name":"Read","input":{"file_path":"src/mod3.ts"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_r3","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_r4","name":"Read","input":{"file_path":"src/mod4.ts"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_r4","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_r5","name":"Read","input":{"file_path":"src/mod5.ts"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_r5","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_r6","name":"Read","input":{"file_path":"src/mod6.ts"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_r6","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_r7","name":"Read","input":{"file_path":"src/mod7.ts"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_r7","is_error":false,"content":"ok"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Applying the fix and committing."}],"usage":{"input_tokens":800,"output_tokens":120}}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_commit","name":"Bash","input":{"command":"git commit -am fix"}}],"usage":{"input_tokens":900,"output_tokens":60}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_commit","is_error":false,"content":"ok"}]}}
+{"type":"result","subtype":"success","session_id":"sess-abc-123","is_error":false,"total_cost_usd":0.0421,"usage":{"input_tokens":15300,"output_tokens":2200}}
