@@ -48,3 +48,79 @@ describe("GhClient.createIssue", () => {
     expect(await gh.createIssue("t", "b")).toBe(42);
   });
 });
+
+describe("GhClient issue read/write", () => {
+  it("listAllIssues fetches open issues without a label filter", async () => {
+    const runner = fakeRunner({
+      stdout: JSON.stringify([{ number: 1, title: "A", labels: [], state: "open" }]),
+    });
+    const gh = new GhClient("/repo", runner);
+    const issues = await gh.listAllIssues();
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      ["issue", "list", "--state", "open", "--json", "number,title,labels,state", "--limit", "200"],
+      "/repo",
+    );
+    expect(issues[0]).toMatchObject({ number: 1, title: "A" });
+  });
+
+  it("viewIssue parses body and comments", async () => {
+    const runner = fakeRunner({
+      stdout: JSON.stringify({
+        number: 5,
+        title: "T",
+        body: "desc",
+        state: "open",
+        labels: [{ name: "bug" }],
+        comments: [{ author: { login: "me" }, body: "hi", createdAt: "2026-05-27T10:00:00Z" }],
+      }),
+    });
+    const gh = new GhClient("/repo", runner);
+    const issue = await gh.viewIssue(5);
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      ["issue", "view", "5", "--json", "number,title,body,state,labels,comments"],
+      "/repo",
+    );
+    expect(issue.body).toBe("desc");
+    expect(issue.labels).toEqual(["bug"]);
+    expect(issue.comments[0]).toMatchObject({ author: "me", body: "hi" });
+  });
+
+  it("editIssue passes title and body", async () => {
+    const runner = fakeRunner({});
+    const gh = new GhClient("/repo", runner);
+    await gh.editIssue(5, { title: "New", body: "B" });
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      ["issue", "edit", "5", "--title", "New", "--body", "B"],
+      "/repo",
+    );
+  });
+
+  it("addLabels and removeLabels join names with commas", async () => {
+    const runner = fakeRunner({});
+    const gh = new GhClient("/repo", runner);
+    await gh.addLabels(5, ["a", "b"]);
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      ["issue", "edit", "5", "--add-label", "a,b"],
+      "/repo",
+    );
+    await gh.removeLabels(5, ["c"]);
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      ["issue", "edit", "5", "--remove-label", "c"],
+      "/repo",
+    );
+  });
+
+  it("closeIssue and reopenIssue call the right subcommands", async () => {
+    const runner = fakeRunner({});
+    const gh = new GhClient("/repo", runner);
+    await gh.closeIssue(5);
+    expect(runner).toHaveBeenCalledWith("gh", ["issue", "close", "5"], "/repo");
+    await gh.reopenIssue(5);
+    expect(runner).toHaveBeenCalledWith("gh", ["issue", "reopen", "5"], "/repo");
+  });
+});
