@@ -80,7 +80,8 @@ export async function spawnClaudeSession(
   const model = job.model ?? "claude-opus-4-7";
   const parser = new StreamJsonParser();
 
-  transitionJob(job.id, "working", { model }, db);
+  if (job.status !== "working") transitionJob(job.id, "working", { model }, db);
+  else db.update(jobs).set({ model }).where(eq(jobs.id, job.id)).run();
 
   const handle = runner("claude", buildClaudeArgs(prompt, model, job.maxTurns), cwd, {
     onStdout: (chunk) => {
@@ -125,4 +126,44 @@ export async function spawnClaudeSession(
 
 function serializeEvent(event: { type: string; chunks: unknown; costUsd?: number }): unknown {
   return { chunks: event.chunks, costUsd: event.costUsd };
+}
+
+/**
+ * Resume an existing Claude session to fix CI, with Haiku and fewer turns.
+ * Streams into the broker like spawnClaudeSession. Used by the CI babysitter.
+ */
+export async function resumeClaudeSession(
+  job: Job,
+  sessionId: string,
+  failedLog: string,
+  cwd: string,
+  deps: ClaudeSessionDeps = {},
+): Promise<ClaudeSessionResult> {
+  const db = deps.db ?? getDb();
+  const runner = deps.runner ?? spawnStreamRunner;
+  const broker = deps.broker ?? getBroker();
+  const parser = new StreamJsonParser();
+  const prompt = `CI failed. Fix the failure and keep changes minimal.\n\nFailed CI log:\n${failedLog}`;
+
+  const handle = runner("claude", buildResumeArgs(prompt, sessionId), cwd, {
+    onStdout: (chunk) => {
+      for (const event of parser.push(chunk)) {
+        broker.publish(job.id, { type: event.type, payload: { chunks: event.chunks } });
+      }
+    },
+    onStderr: (chunk) => broker.publish(job.id, { type: "error", payload: { stderr: chunk } }),
+  });
+  registerAbort(job.id, handle.abort);
+  const exitCode = await handle.done;
+  clearAbort(job.id);
+  for (const event of parser.flush()) {
+    broker.publish(job.id, { type: event.type, payload: { chunks: event.chunks } });
+  }
+  return {
+    exitCode,
+    sessionId: parser.sessionId ?? sessionId,
+    costUsd: parser.costUsd,
+    inputTokens: parser.totalInputTokens,
+    outputTokens: parser.totalOutputTokens,
+  };
 }

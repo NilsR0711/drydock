@@ -21,7 +21,7 @@ describe("gracefulShutdown", () => {
     const abort = vi.fn();
     registerAbort(job.id, abort);
 
-    gracefulShutdown();
+    await gracefulShutdown();
 
     expect(getJob(job.id, db)?.status).toBe("interrupted");
     expect(abort).toHaveBeenCalledWith(5000);
