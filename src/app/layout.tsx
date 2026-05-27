@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/app-shell";
 import { Providers } from "@/components/providers";
 import { pendingCount } from "@/lib/adr/service";
+import { needsHumanJobs } from "@/lib/db/queries";
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
@@ -21,8 +22,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   let pending = 0;
+  let needsHuman = 0;
   try {
     pending = pendingCount();
+    needsHuman = needsHumanJobs().length;
   } catch {
     // DB may not exist yet on first boot
   }
@@ -34,7 +37,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body>
         <Providers>
-          <AppShell adrPending={pending}>{children}</AppShell>
+          <AppShell adrPending={pending} needsHuman={needsHuman}>
+            {children}
+          </AppShell>
         </Providers>
       </body>
     </html>

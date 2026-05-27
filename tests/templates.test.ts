@@ -39,9 +39,7 @@ describe("renderTemplate", () => {
 
 describe("resolveTemplateContent", () => {
   it("falls back to the code default when no row exists", () => {
-    expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.main, db)).toBe(
-      DEFAULT_TEMPLATES.default,
-    );
+    expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.main, db)).toBe(DEFAULT_TEMPLATES.default);
   });
 
   it("returns the stored repo template when present", () => {

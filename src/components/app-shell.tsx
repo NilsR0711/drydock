@@ -8,6 +8,7 @@ import { usePathname } from "next/navigation";
 
 const NAV: { href: string; label: string }[] = [
   { href: "/", label: "Dashboard" },
+  { href: "/needs-human", label: "Needs human" },
   { href: "/prompts", label: "Prompts" },
   { href: "/adrs", label: "ADRs" },
   { href: "/costs", label: "Costs" },
@@ -21,9 +22,11 @@ function isActive(pathname: string, href: string): boolean {
 export function AppShell({
   children,
   adrPending = 0,
+  needsHuman = 0,
 }: {
   children: React.ReactNode;
   adrPending?: number;
+  needsHuman?: number;
 }) {
   const pathname = usePathname();
   return (
@@ -54,6 +57,11 @@ export function AppShell({
                   {item.href === "/adrs" && adrPending > 0 && (
                     <span className="rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-destructive-foreground">
                       {adrPending}
+                    </span>
+                  )}
+                  {item.href === "/needs-human" && needsHuman > 0 && (
+                    <span className="rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-destructive-foreground">
+                      {needsHuman}
                     </span>
                   )}
                 </Link>
