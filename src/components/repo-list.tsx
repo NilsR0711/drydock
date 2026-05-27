@@ -5,6 +5,8 @@ import { ModelSelect } from "@/components/model-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import type { RepoWithStats } from "@/lib/db/queries";
 import { DEFAULT_MODEL } from "@/lib/models";
 import { addRepoAction, removeRepoAction } from "@/lib/repos/actions";
@@ -49,6 +51,20 @@ export function RepoList({ repos }: { repos: RepoWithStats[] }) {
 
 function RepoCard({ repo }: { repo: RepoWithStats }) {
   const [pending, start] = useTransition();
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const { success, error } = useToast();
+
+  function remove() {
+    start(async () => {
+      try {
+        await removeRepoAction(repo.id);
+        success("Repository removed", repo.name);
+      } catch (e) {
+        error("Failed to remove repository", e instanceof Error ? e.message : String(e));
+      }
+    });
+  }
+
   return (
     <Card className="hover-elevate transition-shadow hover:shadow-md">
       <CardContent className="space-y-3 p-4">
@@ -77,12 +93,22 @@ function RepoCard({ repo }: { repo: RepoWithStats }) {
             size="sm"
             variant="ghost"
             disabled={pending}
-            onClick={() => start(() => removeRepoAction(repo.id))}
+            onClick={() => setConfirmRemove(true)}
           >
             Remove
           </Button>
         </div>
       </CardContent>
+      <ConfirmDialog
+        open={confirmRemove}
+        onOpenChange={setConfirmRemove}
+        onConfirm={remove}
+        title="Remove repository?"
+        description={`This stops watching ${repo.name}. Existing jobs are unaffected.`}
+        confirmLabel="Remove"
+        variant="destructive"
+        pending={pending}
+      />
     </Card>
   );
 }

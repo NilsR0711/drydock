@@ -163,10 +163,30 @@ export async function resumeClaudeSession(
   for (const event of parser.flush()) {
     broker.publish(job.id, { type: event.type, payload: { chunks: event.chunks } });
   }
+
+  const model = job.model ?? "claude-haiku-4-5";
+  const costUsd =
+    parser.costUsd > 0
+      ? parser.costUsd
+      : estimateCost(model, parser.totalInputTokens, parser.totalOutputTokens);
+
+  // Persist usage additively: a resume continues the same job, so its cost and
+  // tokens accumulate on top of whatever the initial session already recorded.
+  const current = db.select().from(jobs).where(eq(jobs.id, job.id)).get();
+  db.update(jobs)
+    .set({
+      sessionId: parser.sessionId ?? sessionId,
+      totalInputTokens: (current?.totalInputTokens ?? 0) + parser.totalInputTokens,
+      totalOutputTokens: (current?.totalOutputTokens ?? 0) + parser.totalOutputTokens,
+      costUsd: (current?.costUsd ?? 0) + costUsd,
+    })
+    .where(eq(jobs.id, job.id))
+    .run();
+
   return {
     exitCode,
     sessionId: parser.sessionId ?? sessionId,
-    costUsd: parser.costUsd,
+    costUsd,
     inputTokens: parser.totalInputTokens,
     outputTokens: parser.totalOutputTokens,
   };

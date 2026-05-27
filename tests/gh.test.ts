@@ -47,6 +47,100 @@ describe("GhClient.createIssue", () => {
     const gh = new GhClient("/repo", fakeRunner({ stdout: "https://github.com/o/r/issues/42\n" }));
     expect(await gh.createIssue("t", "b")).toBe(42);
   });
+
+  it("throws GhError when the issue number cannot be parsed", async () => {
+    const gh = new GhClient("/repo", fakeRunner({ stdout: "no url here" }));
+    await expect(gh.createIssue("t", "b")).rejects.toBeInstanceOf(GhError);
+  });
+
+  it("passes title and body as --flag=value tokens (argument-injection safe)", async () => {
+    const runner = fakeRunner({ stdout: "https://github.com/o/r/issues/9\n" });
+    const gh = new GhClient("/repo", runner);
+    await gh.createIssue("-rf danger", "body");
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      ["issue", "create", "--title=-rf danger", "--body=body"],
+      "/repo",
+    );
+  });
+});
+
+describe("GhClient.failedRunLog", () => {
+  it("resolves branch, finds the failed run, and returns its log", async () => {
+    const calls: { args: string[] }[] = [];
+    const runner = vi.fn(async (_cmd: string, args: string[]) => {
+      calls.push({ args });
+      if (args[0] === "pr" && args[1] === "view") {
+        return { stdout: JSON.stringify({ headRefName: "feat/x" }), stderr: "", exitCode: 0 };
+      }
+      if (args[0] === "run" && args[1] === "list") {
+        return {
+          stdout: JSON.stringify([
+            { databaseId: 111, conclusion: "success" },
+            { databaseId: 222, conclusion: "failure" },
+          ]),
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      // gh run view <id> --log-failed
+      return { stdout: "FAILED LOG OUTPUT", stderr: "", exitCode: 0 };
+    });
+    const gh = new GhClient("/repo", runner);
+    const log = await gh.failedRunLog(12);
+    expect(log).toBe("FAILED LOG OUTPUT");
+    expect(calls[0]?.args).toEqual(["pr", "view", "12", "--json", "headRefName"]);
+    expect(calls[1]?.args).toEqual([
+      "run",
+      "list",
+      "--branch",
+      "feat/x",
+      "--json",
+      "databaseId,conclusion",
+      "--limit",
+      "20",
+    ]);
+    expect(calls[2]?.args).toEqual(["run", "view", "222", "--log-failed"]);
+  });
+
+  it("returns an empty string when no failed run exists", async () => {
+    const runner = vi.fn(async (_cmd: string, args: string[]) => {
+      if (args[0] === "pr") {
+        return { stdout: JSON.stringify({ headRefName: "feat/x" }), stderr: "", exitCode: 0 };
+      }
+      return {
+        stdout: JSON.stringify([{ databaseId: 1, conclusion: "success" }]),
+        stderr: "",
+        exitCode: 0,
+      };
+    });
+    const gh = new GhClient("/repo", runner);
+    expect(await gh.failedRunLog(12)).toBe("");
+  });
+
+  it("returns an empty string when the PR cannot be resolved", async () => {
+    const gh = new GhClient("/repo", fakeRunner({ exitCode: 1, stderr: "no pr" }));
+    expect(await gh.failedRunLog(99)).toBe("");
+  });
+
+  it("truncates the log to the last 8000 characters", async () => {
+    const big = "x".repeat(9000);
+    const runner = vi.fn(async (_cmd: string, args: string[]) => {
+      if (args[0] === "pr") {
+        return { stdout: JSON.stringify({ headRefName: "b" }), stderr: "", exitCode: 0 };
+      }
+      if (args[1] === "list") {
+        return {
+          stdout: JSON.stringify([{ databaseId: 5, conclusion: "failure" }]),
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      return { stdout: big, stderr: "", exitCode: 0 };
+    });
+    const gh = new GhClient("/repo", runner);
+    expect((await gh.failedRunLog(1)).length).toBe(8000);
+  });
 });
 
 describe("GhClient issue read/write", () => {
@@ -93,26 +187,25 @@ describe("GhClient issue read/write", () => {
     await gh.editIssue(5, { title: "New", body: "B" });
     expect(runner).toHaveBeenCalledWith(
       "gh",
-      ["issue", "edit", "5", "--title", "New", "--body", "B"],
+      ["issue", "edit", "5", "--title=New", "--body=B"],
       "/repo",
     );
+  });
+
+  it("editIssue with an empty patch makes no gh call", async () => {
+    const runner = fakeRunner({});
+    const gh = new GhClient("/repo", runner);
+    await gh.editIssue(5, {});
+    expect(runner).not.toHaveBeenCalled();
   });
 
   it("addLabels and removeLabels join names with commas", async () => {
     const runner = fakeRunner({});
     const gh = new GhClient("/repo", runner);
     await gh.addLabels(5, ["a", "b"]);
-    expect(runner).toHaveBeenCalledWith(
-      "gh",
-      ["issue", "edit", "5", "--add-label", "a,b"],
-      "/repo",
-    );
+    expect(runner).toHaveBeenCalledWith("gh", ["issue", "edit", "5", "--add-label=a,b"], "/repo");
     await gh.removeLabels(5, ["c"]);
-    expect(runner).toHaveBeenCalledWith(
-      "gh",
-      ["issue", "edit", "5", "--remove-label", "c"],
-      "/repo",
-    );
+    expect(runner).toHaveBeenCalledWith("gh", ["issue", "edit", "5", "--remove-label=c"], "/repo");
   });
 
   it("closeIssue and reopenIssue call the right subcommands", async () => {

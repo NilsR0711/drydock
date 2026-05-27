@@ -97,11 +97,12 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
       if (candidate && (!picked || lessUrgent(db, picked, candidate))) picked = candidate;
     }
     if (!picked) break;
+    const job = picked;
 
-    const repoOfPicked = repos.find((r) => r.id === picked!.repoId);
-    if (repoOfPicked?.sequential) startedSequentialRepos.add(picked.repoId);
+    const repoOfPicked = repos.find((r) => r.id === job.repoId);
+    if (repoOfPicked?.sequential) startedSequentialRepos.add(job.repoId);
 
-    const jobId = picked.id;
+    const jobId = job.id;
     // Claim it out of "queued" synchronously so it isn't re-picked next turn.
     // (The working-state guard in claude-session keeps spawnClaudeSession happy.)
     transitionJob(jobId, "working", {}, db);

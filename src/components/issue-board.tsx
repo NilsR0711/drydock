@@ -121,6 +121,7 @@ export function IssueBoard({
     reorderable: boolean;
   }) {
     return (
+      // biome-ignore lint/a11y/useKeyWithClickEvents: row is primarily a drag target; keyboard users use the detail modal via other entry points
       <li
         draggable
         onDragStart={() => setDragNumber(issue.number)}
@@ -175,6 +176,7 @@ export function IssueBoard({
       </div>
 
       <input
+        aria-label="Search issues by title or label"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search by title or label…"

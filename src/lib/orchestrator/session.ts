@@ -14,6 +14,10 @@ export interface SessionDeps {
  * Phase 2 mock lifecycle: drive a job through working -> ci_running -> merged
  * (or needs_human on failure). Replaced by the real stream parser / CI
  * babysitter in later phases. The runner is injectable (ADR 004).
+ *
+ * @remarks Test-only. The production flow uses spawnClaudeSession / ciBabysitter
+ * via run-job.ts; this helper is retained solely for the job-lifecycle tests
+ * that exercise the state-machine progression without a real Claude subprocess.
  */
 export async function runMockSession(
   job: Job,

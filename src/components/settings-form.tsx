@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 import { saveSettingsAction } from "@/lib/settings/actions";
 import type { Settings } from "@/lib/settings/service";
 import { useState, useTransition } from "react";
@@ -9,6 +10,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
   const [s, setS] = useState(initial);
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
+  const { success, error } = useToast();
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => {
     setS((prev) => ({ ...prev, [k]: v }));
@@ -20,8 +22,13 @@ export function SettingsForm({ initial }: { initial: Settings }) {
       className="max-w-md space-y-3"
       action={() =>
         start(async () => {
-          await saveSettingsAction(s);
-          setSaved(true);
+          try {
+            await saveSettingsAction(s);
+            setSaved(true);
+            success("Settings saved");
+          } catch (e) {
+            error("Failed to save settings", e instanceof Error ? e.message : String(e));
+          }
         })
       }
     >

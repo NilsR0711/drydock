@@ -1,6 +1,7 @@
 "use client";
 
 import { ModelSelect } from "@/components/model-select";
+import { useToast } from "@/components/ui/toast";
 import type { Repo } from "@/lib/db/schema";
 import { updateRepoAction } from "@/lib/repos/actions";
 import { useState, useTransition } from "react";
@@ -12,42 +13,43 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
   const [sequential, setSequential] = useState(repo.sequential);
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
+  const { error } = useToast();
 
   function flagSaved() {
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   }
 
+  function persist(patch: Parameters<typeof updateRepoAction>[1]) {
+    setSaved(false);
+    start(async () => {
+      try {
+        await updateRepoAction(repo.id, patch);
+        flagSaved();
+      } catch (e) {
+        error("Failed to update repository", e instanceof Error ? e.message : String(e));
+      }
+    });
+  }
+
   function change(value: string) {
     setModel(value);
-    setSaved(false);
-    start(() => {
-      updateRepoAction(repo.id, { defaultModel: value }).then(flagSaved);
-    });
+    persist({ defaultModel: value });
   }
 
   function changeLimit(value: number) {
     setLimit(value);
-    setSaved(false);
-    start(() => {
-      updateRepoAction(repo.id, { dailyCostLimitUsd: value }).then(flagSaved);
-    });
+    persist({ dailyCostLimitUsd: value });
   }
 
   function changeGating(value: boolean) {
     setAdrGating(value);
-    setSaved(false);
-    start(() => {
-      updateRepoAction(repo.id, { adrGating: value }).then(flagSaved);
-    });
+    persist({ adrGating: value });
   }
 
   function changeSequential(value: boolean) {
     setSequential(value);
-    setSaved(false);
-    start(() => {
-      updateRepoAction(repo.id, { sequential: value }).then(flagSaved);
-    });
+    persist({ sequential: value });
   }
 
   return (

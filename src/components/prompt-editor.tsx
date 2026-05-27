@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useToast } from "@/components/ui/toast";
 import { loadTemplateAction, saveTemplateAction } from "@/lib/prompts/actions";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { SUPPORTED_VARIABLES, renderTemplate } from "@/lib/prompts/render";
@@ -32,13 +33,18 @@ export function PromptEditor({
   const [versions, setVersions] = useState<VersionInfo[]>(initialVersions);
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState<number | null>(null);
+  const { success, error } = useToast();
 
   function load(nextRepo: number, nextName: string) {
     start(async () => {
-      const res = await loadTemplateAction(nextRepo, nextName);
-      setContent(res.content);
-      setVersions(res.versions);
-      setSaved(null);
+      try {
+        const res = await loadTemplateAction(nextRepo, nextName);
+        setContent(res.content);
+        setVersions(res.versions);
+        setSaved(null);
+      } catch (e) {
+        error("Failed to load template", e instanceof Error ? e.message : String(e));
+      }
     });
   }
 
@@ -61,6 +67,7 @@ export function PromptEditor({
         <CardContent className="space-y-2">
           <div className="flex gap-2">
             <select
+              aria-label="Repository"
               className="rounded border border-card-border bg-background px-2 py-1 text-sm"
               value={repoId}
               onChange={(e) => {
@@ -76,6 +83,7 @@ export function PromptEditor({
               ))}
             </select>
             <select
+              aria-label="Template"
               className="rounded border border-card-border bg-background px-2 py-1 text-sm"
               value={name}
               onChange={(e) => {
@@ -99,10 +107,15 @@ export function PromptEditor({
             disabled={pending || !repoId}
             onClick={() =>
               start(async () => {
-                const row = await saveTemplateAction({ repoId, name, content });
-                setSaved(row.version);
-                const res = await loadTemplateAction(repoId, name);
-                setVersions(res.versions);
+                try {
+                  const row = await saveTemplateAction({ repoId, name, content });
+                  setSaved(row.version);
+                  const res = await loadTemplateAction(repoId, name);
+                  setVersions(res.versions);
+                  success("Template saved", `Version ${row.version}`);
+                } catch (e) {
+                  error("Failed to save template", e instanceof Error ? e.message : String(e));
+                }
               })
             }
           >

@@ -19,6 +19,10 @@ describe("state machine", () => {
     expect(canTransition("retrying", "ci_running")).toBe(true);
   });
 
+  it("allows ci_failed -> interrupted for crash recovery", () => {
+    expect(canTransition("ci_failed", "interrupted")).toBe(true);
+  });
+
   it("forbids skipping states", () => {
     expect(canTransition("queued", "merged")).toBe(false);
     expect(canTransition("merged", "working")).toBe(false);

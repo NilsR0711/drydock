@@ -111,6 +111,25 @@ describe("ciBabysitter", () => {
     expect(getJob(job.id, db)?.ciRetryCount).toBe(1);
   });
 
+  it("hands over to a human when the job has no session id to resume", async () => {
+    // ci_running job without a recorded session id.
+    const job = createJob({ repoId, issueNumber: 4, model: "claude-sonnet-4-5" }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "ci_running", { prNumber: 5 }, db);
+    const { gh } = scriptedGh([[{ name: "build", state: "FAILURE" }]]);
+    const resume = vi.fn(async () => {});
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      sleep: vi.fn(),
+      maxPolls: 10,
+    });
+    expect(final.status).toBe("needs_human");
+    expect(resume).not.toHaveBeenCalled();
+    expect(getJob(job.id, db)?.errorMessage).toContain("no session id");
+  });
+
   it("gives up after MAX retries -> needs_human + follow-up issue", async () => {
     const job = ciRunningJob(3);
     const { gh } = scriptedGh([[{ name: "build", state: "FAILURE" }]]);

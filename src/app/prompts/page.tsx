@@ -20,7 +20,7 @@ export default function PromptsPage() {
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Prompts</h1>
       {repos.length === 0 ? (
-        <p className="text-sm text-neutral-500">Add a repo first.</p>
+        <p className="text-sm text-muted-foreground">Add a repo first.</p>
       ) : (
         <PromptEditor
           repos={repos}

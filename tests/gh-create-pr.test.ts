@@ -19,14 +19,10 @@ describe("GhClient.createPr", () => {
     expect(calls[0]).toEqual([
       "pr",
       "create",
-      "--head",
-      "drydock/issue-5-job-1",
-      "--base",
-      "main",
-      "--title",
-      "Fix #5",
-      "--body",
-      "Closes #5",
+      "--head=drydock/issue-5-job-1",
+      "--base=main",
+      "--title=Fix #5",
+      "--body=Closes #5",
     ]);
   });
 

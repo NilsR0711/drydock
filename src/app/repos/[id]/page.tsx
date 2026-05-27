@@ -42,11 +42,11 @@ export default async function RepoWorkspacePage({
   return (
     <div className="space-y-6">
       <div>
-        <Link href="/" className="text-xs text-neutral-500 hover:underline">
+        <Link href="/" className="text-xs text-muted-foreground hover:underline">
           ← Dashboard
         </Link>
         <h1 className="mt-1 text-2xl font-bold tracking-tight">{ws.repo.name}</h1>
-        <p className="text-sm text-neutral-500">{ws.repo.path}</p>
+        <p className="text-sm text-muted-foreground">{ws.repo.path}</p>
       </div>
 
       <RepoSettingsBar repo={ws.repo} />
