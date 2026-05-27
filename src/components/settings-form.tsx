@@ -97,6 +97,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
+    // biome-ignore lint/a11y/noLabelWithoutControl: the form control is provided via children
     <label className="flex flex-col gap-1 text-sm">
       <span>{label}</span>
       {children}
