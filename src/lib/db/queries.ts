@@ -66,3 +66,24 @@ export function getRepoWorkspace(repoId: number, db: DB = getDb()): RepoWorkspac
   const activeJob = repoJobs.find((j) => ACTIVE.includes(j.status));
   return { repo, issues: repoIssues, activeJob, recentJobs: repoJobs.slice(0, 8) };
 }
+
+export interface DashboardSummary {
+  repos: number;
+  queued: number;
+  running: number;
+  merged: number;
+  needsHuman: number;
+}
+
+/** Aggregate job counts across all repos for the dashboard stat cards. */
+export function dashboardSummary(db: DB = getDb()): DashboardSummary {
+  const allJobs = db.select().from(jobs).all();
+  const count = (statuses: string[]) => allJobs.filter((j) => statuses.includes(j.status)).length;
+  return {
+    repos: db.select().from(repos).all().length,
+    queued: count(["queued"]),
+    running: count(["working", "ci_running", "retrying"]),
+    merged: count(["merged"]),
+    needsHuman: count(["needs_human"]),
+  };
+}
