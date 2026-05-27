@@ -1,7 +1,7 @@
 import { type DB, getDb } from "@/lib/db/client";
 import type { Job } from "@/lib/db/schema";
 import { followupIssues } from "@/lib/db/schema";
-import type { GhClient, PrCheck } from "@/lib/github/gh";
+import type { ForgeClient, PrCheck } from "@/lib/forge/types";
 import { getJob, recordEvent, transitionJob } from "./jobs";
 
 export type CiOutcome = "pending" | "passed" | "failed";
@@ -20,7 +20,8 @@ export function classifyChecks(checks: PrCheck[]): CiOutcome {
 export const MAX_CI_RETRIES = 3;
 
 export interface BabysitterDeps {
-  gh: GhClient;
+  /** Forge client (GitHub or GitLab) for PR/MR checks, merge, and comments. */
+  gh: ForgeClient;
   db?: DB;
   /** Resume the Claude session with a CI-fix prompt (Haiku). Returns when done. */
   resumeSession: (job: Job, sessionId: string, failedLog: string) => Promise<void>;

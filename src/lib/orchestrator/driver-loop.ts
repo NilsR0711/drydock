@@ -2,7 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
 import { issues, type Job } from "@/lib/db/schema";
-import { GhClient, type GhIssue } from "@/lib/github/gh";
+import { getForge } from "@/lib/forge/registry";
+import type { GhIssue } from "@/lib/github/gh";
 import { evaluateIssue } from "@/lib/issues/evaluator";
 import { syncIssuesFromGh } from "@/lib/issues/service";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
@@ -59,7 +60,7 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
 
   for (const repo of repos) {
     try {
-      const fetch = deps.fetchIssues ?? ((p, _label) => new GhClient(p).listAllIssues());
+      const fetch = deps.fetchIssues ?? ((_p, _label) => getForge(repo).listAllIssues());
       const fetched = await fetch(repo.path, repo.queueLabel);
       syncIssuesFromGh(repo.id, fetched, db);
       for (const gh of fetched) {
