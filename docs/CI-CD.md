@@ -1,0 +1,46 @@
+# CI/CD Pipeline
+
+All automation lives in `.github/workflows/`. Workflows are scoped to the
+`master` branch and pull requests targeting it.
+
+## `ci.yml` — Verify
+
+Runs on every push to `master` and every PR. Installs with a frozen lockfile,
+then runs lint, typecheck, test, and build across a Node 20/22 matrix.
+Superseded runs on the same ref are cancelled (`concurrency` with
+`cancel-in-progress: true`).
+
+## `codeql.yml` — Security analysis
+
+CodeQL static analysis on push, PR, and a weekly schedule. Skipped on private
+repositories (CodeQL needs GitHub Advanced Security there); runs unconditionally
+once the repo is public.
+
+## `release-please.yml` — Releases
+
+Turns Conventional Commits into release PRs. On every push to `master` (and via
+`workflow_dispatch`), [release-please][rp] maintains a release PR that bumps the
+version in `package.json`, updates `CHANGELOG.md`, and — once merged — creates
+the matching git tag and GitHub release.
+
+Configuration:
+
+- `release-please-config.json` — single Node package at the repo root, releases
+  tagged without a component prefix (`vX.Y.Z`). Pre-1.0 bumps stay in the minor
+  range (`bump-minor-pre-major`).
+- `.release-please-manifest.json` — tracks the last released version.
+
+Because we already commit conventionally (`feat:`, `fix:`, `chore:` …), no extra
+discipline is needed. Commits that should appear in the changelog use `feat:` or
+`fix:`; everything else is grouped under "Miscellaneous".
+
+## `doc-review.yml` — Documentation reminder
+
+On PRs, compares the changed files against the base. If files under `src/`
+changed but nothing under `docs/` did, it posts a single reminder comment to
+update the docs. The comment is **idempotent**: it is keyed by a hidden marker,
+so re-runs update the existing comment instead of posting a new one. If a later
+push adds docs, the reminder is replaced with a confirmation. This is a nudge,
+not a merge blocker.
+
+[rp]: https://github.com/googleapis/release-please-action
