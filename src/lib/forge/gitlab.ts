@@ -14,6 +14,7 @@ const gitlabIssueSchema = z.object({
   iid: z.number(),
   title: z.string(),
   labels: z.array(z.string()).default([]),
+  author: z.object({ username: z.string() }).nullish(),
 });
 
 const gitlabIssueDetailSchema = z.object({
@@ -302,6 +303,11 @@ function parseIssues(body: string): ForgeIssue[] {
     number: i.iid,
     title: i.title,
     labels: i.labels.map((name) => ({ name })),
+    author: i.author?.username ?? null,
+    // GitLab's issue payload carries no GitHub-style author association; the
+    // author gate treats this as unknown (use minAuthorAssociation "any" to
+    // act on public participants). See ADR 016.
+    authorAssociation: null,
   }));
 }
 

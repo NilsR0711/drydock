@@ -17,6 +17,26 @@ export const repos = sqliteTable("repos", {
   dailyCostLimitUsd: real("daily_cost_limit_usd").notNull().default(10),
   adrGating: integer("adr_gating", { mode: "boolean" }).notNull().default(false),
   sequential: integer("sequential", { mode: "boolean" }).notNull().default(true),
+  // Opt-in autonomous automation (both default off). See ADR 016.
+  autoTriageEnabled: integer("auto_triage_enabled", { mode: "boolean" }).notNull().default(false),
+  autoProcessEnabled: integer("auto_process_enabled", { mode: "boolean" }).notNull().default(false),
+  // JSON string arrays; parsed via repoAutomation(). Any ready label triggers,
+  // any blocking label vetoes; triage may only apply whitelisted labels.
+  readyLabels: text("ready_labels")
+    .notNull()
+    .default('["ready","ready-for-agent","ready-to-work"]'),
+  blockingLabels: text("blocking_labels")
+    .notNull()
+    .default(
+      '["blocked","question","needs-human","needs-discussion","wontfix","duplicate","invalid"]',
+    ),
+  autoLabelWhitelist: text("auto_label_whitelist")
+    .notNull()
+    .default('["bug","enhancement","documentation","ready"]'),
+  priorityAuthors: text("priority_authors").notNull().default("[]"),
+  // "approved" = only owners/members/collaborators; "any" = anyone (public).
+  minAuthorAssociation: text("min_author_association").notNull().default("approved"),
+  maxAttempts: integer("max_attempts").notNull().default(3),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 
@@ -105,6 +125,10 @@ export const issues = sqliteTable(
     labels: text("labels").notNull().default("[]"),
     state: text("state").notNull().default("open"),
     priority: integer("priority").notNull().default(0),
+    // Auto-triage bookkeeping: a content hash of the last triaged version and
+    // when it ran. Lets the triage stage skip unchanged issues (ADR 016).
+    triageHash: text("triage_hash"),
+    triagedAt: integer("triaged_at"),
     syncedAt: integer("synced_at").notNull().default(sql`(unixepoch())`),
   },
   (t) => ({

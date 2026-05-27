@@ -3,6 +3,18 @@ import { z } from "zod";
 import { type DB, getDb } from "@/lib/db/client";
 import { type Repo, repos } from "@/lib/db/schema";
 
+/**
+ * A label/author list column: callers pass a `string[]`, but we persist it as a
+ * JSON text column (parsed back via repoAutomation). `defaultJson` seeds new
+ * repos; on partial updates an omitted field is left untouched.
+ */
+function jsonStringArray(defaultJson: string) {
+  return z
+    .array(z.string())
+    .default(() => JSON.parse(defaultJson) as string[])
+    .transform((a) => JSON.stringify(a));
+}
+
 export const repoInputSchema = z.object({
   path: z.string().min(1, "path is required"),
   name: z.string().min(1, "name is required"),
@@ -18,6 +30,16 @@ export const repoInputSchema = z.object({
   dailyCostLimitUsd: z.number().nonnegative().default(10),
   adrGating: z.boolean().default(false),
   sequential: z.boolean().default(true),
+  autoTriageEnabled: z.boolean().default(false),
+  autoProcessEnabled: z.boolean().default(false),
+  readyLabels: jsonStringArray('["ready","ready-for-agent","ready-to-work"]'),
+  blockingLabels: jsonStringArray(
+    '["blocked","question","needs-human","needs-discussion","wontfix","duplicate","invalid"]',
+  ),
+  autoLabelWhitelist: jsonStringArray('["bug","enhancement","documentation","ready"]'),
+  priorityAuthors: jsonStringArray("[]"),
+  minAuthorAssociation: z.enum(["approved", "any"]).default("approved"),
+  maxAttempts: z.number().int().positive().default(3),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 

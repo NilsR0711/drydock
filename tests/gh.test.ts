@@ -144,18 +144,50 @@ describe("GhClient.failedRunLog", () => {
 });
 
 describe("GhClient issue read/write", () => {
-  it("listAllIssues fetches open issues without a label filter", async () => {
+  it("listAllIssues fetches open issues with author metadata", async () => {
     const runner = fakeRunner({
-      stdout: JSON.stringify([{ number: 1, title: "A", labels: [], state: "open" }]),
+      stdout: JSON.stringify([
+        {
+          number: 1,
+          title: "A",
+          labels: [],
+          state: "open",
+          author: { login: "octocat" },
+          authorAssociation: "MEMBER",
+        },
+      ]),
     });
     const gh = new GhClient("/repo", runner);
     const issues = await gh.listAllIssues();
     expect(runner).toHaveBeenCalledWith(
       "gh",
-      ["issue", "list", "--state", "open", "--json", "number,title,labels,state", "--limit", "200"],
+      [
+        "issue",
+        "list",
+        "--state",
+        "open",
+        "--json",
+        "number,title,labels,state,author,authorAssociation",
+        "--limit",
+        "200",
+      ],
       "/repo",
     );
-    expect(issues[0]).toMatchObject({ number: 1, title: "A" });
+    expect(issues[0]).toMatchObject({
+      number: 1,
+      title: "A",
+      author: "octocat",
+      authorAssociation: "MEMBER",
+    });
+  });
+
+  it("listAllIssues tolerates issues without author metadata", async () => {
+    const runner = fakeRunner({
+      stdout: JSON.stringify([{ number: 2, title: "B", labels: [], state: "open" }]),
+    });
+    const gh = new GhClient("/repo", runner);
+    const issues = await gh.listAllIssues();
+    expect(issues[0]).toMatchObject({ number: 2, author: null, authorAssociation: null });
   });
 
   it("viewIssue parses body and comments", async () => {

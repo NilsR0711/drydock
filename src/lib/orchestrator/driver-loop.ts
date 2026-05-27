@@ -1,11 +1,14 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
-import { issues, type Job } from "@/lib/db/schema";
+import { issues, type Job, jobs, type Repo } from "@/lib/db/schema";
 import { getForge } from "@/lib/forge/registry";
+import type { ForgeClient } from "@/lib/forge/types";
 import type { GhIssue } from "@/lib/github/gh";
 import { evaluateIssue } from "@/lib/issues/evaluator";
 import { syncIssuesFromGh } from "@/lib/issues/service";
+import { type TriageResult, triageRepo } from "@/lib/issues/triage";
+import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
 import { createJob, listJobsByStatus, nextQueuedJob, transitionJob } from "./jobs";
 import { runJob as defaultRunJob } from "./run-job";
@@ -15,6 +18,67 @@ export interface DriveTickDeps {
   db?: DB;
   fetchIssues?: (repoPath: string, label: string) => Promise<GhIssue[]>;
   runJob?: (jobId: number) => Promise<Job>;
+  /** Forge client per repo (label/comment writes + default issue fetch). */
+  forgeFor?: (repo: Repo) => ForgeClient;
+  /** Auto-triage entry point (injectable for tests). */
+  triage?: (repo: Repo, forge: ForgeClient, fetched: GhIssue[], db: DB) => Promise<TriageResult[]>;
+}
+
+// A failed attempt is a job that ended parked for a human or aborted; merged
+// jobs are successes and don't count toward maxAttempts.
+const FAILED_ATTEMPT_STATES = ["needs_human", "aborted"] as const;
+
+/** How many times automation has already tried (and failed) a given issue. */
+function failedAttempts(db: DB, repoId: number, issueNumber: number): number {
+  return db
+    .select()
+    .from(jobs)
+    .where(
+      and(
+        eq(jobs.repoId, repoId),
+        eq(jobs.issueNumber, issueNumber),
+        inArray(jobs.status, [...FAILED_ATTEMPT_STATES]),
+      ),
+    )
+    .all().length;
+}
+
+/** Move a priority-author issue to the front of the queue (lower = sooner). */
+function boostPriority(db: DB, repoId: number, issueNumber: number): void {
+  db.update(issues)
+    .set({ priority: -1 })
+    .where(and(eq(issues.repoId, repoId), eq(issues.number, issueNumber)))
+    .run();
+}
+
+/**
+ * Whether an auto-process repo may queue this issue: it carries a ready label,
+ * no blocking label, and an approved author. On reaching maxAttempts the issue
+ * is labelled needs-human and skipped rather than retried forever.
+ */
+async function autoEligible(
+  repo: Repo,
+  cfg: RepoAutomation,
+  forge: ForgeClient,
+  gh: GhIssue,
+  labelNames: string[],
+  db: DB,
+): Promise<boolean> {
+  const hasReady = labelNames.some((l) => cfg.readyLabels.includes(l));
+  const hasBlocking = labelNames.some((l) => cfg.blockingLabels.includes(l));
+  if (!hasReady || hasBlocking) return false;
+  if (!authorAllowed(cfg, gh.authorAssociation)) return false;
+  if (failedAttempts(db, repo.id, gh.number) >= cfg.maxAttempts) {
+    if (!labelNames.includes(repo.needsHumanLabel)) {
+      await forge.ensureLabel(repo.needsHumanLabel, {
+        color: "d73a4a",
+        description: "Drydock gave up after repeated failures; needs a human",
+      });
+      await forge.addLabels(gh.number, [repo.needsHumanLabel]);
+    }
+    return false;
+  }
+  return true;
 }
 
 const OPEN_STATES = ["queued", "working", "ci_running", "ci_failed", "retrying"] as const;
@@ -58,21 +122,32 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   const runJob = deps.runJob ?? defaultRunJob;
   const repos = listRepos(db);
 
+  const triage = deps.triage ?? triageRepo;
   for (const repo of repos) {
     try {
-      const fetch = deps.fetchIssues ?? ((_p, _label) => getForge(repo).listAllIssues());
+      const forge = deps.forgeFor?.(repo) ?? getForge(repo);
+      const fetch = deps.fetchIssues ?? ((_p, _label) => forge.listAllIssues());
       const fetched = await fetch(repo.path, repo.queueLabel);
       syncIssuesFromGh(repo.id, fetched, db);
+
+      const cfg = repoAutomation(repo);
+      if (cfg.autoTriageEnabled) {
+        await triage(repo, forge, fetched, db);
+      }
+
       for (const gh of fetched) {
         const labelNames = gh.labels.map((l) => l.name);
-        if (!labelNames.includes(repo.queueLabel)) continue; // backlog issues aren't scheduled
-        const verdict = evaluateIssue({
-          number: gh.number,
-          title: gh.title,
-          labels: labelNames,
-        });
+        const manual = labelNames.includes(repo.queueLabel);
+        const auto = cfg.autoProcessEnabled
+          ? await autoEligible(repo, cfg, forge, gh, labelNames, db)
+          : false;
+        if (!manual && !auto) continue; // backlog issues aren't scheduled
+        const verdict = evaluateIssue({ number: gh.number, title: gh.title, labels: labelNames });
         if (verdict.decision !== "approved") continue;
         if (hasOpenJob(db, repo.id, gh.number)) continue;
+        if (auto && gh.author && cfg.priorityAuthors.includes(gh.author)) {
+          boostPriority(db, repo.id, gh.number);
+        }
         createJob(
           { repoId: repo.id, issueNumber: gh.number, model: repo.defaultModel, agent: repo.agent },
           db,

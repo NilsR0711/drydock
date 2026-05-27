@@ -160,3 +160,97 @@ describe("driveTick", () => {
     await expect(driveTick(d as never)).resolves.toBeUndefined();
   });
 });
+
+describe("driveTick auto-processing", () => {
+  function fakeForge() {
+    return {
+      listAllIssues: vi.fn(async () => []),
+      viewIssue: vi.fn(),
+      ensureLabel: vi.fn(async () => {}),
+      addLabels: vi.fn(async () => {}),
+      commentIssue: vi.fn(async () => {}),
+    };
+  }
+
+  const ghIssue = (over: Record<string, unknown> = {}) => ({
+    number: 1,
+    title: "Add a thing",
+    labels: [{ name: "ready" }],
+    author: "octocat",
+    authorAssociation: "MEMBER",
+    ...over,
+  });
+
+  function autoDeps(fetched: unknown[], over: Record<string, unknown> = {}) {
+    return {
+      db,
+      fetchIssues: vi.fn(async () => fetched),
+      forgeFor: () => fakeForge(),
+      triage: vi.fn(async () => []),
+      runJob: vi.fn(async (id: number) => getJob(id, db) as Job),
+      ...over,
+    };
+  }
+
+  it("queues a ready issue with no blocking label for an auto-process repo", async () => {
+    const r = addRepo({ path: "/ap", name: "ap", autoProcessEnabled: true }, db).id;
+    await driveTick(
+      autoDeps([ghIssue()], { fetchIssues: vi.fn(async () => [ghIssue()]) }) as never,
+    );
+    const seen = listJobsByStatus(["queued", "working", "merged"], db);
+    expect(seen.some((j) => j.repoId === r && j.issueNumber === 1)).toBe(true);
+  });
+
+  it("does not queue when a blocking label is present", async () => {
+    addRepo({ path: "/ap2", name: "ap2", autoProcessEnabled: true }, db);
+    const issue = ghIssue({ labels: [{ name: "ready" }, { name: "blocked" }] });
+    await driveTick(autoDeps([issue], { fetchIssues: vi.fn(async () => [issue]) }) as never);
+    expect(listJobsByStatus(["queued", "working", "merged"], db)).toHaveLength(0);
+  });
+
+  it("ignores ready issues from non-approved authors on a public repo", async () => {
+    addRepo({ path: "/ap3", name: "ap3", autoProcessEnabled: true }, db);
+    const issue = ghIssue({ authorAssociation: "NONE" });
+    await driveTick(autoDeps([issue], { fetchIssues: vi.fn(async () => [issue]) }) as never);
+    expect(listJobsByStatus(["queued", "working", "merged"], db)).toHaveLength(0);
+  });
+
+  it("does not auto-queue ready issues when auto-processing is off (no regression)", async () => {
+    addRepo({ path: "/off", name: "off", autoProcessEnabled: false }, db);
+    const issue = ghIssue();
+    await driveTick(autoDeps([issue], { fetchIssues: vi.fn(async () => [issue]) }) as never);
+    expect(listJobsByStatus(["queued", "working", "merged"], db)).toHaveLength(0);
+  });
+
+  it("labels needs-human and stops after maxAttempts failures", async () => {
+    const r = addRepo({ path: "/ap4", name: "ap4", autoProcessEnabled: true, maxAttempts: 2 }, db);
+    // Two prior failed attempts on issue #1.
+    db.insert(jobs).values({ repoId: r.id, issueNumber: 1, status: "needs_human" }).run();
+    db.insert(jobs).values({ repoId: r.id, issueNumber: 1, status: "needs_human" }).run();
+    const forge = fakeForge();
+    const issue = ghIssue();
+    await driveTick(
+      autoDeps([issue], {
+        fetchIssues: vi.fn(async () => [issue]),
+        forgeFor: () => forge,
+      }) as never,
+    );
+    expect(forge.addLabels).toHaveBeenCalledWith(1, [r.needsHumanLabel]);
+    expect(listJobsByStatus(["queued"], db).filter((j) => j.repoId === r.id)).toHaveLength(0);
+  });
+
+  it("runs auto-triage for repos that enabled it", async () => {
+    const r = addRepo({ path: "/t", name: "t", autoTriageEnabled: true }, db);
+    const triage = vi.fn(async () => []);
+    const issue = ghIssue();
+    await driveTick(
+      autoDeps([issue], { fetchIssues: vi.fn(async () => [issue]), triage }) as never,
+    );
+    expect(triage).toHaveBeenCalledWith(
+      expect.objectContaining({ id: r.id }),
+      expect.anything(),
+      [issue],
+      db,
+    );
+  });
+});

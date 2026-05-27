@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { IssueBoard } from "@/components/issue-board";
 import { RepoActivity } from "@/components/repo-activity";
 import { RepoAdrPanel } from "@/components/repo-adr-panel";
+import { RepoAutomationBar } from "@/components/repo-automation-bar";
 import { RepoCostPanel } from "@/components/repo-cost-panel";
 import { RepoSettingsBar } from "@/components/repo-settings-bar";
 import { listAdrs } from "@/lib/adr/service";
@@ -46,6 +47,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
       </div>
 
       <RepoSettingsBar repo={ws.repo} />
+      <RepoAutomationBar repo={ws.repo} />
 
       <IssueBoard
         repoId={ws.repo.id}
