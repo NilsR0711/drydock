@@ -2,6 +2,7 @@ import { type DB, getDb } from "@/lib/db/client";
 import { type PromptTemplate, promptTemplates } from "@/lib/db/schema";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
+import { DEFAULT_TEMPLATES, type TemplateName } from "./defaults";
 
 export { renderTemplate, SUPPORTED_VARIABLES } from "./render";
 export type { TemplateVar, TemplateVars } from "./render";
@@ -27,6 +28,11 @@ export function getActiveTemplate(
     .where(and(eq(promptTemplates.repoId, repoId), eq(promptTemplates.name, name)))
     .orderBy(desc(promptTemplates.version))
     .get();
+}
+
+/** Active repo template content, or the code-level default for that name. */
+export function resolveTemplateContent(repoId: number, name: string, db: DB = getDb()): string {
+  return getActiveTemplate(repoId, name, db)?.content ?? DEFAULT_TEMPLATES[name as TemplateName] ?? "";
 }
 
 export function listVersions(repoId: number, name: string, db: DB = getDb()): PromptTemplate[] {
