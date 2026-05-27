@@ -3,6 +3,8 @@ import { type Job, jobs } from "@/lib/db/schema";
 import type { Worktree } from "@/lib/git/worktree";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
 import { runJob } from "@/lib/orchestrator/run-job";
+import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
+import { saveTemplate } from "@/lib/prompts/templates";
 import { addRepo } from "@/lib/repos/service";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -57,6 +59,19 @@ describe("runJob", () => {
     );
     expect(deps.runBabysitter).toHaveBeenCalled();
     expect(removed.v).toBe(true);
+  });
+
+  it("uses the repo's saved main template for the session prompt", async () => {
+    saveTemplate(
+      { repoId, name: TEMPLATE_NAMES.main, content: "DO ISSUE $ISSUE_NUM ON $BRANCH" },
+      db,
+    );
+    const removed = { v: false };
+    const deps = baseDeps(removed);
+    const job = createJob({ repoId, issueNumber: 1 }, db);
+    await runJob(job.id, deps as never);
+    const prompt = (deps.runSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+    expect(prompt).toContain("DO ISSUE 1 ON ");
   });
 
   it("marks needs_human and cleans up when the session exits non-zero", async () => {
