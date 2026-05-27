@@ -87,6 +87,21 @@ export function SettingsForm({ initial }: { initial: Settings }) {
           className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         />
       </Field>
+      <Field label="Telegram bot token">
+        <input
+          value={s.telegramBotToken}
+          onChange={(e) => set("telegramBotToken", e.target.value)}
+          placeholder="leave empty to disable notifications"
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        />
+      </Field>
+      <Field label="Telegram chat ID">
+        <input
+          value={s.telegramChatId}
+          onChange={(e) => set("telegramChatId", e.target.value)}
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        />
+      </Field>
       <Button type="submit" disabled={pending}>
         Save settings
       </Button>

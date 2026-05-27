@@ -13,6 +13,8 @@ export const settingsSchema = z.object({
   claudePath: z.string().default("claude"),
   ghPath: z.string().default("gh"),
   maxParallelJobs: z.number().int().positive().default(3),
+  telegramBotToken: z.string().default(""),
+  telegramChatId: z.string().default(""),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 

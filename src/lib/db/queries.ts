@@ -18,6 +18,22 @@ export function getRepo(id: number, db: DB = getDb()): Repo | undefined {
   return db.select().from(repos).where(eq(repos.id, id)).get();
 }
 
+export interface NeedsHumanJob extends Job {
+  repoName: string;
+}
+
+/** Jobs parked in needs_human, newest first, enriched with their repo name. */
+export function needsHumanJobs(db: DB = getDb()): NeedsHumanJob[] {
+  return db
+    .select()
+    .from(jobs)
+    .innerJoin(repos, eq(jobs.repoId, repos.id))
+    .where(eq(jobs.status, "needs_human"))
+    .orderBy(desc(jobs.finishedAt))
+    .all()
+    .map((r) => ({ ...r.jobs, repoName: r.repos.name }));
+}
+
 export function listReposWithStats(db: DB = getDb()): RepoWithStats[] {
   return listRepos(db).map((repo) => {
     const repoJobs = db

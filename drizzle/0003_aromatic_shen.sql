@@ -1,0 +1,1 @@
+ALTER TABLE `repos` ADD `adr_gating` integer DEFAULT false NOT NULL;
