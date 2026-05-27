@@ -1,4 +1,4 @@
-import { IssueQueue } from "@/components/issue-queue";
+import { IssueBoard } from "@/components/issue-board";
 import { RepoActivity } from "@/components/repo-activity";
 import { RepoAdrPanel } from "@/components/repo-adr-panel";
 import { RepoCostPanel } from "@/components/repo-cost-panel";
@@ -51,12 +51,14 @@ export default async function RepoWorkspacePage({
 
       <RepoSettingsBar repo={ws.repo} />
 
+      <IssueBoard
+        repoId={ws.repo.id}
+        queueLabel={ws.repo.queueLabel}
+        initialIssues={ws.issues}
+        pollIntervalSec={settings.pollIntervalSec}
+      />
+
       <div className="grid gap-6 lg:grid-cols-2">
-        <IssueQueue
-          repoId={ws.repo.id}
-          initialIssues={ws.issues}
-          pollIntervalSec={settings.pollIntervalSec}
-        />
         <RepoActivity activeJob={ws.activeJob} recentJobs={ws.recentJobs} initialLog={initialLog} />
         <RepoCostPanel todayUsd={todayUsd} limitUsd={ws.repo.dailyCostLimitUsd} daily={daily} />
         <RepoAdrPanel adrs={repoAdrs} />
