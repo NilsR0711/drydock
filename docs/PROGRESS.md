@@ -1,6 +1,6 @@
 # Drydock — Progress
 
-Phase tracking. Continuously maintained; survives context compaction.
+Phase tracking. Continuously maintained.
 
 ## Phases
 

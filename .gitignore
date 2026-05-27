@@ -1,10 +1,45 @@
+# Dependencies
 node_modules
+.pnpm-store
+
+# Build output
 .next
 out
-data
-*.log
-.DS_Store
+.turbo
+.vercel
 next-env.d.ts
-.env*
-coverage
 tsconfig.tsbuildinfo
+
+# Test / coverage
+coverage
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Local application data (SQLite DB with repo data & tokens, backups)
+data
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.DS_Store
+.idea
+.vscode
+
+# Local-only files (not part of the public project)
+CLAUDE.md
+.claude
+DRYDOCK_SPEC.md
+docs/superpowers
