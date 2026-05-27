@@ -14,3 +14,5 @@
 - [011](adr/011-adr-watcher-and-review.md) — ADR detection via chokidar + review queue (Phase 7)
 - [012](adr/012-graceful-shutdown-and-backup.md) — Graceful shutdown, abort registry & DB backup (Phase 8)
 - [013](adr/013-server-side-directory-picker.md) — Server-side directory picker (post-MVP)
+- [014](adr/014-agent-provider-abstraction.md) — Pluggable agent providers (claude + codex)
+- [015](adr/015-gitlab-forge-support.md) — Pluggable forge platforms (github + gitlab)
