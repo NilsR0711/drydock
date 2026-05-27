@@ -32,6 +32,9 @@ export const repos = sqliteTable("repos", {
   includeProgressReplies: integer("include_progress_replies", { mode: "boolean" })
     .notNull()
     .default(false),
+  // Opt-in decomposition of large issues into tracked subtasks (default off).
+  // See ADR 020.
+  autoDecompose: integer("auto_decompose", { mode: "boolean" }).notNull().default(false),
   // JSON string arrays; parsed via repoAutomation(). Only trusted reviewers'
   // feedback is acted on; ignored bots are never acted on.
   trustedReviewers: text("trusted_reviewers").notNull().default("[]"),
@@ -147,6 +150,10 @@ export const issues = sqliteTable(
     // when it ran. Lets the triage stage skip unchanged issues (ADR 016).
     triageHash: text("triage_hash"),
     triagedAt: integer("triaged_at"),
+    // Decomposition bookkeeping (ADR 020): a content hash of the issue body the
+    // last time it was decomposed. Lets the decomposer skip an unchanged issue
+    // (and avoid re-running the agent fallback) until its body actually changes.
+    decomposedHash: text("decomposed_hash"),
     syncedAt: integer("synced_at").notNull().default(sql`(unixepoch())`),
   },
   (t) => ({
@@ -235,6 +242,37 @@ export const reviewFeedbackItems = sqliteTable(
   }),
 );
 
+/**
+ * One ordered subtask of a decomposed issue (issue #19). A large issue is split
+ * into subtasks worked in `ordinal` order; `status` is a SubtaskStatus. The
+ * `(repoId, issueNumber, ordinal)` triple is unique so a re-decomposition
+ * deterministically refreshes the set. `bodyHash` records the source issue body
+ * the subtask was derived from, so a changed issue triggers a redo.
+ */
+export const issueSubtasks = sqliteTable(
+  "issue_subtasks",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repos.id, { onDelete: "cascade" }),
+    issueNumber: integer("issue_number").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    title: text("title").notNull(),
+    status: text("status").notNull().default("pending"),
+    bodyHash: text("body_hash").notNull(),
+    createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    issueIdx: index("issue_subtasks_issue_idx").on(t.repoId, t.issueNumber),
+    issueOrdinalUnique: uniqueIndex("issue_subtasks_issue_ordinal_unique").on(
+      t.repoId,
+      t.issueNumber,
+      t.ordinal,
+    ),
+  }),
+);
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -256,3 +294,5 @@ export type HealingAttempt = typeof healingAttempts.$inferSelect;
 export type NewHealingAttempt = typeof healingAttempts.$inferInsert;
 export type ReviewFeedbackItem = typeof reviewFeedbackItems.$inferSelect;
 export type NewReviewFeedbackItem = typeof reviewFeedbackItems.$inferInsert;
+export type IssueSubtask = typeof issueSubtasks.$inferSelect;
+export type NewIssueSubtask = typeof issueSubtasks.$inferInsert;
