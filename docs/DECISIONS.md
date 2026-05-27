@@ -10,3 +10,4 @@
 - [007](adr/007-sse-over-websocket.md) — SSE over WebSocket + stream parser strategy (Phase 3)
 - [008](adr/008-cost-tracking-source.md) — Cost tracking source of truth (Phase 4)
 - [009](adr/009-ci-retry-strategy.md) — CI babysitter & retry strategy (Phase 5)
+- [010](adr/010-prompt-template-versioning.md) — Prompt template versioning & substitution (Phase 6)

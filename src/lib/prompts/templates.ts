@@ -1,0 +1,66 @@
+import { type DB, getDb } from "@/lib/db/client";
+import { type PromptTemplate, promptTemplates } from "@/lib/db/schema";
+import { and, desc, eq } from "drizzle-orm";
+import { z } from "zod";
+
+export { renderTemplate, SUPPORTED_VARIABLES } from "./render";
+export type { TemplateVar, TemplateVars } from "./render";
+
+export const MAX_VERSIONS = 20;
+
+const templateInput = z.object({
+  repoId: z.number().int().positive(),
+  name: z.string().min(1),
+  content: z.string(),
+});
+export type TemplateInput = z.infer<typeof templateInput>;
+
+/** Active (latest) version of a named template for a repo. */
+export function getActiveTemplate(
+  repoId: number,
+  name: string,
+  db: DB = getDb(),
+): PromptTemplate | undefined {
+  return db
+    .select()
+    .from(promptTemplates)
+    .where(and(eq(promptTemplates.repoId, repoId), eq(promptTemplates.name, name)))
+    .orderBy(desc(promptTemplates.version))
+    .get();
+}
+
+export function listVersions(repoId: number, name: string, db: DB = getDb()): PromptTemplate[] {
+  return db
+    .select()
+    .from(promptTemplates)
+    .where(and(eq(promptTemplates.repoId, repoId), eq(promptTemplates.name, name)))
+    .orderBy(desc(promptTemplates.version))
+    .all();
+}
+
+/**
+ * Save a template version. The first save is version 1; each subsequent save
+ * appends a new version row and prunes anything beyond the newest MAX_VERSIONS.
+ */
+export function saveTemplate(input: TemplateInput, db: DB = getDb()): PromptTemplate {
+  const data = templateInput.parse(input);
+  const current = getActiveTemplate(data.repoId, data.name, db);
+  const nextVersion = (current?.version ?? 0) + 1;
+  const row = db
+    .insert(promptTemplates)
+    .values({
+      repoId: data.repoId,
+      name: data.name,
+      content: data.content,
+      version: nextVersion,
+      updatedAt: Math.floor(Date.now() / 1000),
+    })
+    .returning()
+    .get();
+
+  const versions = listVersions(data.repoId, data.name, db);
+  for (const old of versions.slice(MAX_VERSIONS)) {
+    db.delete(promptTemplates).where(eq(promptTemplates.id, old.id)).run();
+  }
+  return row;
+}
