@@ -18,10 +18,12 @@ once the repo is public.
 
 ## `release-please.yml` — Releases
 
-Turns Conventional Commits into release PRs. On every push to `master` (and via
-`workflow_dispatch`), [release-please][rp] maintains a release PR that bumps the
-version in `package.json`, updates `CHANGELOG.md`, and — once merged — creates
-the matching git tag and GitHub release.
+Turns Conventional Commits into release PRs. Releases are **manual only**: this
+workflow runs solely on `workflow_dispatch` (Actions tab or
+`gh workflow run release-please.yml`). When triggered, [release-please][rp]
+maintains a release PR that bumps the version in `package.json`, updates
+`CHANGELOG.md`, and — once merged — creates the matching git tag and GitHub
+release.
 
 Configuration:
 
