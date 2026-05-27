@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { listRepos, listReposWithStats } from "@/lib/db/queries";
 import { jobs } from "@/lib/db/schema";
+import { repoAutomation } from "@/lib/repos/automation";
 import { addRepo, removeRepo, updateRepo } from "@/lib/repos/service";
 
 let db: DB;
@@ -69,6 +70,51 @@ describe("repos service", () => {
     const updated = updateRepo(repo.id, { name: "bar", defaultModel: "claude-haiku-4-5" }, db);
     expect(updated.name).toBe("bar");
     expect(updated.defaultModel).toBe("claude-haiku-4-5");
+  });
+
+  it("defaults automation to off with safe label/author defaults", () => {
+    const repo = addRepo({ path: "/auto", name: "auto" }, db);
+    expect(repo.autoTriageEnabled).toBe(false);
+    expect(repo.autoProcessEnabled).toBe(false);
+    expect(repo.maxAttempts).toBe(3);
+    expect(repo.minAuthorAssociation).toBe("approved");
+    const cfg = repoAutomation(repo);
+    expect(cfg.readyLabels).toContain("ready");
+    expect(cfg.blockingLabels).toContain("blocked");
+    expect(cfg.autoLabelWhitelist).toContain("bug");
+    expect(cfg.priorityAuthors).toEqual([]);
+  });
+
+  it("updateRepo can enable automation and override label lists", () => {
+    const repo = addRepo({ path: "/auto2", name: "auto2" }, db);
+    const updated = updateRepo(
+      repo.id,
+      {
+        autoTriageEnabled: true,
+        autoProcessEnabled: true,
+        readyLabels: ["go"],
+        blockingLabels: ["hold"],
+        autoLabelWhitelist: ["bug", "ready"],
+        priorityAuthors: ["octocat"],
+        minAuthorAssociation: "any",
+        maxAttempts: 5,
+      },
+      db,
+    );
+    expect(updated.autoTriageEnabled).toBe(true);
+    expect(updated.autoProcessEnabled).toBe(true);
+    expect(updated.maxAttempts).toBe(5);
+    expect(updated.minAuthorAssociation).toBe("any");
+    const cfg = repoAutomation(updated);
+    expect(cfg.readyLabels).toEqual(["go"]);
+    expect(cfg.blockingLabels).toEqual(["hold"]);
+    expect(cfg.priorityAuthors).toEqual(["octocat"]);
+  });
+
+  it("rejects an unknown author-association value", () => {
+    expect(() =>
+      addRepo({ path: "/bad", name: "bad", minAuthorAssociation: "everyone" } as never, db),
+    ).toThrow();
   });
 
   it("removes a repo", () => {
