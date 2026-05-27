@@ -1,3 +1,4 @@
+import { registerAdr } from "@/lib/adr/service";
 import { type DB, createDb } from "@/lib/db/client";
 import { type Job, jobs } from "@/lib/db/schema";
 import type { Worktree } from "@/lib/git/worktree";
@@ -72,6 +73,28 @@ describe("runJob", () => {
     await runJob(job.id, deps as never);
     const prompt = (deps.runSession as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
     expect(prompt).toContain("DO ISSUE 1 ON ");
+  });
+
+  it("notifies on a merged outcome", async () => {
+    const removed = { v: false };
+    const notify = vi.fn(async () => {});
+    const deps = baseDeps(removed, { notify });
+    const job = createJob({ repoId, issueNumber: 1 }, db);
+    await runJob(job.id, deps as never);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Merged"));
+  });
+
+  it("blocks the merge and routes to needs_human when ADR gating finds pending ADRs", async () => {
+    const gatedRepo = addRepo({ path: "/g", name: "gated", adrGating: true }, db);
+    registerAdr({ repoId: gatedRepo.id, filePath: "/g/docs/adr/1.md", content: "# Decide" }, db);
+    const removed = { v: false };
+    const deps = baseDeps(removed);
+    const job = createJob({ repoId: gatedRepo.id, issueNumber: 1 }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("needs_human");
+    expect(result.errorMessage).toContain("pending ADR");
+    expect(deps.createPr).not.toHaveBeenCalled();
+    expect(removed.v).toBe(true);
   });
 
   it("marks needs_human and cleans up when the session exits non-zero", async () => {

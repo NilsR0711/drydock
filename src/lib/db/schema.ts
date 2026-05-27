@@ -11,6 +11,7 @@ export const repos = sqliteTable("repos", {
   needsHumanLabel: text("needs_human_label").notNull().default("drydock:needs-human"),
   defaultModel: text("default_model").notNull().default("claude-sonnet-4-5"),
   dailyCostLimitUsd: real("daily_cost_limit_usd").notNull().default(10),
+  adrGating: integer("adr_gating", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 

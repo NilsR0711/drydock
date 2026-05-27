@@ -1,9 +1,11 @@
+import { listAdrs } from "@/lib/adr/service";
 import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
 import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { GhClient } from "@/lib/github/gh";
 import { listIssues } from "@/lib/issues/service";
+import { notify } from "@/lib/notify/service";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
 import { ciBabysitter } from "./ci-babysitter";
@@ -31,13 +33,29 @@ export interface RunJobDeps {
     body: string;
   }) => Promise<number>;
   runBabysitter?: (job: Job, prNumber: number) => Promise<Job>;
+  notify?: (text: string) => Promise<void>;
 }
 
 /**
- * Run one job end-to-end. Worktree is always cleaned up. Any failure before the
- * PR exists routes the job to needs_human with the error recorded.
+ * Run one job end-to-end and notify on its terminal outcome. Worktree cleanup
+ * and state transitions live in runJobCore; this wrapper adds the side-channel
+ * notification once the final status is known.
  */
 export async function runJob(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
+  const db = deps.db ?? getDb();
+  const result = await runJobCore(jobId, deps);
+  const send = deps.notify ?? ((text: string) => notify(text, db));
+  if (result.status === "merged") {
+    await send(`✅ Merged: ${result.repoId}#${result.issueNumber} (PR #${result.prNumber}).`);
+  } else if (result.status === "needs_human") {
+    await send(
+      `⚠️ Needs human: ${result.repoId}#${result.issueNumber} — ${result.errorMessage ?? "review required"}.`,
+    );
+  }
+  return result;
+}
+
+async function runJobCore(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
   const db = deps.db ?? getDb();
   const job = getJob(jobId, db);
   if (!job) throw new Error(`job ${jobId} not found`);
@@ -76,6 +94,19 @@ export async function runJob(jobId: number, deps: RunJobDeps = {}): Promise<Job>
     const session = await runSession(getJob(job.id, db) as Job, prompt, wt.path);
     if (session.exitCode !== 0) {
       return transitionJob(job.id, "needs_human", { errorMessage: "claude exited non-zero" }, db);
+    }
+
+    // Per-repo ADR gate: hold the merge while ADRs await review (SPEC opt-in).
+    if (repo.adrGating) {
+      const pending = listAdrs("pending_review", db, repo.id);
+      if (pending.length > 0) {
+        return transitionJob(
+          job.id,
+          "needs_human",
+          { errorMessage: `Blocked by ${pending.length} pending ADR review(s).` },
+          db,
+        );
+      }
     }
 
     await worktrees.commitAndPush(wt, `Fix #${job.issueNumber}`);
