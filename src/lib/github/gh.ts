@@ -1,12 +1,34 @@
 import { z } from "zod";
 import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
 
-export const ghIssueSchema = z.object({
-  number: z.number(),
-  title: z.string(),
-  labels: z.array(z.object({ name: z.string() })).default([]),
-});
-export type GhIssue = z.infer<typeof ghIssueSchema>;
+export const ghIssueSchema = z
+  .object({
+    number: z.number(),
+    title: z.string(),
+    labels: z.array(z.object({ name: z.string() })).default([]),
+    author: z.object({ login: z.string() }).nullish(),
+    authorAssociation: z.string().nullish(),
+  })
+  .transform((d) => ({
+    number: d.number,
+    title: d.title,
+    labels: d.labels,
+    author: d.author?.login ?? null,
+    authorAssociation: d.authorAssociation ?? null,
+  }));
+
+/**
+ * A listed issue. `author`/`authorAssociation` are optional because only some
+ * code paths (and forges) populate them — auto-triage/processing read them for
+ * the public-repo author gate, while the queue path leaves them undefined.
+ */
+export interface GhIssue {
+  number: number;
+  title: string;
+  labels: { name: string }[];
+  author?: string | null;
+  authorAssociation?: string | null;
+}
 
 export const ghIssueDetailSchema = z.object({
   number: z.number(),
@@ -79,7 +101,16 @@ export class GhClient {
   async listAllIssues(): Promise<GhIssue[]> {
     const res = await this.run(
       "gh",
-      ["issue", "list", "--state", "open", "--json", "number,title,labels,state", "--limit", "200"],
+      [
+        "issue",
+        "list",
+        "--state",
+        "open",
+        "--json",
+        "number,title,labels,state,author,authorAssociation",
+        "--limit",
+        "200",
+      ],
       this.cwd,
     );
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue list failed");
