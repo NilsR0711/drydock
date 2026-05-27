@@ -2,16 +2,28 @@
 
 import { getRepo } from "@/lib/db/queries";
 import { GhClient } from "@/lib/github/gh";
-import { listIssues, reorderIssues, syncIssuesFromGh } from "@/lib/issues/service";
+import {
+  listIssues,
+  reorderIssues,
+  setQueueLabelLocal,
+  syncIssuesFromGh,
+} from "@/lib/issues/service";
 import { createJob } from "@/lib/orchestrator/jobs";
 import { revalidatePath } from "next/cache";
 
-/** Fetch issues from GitHub by the repo's queue label and cache them. */
+type GhFactory = (cwd: string) => GhClient;
+let makeGh: GhFactory = (cwd) => new GhClient(cwd);
+/** Test seam: override how GhClient instances are created. */
+export function __setGhFactory(factory: GhFactory) {
+  makeGh = factory;
+}
+
+/** Fetch all open issues from GitHub and cache them (backlog + queue). */
 export async function syncRepoIssuesAction(repoId: number) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  const gh = new GhClient(repo.path);
-  const fetched = await gh.listIssues(repo.queueLabel);
+  const gh = makeGh(repo.path);
+  const fetched = await gh.listAllIssues();
   syncIssuesFromGh(repoId, fetched);
   revalidatePath(`/repos/${repoId}`);
   return listIssues(repoId);
@@ -30,4 +42,82 @@ export async function startIssueAction(repoId: number, issueNumber: number) {
   const job = createJob({ repoId, issueNumber, model: repo.defaultModel });
   revalidatePath(`/repos/${repoId}`);
   return job;
+}
+
+/** Add the repo's queue label to an issue (GitHub + local cache). */
+export async function addToQueueAction(repoId: number, issueNumber: number) {
+  const repo = getRepo(repoId);
+  if (!repo) throw new Error(`repo ${repoId} not found`);
+  await makeGh(repo.path).addLabels(issueNumber, [repo.queueLabel]);
+  setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true);
+  revalidatePath(`/repos/${repoId}`);
+  return listIssues(repoId);
+}
+
+/** Remove the repo's queue label from an issue (GitHub + local cache). */
+export async function removeFromQueueAction(repoId: number, issueNumber: number) {
+  const repo = getRepo(repoId);
+  if (!repo) throw new Error(`repo ${repoId} not found`);
+  await makeGh(repo.path).removeLabels(issueNumber, [repo.queueLabel]);
+  setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, false);
+  revalidatePath(`/repos/${repoId}`);
+  return listIssues(repoId);
+}
+
+/** Full issue detail incl. body and comments, fetched live from GitHub. */
+export async function viewIssueAction(repoId: number, issueNumber: number) {
+  const repo = getRepo(repoId);
+  if (!repo) throw new Error(`repo ${repoId} not found`);
+  return makeGh(repo.path).viewIssue(issueNumber);
+}
+
+/** Edit issue title and/or body. */
+export async function editIssueAction(
+  repoId: number,
+  issueNumber: number,
+  patch: { title?: string; body?: string },
+) {
+  const repo = getRepo(repoId);
+  if (!repo) throw new Error(`repo ${repoId} not found`);
+  await makeGh(repo.path).editIssue(issueNumber, patch);
+  revalidatePath(`/repos/${repoId}`);
+}
+
+/** Post a comment on an issue. */
+export async function commentIssueAction(repoId: number, issueNumber: number, body: string) {
+  const repo = getRepo(repoId);
+  if (!repo) throw new Error(`repo ${repoId} not found`);
+  await makeGh(repo.path).commentIssue(issueNumber, body);
+}
+
+/** Add or remove labels on an issue (GitHub + local cache for the queue label). */
+export async function setIssueLabelsAction(
+  repoId: number,
+  issueNumber: number,
+  add: string[],
+  remove: string[],
+) {
+  const repo = getRepo(repoId);
+  if (!repo) throw new Error(`repo ${repoId} not found`);
+  const gh = makeGh(repo.path);
+  if (add.length) await gh.addLabels(issueNumber, add);
+  if (remove.length) await gh.removeLabels(issueNumber, remove);
+  if (add.includes(repo.queueLabel)) setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true);
+  if (remove.includes(repo.queueLabel))
+    setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, false);
+  revalidatePath(`/repos/${repoId}`);
+}
+
+/** Close or reopen an issue. */
+export async function setIssueStateAction(
+  repoId: number,
+  issueNumber: number,
+  state: "open" | "closed",
+) {
+  const repo = getRepo(repoId);
+  if (!repo) throw new Error(`repo ${repoId} not found`);
+  const gh = makeGh(repo.path);
+  if (state === "closed") await gh.closeIssue(issueNumber);
+  else await gh.reopenIssue(issueNumber);
+  revalidatePath(`/repos/${repoId}`);
 }
