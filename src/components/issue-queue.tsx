@@ -81,10 +81,10 @@ export function IssueQueue({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
-          Issue-Queue
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Issue queue
         </h2>
-        <span className="text-xs text-neutral-400">({issues.length})</span>
+        <span className="text-xs text-muted-foreground">({issues.length})</span>
         <Button
           size="sm"
           variant="outline"
@@ -92,21 +92,21 @@ export function IssueQueue({
           disabled={pending}
           onClick={manualSync}
         >
-          {pending ? "Sync…" : "Aktualisieren"}
+          {pending ? "Syncing…" : "Refresh"}
         </Button>
       </div>
 
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Suche nach Titel oder Label…"
-        className="w-full rounded-md border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+        placeholder="Search by title or label…"
+        className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
       />
 
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
       {filtered.length === 0 && (
-        <p className="text-sm text-neutral-500">
-          Keine Issues. „Aktualisieren" lädt gelabelte Issues von GitHub.
+        <p className="text-sm text-muted-foreground">
+          No issues. “Refresh” pulls labelled issues from GitHub.
         </p>
       )}
 
@@ -118,11 +118,11 @@ export function IssueQueue({
             onDragStart={() => setDragIndex(index)}
             onDragOver={(e) => e.preventDefault()}
             onDrop={() => onDrop(index)}
-            className={`issue-row flex items-center gap-3 rounded-lg border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-950 ${
+            className={`issue-row flex items-center gap-3 rounded-xl border border-card-border bg-card p-3 ${
               dragIndex === index ? "dragging" : ""
             }`}
           >
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-xs font-semibold text-white dark:bg-white dark:text-neutral-900">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
               {index + 1}
             </span>
             <div className="min-w-0 flex-1">
@@ -140,9 +140,9 @@ export function IssueQueue({
               disabled={pending}
               onClick={() => start(() => startIssueAction(repoId, issue.number).then(() => {}))}
             >
-              Jetzt starten
+              Start now
             </Button>
-            <span className="cursor-grab text-neutral-400" title="Zum Umsortieren ziehen">
+            <span className="cursor-grab text-muted-foreground" title="Drag to reorder">
               ⠿
             </span>
           </li>
