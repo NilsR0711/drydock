@@ -14,7 +14,7 @@ export default function CostsPage() {
     <div className="space-y-6">
       <div className="flex items-baseline gap-3">
         <h1 className="text-2xl font-bold">Costs</h1>
-        <span className="text-sm text-neutral-500">Total: ${total.toFixed(4)}</span>
+        <span className="text-sm text-muted-foreground">Total: ${total.toFixed(4)}</span>
       </div>
       <Card>
         <CardHeader>
@@ -22,7 +22,7 @@ export default function CostsPage() {
         </CardHeader>
         <CardContent>
           {daily.length === 0 ? (
-            <p className="text-sm text-neutral-500">No cost data yet.</p>
+            <p className="text-sm text-muted-foreground">No cost data yet.</p>
           ) : (
             <CostChart data={daily} />
           )}

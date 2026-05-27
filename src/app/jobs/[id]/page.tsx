@@ -1,3 +1,4 @@
+import { JobMetrics } from "@/components/job-metrics";
 import { LogViewer } from "@/components/log-viewer";
 import { Badge } from "@/components/ui/badge";
 import { getDb } from "@/lib/db/client";
@@ -21,14 +22,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         <h1 className="text-2xl font-bold">Job #{job.id}</h1>
         <Badge status={job.status}>{job.status}</Badge>
       </div>
-      <dl className="grid gap-1 text-sm">
-        <div>Issue: #{job.issueNumber}</div>
-        <div>Model: {job.model ?? "—"}</div>
-        <div>Cost: ${job.costUsd.toFixed(4)}</div>
-        <div>
-          Tokens: {job.totalInputTokens} in / {job.totalOutputTokens} out
-        </div>
-      </dl>
+      <JobMetrics
+        jobId={job.id}
+        issueNumber={job.issueNumber}
+        model={job.model}
+        initialCostUsd={job.costUsd}
+        inputTokens={job.totalInputTokens}
+        outputTokens={job.totalOutputTokens}
+      />
       <section>
         <h2 className="mb-2 font-semibold">Live log</h2>
         <LogViewer

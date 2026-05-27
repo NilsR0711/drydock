@@ -2,6 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
 import type { IssueDetail } from "@/lib/github/gh";
 import {
@@ -30,6 +31,7 @@ export function IssueDetailModal({
   const [comment, setComment] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [confirmClose, setConfirmClose] = useState(false);
   const [pending, start] = useTransition();
 
   useEffect(() => {
@@ -52,6 +54,15 @@ export function IssueDetailModal({
       .catch((e) => setError(e.message));
   }
 
+  function setState(next: "open" | "closed") {
+    if (!detail) return;
+    start(() => {
+      setIssueStateAction(repoId, detail.number, next)
+        .then(reload)
+        .catch((e) => setError(e.message));
+    });
+  }
+
   if (issueNumber === null) return null;
 
   return (
@@ -69,17 +80,7 @@ export function IssueDetailModal({
               variant="outline"
               className="ml-auto"
               disabled={pending}
-              onClick={() =>
-                start(() => {
-                  setIssueStateAction(
-                    repoId,
-                    detail.number,
-                    detail.state === "open" ? "closed" : "open",
-                  )
-                    .then(reload)
-                    .catch((e) => setError(e.message));
-                })
-              }
+              onClick={() => (detail.state === "open" ? setConfirmClose(true) : setState("open"))}
             >
               {detail.state === "open" ? "Close issue" : "Reopen issue"}
             </Button>
@@ -204,6 +205,18 @@ export function IssueDetailModal({
             </Button>
           </div>
         </div>
+      )}
+      {detail && (
+        <ConfirmDialog
+          open={confirmClose}
+          onOpenChange={setConfirmClose}
+          onConfirm={() => setState("closed")}
+          title="Close issue?"
+          description={`This closes #${detail.number} on GitHub.`}
+          confirmLabel="Close issue"
+          variant="destructive"
+          pending={pending}
+        />
       )}
     </Dialog>
   );

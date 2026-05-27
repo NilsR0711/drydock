@@ -1,8 +1,10 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { browseDirectoryAction } from "@/lib/fs/actions";
 import type { BrowseResult } from "@/lib/fs/browse";
+import { Check, Folder, FolderGit2, X } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 
 /**
@@ -28,35 +30,40 @@ export function DirectoryPicker({
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-800 dark:bg-neutral-950">
-        <div className="flex items-center justify-between border-b p-3">
-          <span className="font-semibold">Choose a folder</span>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            ✕
+    <Dialog open onClose={onClose}>
+      <div className="flex max-h-[70vh] flex-col">
+        <div className="flex items-center justify-between border-b border-card-border pb-3">
+          <span className="flex items-center gap-2 font-semibold">
+            <Folder className="h-4 w-4 text-muted-foreground" />
+            Choose a folder
+          </span>
+          <Button size="icon" variant="ghost" aria-label="Close" onClick={onClose}>
+            <X />
           </Button>
         </div>
 
-        <div className="border-b p-3">
-          <p className="truncate font-mono text-xs text-neutral-500" title={result?.path}>
+        <div className="border-b border-card-border py-3">
+          <p className="truncate font-mono text-xs text-muted-foreground" title={result?.path}>
             {result?.path ?? "…"}
           </p>
           {result?.isGitRepo && (
-            <span className="mt-1 inline-block rounded bg-green-100 px-1.5 text-xs text-green-800">
+            <span className="mt-1 inline-flex items-center gap-1 rounded bg-success-muted px-1.5 py-0.5 text-xs text-success">
+              <FolderGit2 className="h-3 w-3" />
               git repo
             </span>
           )}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto p-2">
+        <div className="min-h-0 flex-1 overflow-auto py-2">
           {result?.parent && (
             <button
               type="button"
               disabled={pending}
               onClick={() => go(result.parent ?? undefined)}
-              className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover-elevate"
             >
-              📁 ..
+              <Folder className="h-4 w-4 text-muted-foreground" />
+              ..
             </button>
           )}
           {result?.entries.map((e) => (
@@ -65,20 +72,27 @@ export function DirectoryPicker({
               type="button"
               disabled={pending}
               onClick={() => go(e.path)}
-              className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              className="flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-sm hover-elevate"
             >
-              <span>📁 {e.name}</span>
+              <span className="flex items-center gap-2">
+                {e.isGitRepo ? (
+                  <FolderGit2 className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <Folder className="h-4 w-4 text-muted-foreground" />
+                )}
+                {e.name}
+              </span>
               {e.isGitRepo && (
-                <span className="rounded bg-green-100 px-1 text-[10px] text-green-800">git</span>
+                <span className="rounded bg-success-muted px-1 text-[10px] text-success">git</span>
               )}
             </button>
           ))}
           {result && result.entries.length === 0 && (
-            <p className="px-2 py-1 text-xs text-neutral-500">No subfolders.</p>
+            <p className="px-2 py-1 text-xs text-muted-foreground">No subfolders.</p>
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t p-3">
+        <div className="flex items-center justify-end gap-2 border-t border-card-border pt-3">
           <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
           </Button>
@@ -87,10 +101,11 @@ export function DirectoryPicker({
             disabled={!result || pending}
             onClick={() => result && onSelect(result.path)}
           >
+            <Check />
             Use this folder
           </Button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

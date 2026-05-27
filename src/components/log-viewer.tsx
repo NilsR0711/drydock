@@ -38,13 +38,13 @@ export function LogViewer({ jobId, initial = [] }: { jobId: number; initial?: Lo
   }, [jobId]);
 
   return (
-    <div className="h-96 rounded border border-neutral-200 dark:border-neutral-800">
+    <div className="h-96 rounded border border-card-border">
       <Virtuoso
         data={lines}
         followOutput="smooth"
         itemContent={(_i, line) => (
           <div className="px-3 py-1 font-mono text-xs">
-            <span className="mr-2 text-neutral-500">{line.type}</span>
+            <span className="mr-2 text-muted-foreground">{line.type}</span>
             <span>
               {typeof line.payload === "string" ? line.payload : JSON.stringify(line.payload)}
             </span>

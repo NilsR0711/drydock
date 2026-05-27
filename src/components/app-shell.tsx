@@ -2,7 +2,7 @@
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/utils";
-import { Anchor } from "lucide-react";
+import { Anchor, PauseCircle } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -23,10 +23,12 @@ export function AppShell({
   children,
   adrPending = 0,
   needsHuman = 0,
+  paused = false,
 }: {
   children: React.ReactNode;
   adrPending?: number;
   needsHuman?: number;
+  paused?: boolean;
 }) {
   const pathname = usePathname();
   return (
@@ -68,7 +70,17 @@ export function AppShell({
               );
             })}
           </nav>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            {paused && (
+              <Link
+                href="/settings"
+                aria-label="Automation paused — open settings"
+                className="flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-muted px-2 py-1 text-xs font-medium text-warning"
+              >
+                <PauseCircle className="h-3.5 w-3.5" />
+                Paused
+              </Link>
+            )}
             <ThemeToggle />
           </div>
         </div>
