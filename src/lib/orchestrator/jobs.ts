@@ -1,6 +1,6 @@
 import { type DB, getDb } from "@/lib/db/client";
-import { type Job, jobEvents, jobs } from "@/lib/db/schema";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { type Job, issues, jobEvents, jobs } from "@/lib/db/schema";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { type JobStatus, assertTransition } from "./state-machine";
 
 export function createJob(
@@ -62,12 +62,17 @@ export function listJobsByStatus(statuses: JobStatus[], db: DB = getDb()): Job[]
   return db.select().from(jobs).where(inArray(jobs.status, statuses)).all();
 }
 
-/** Oldest queued job for a repo (driver loop picks this). */
+/**
+ * Next queued job for a repo. Ordered by the manual issue priority
+ * (issues.priority, lower = sooner); jobs without a cached issue row sort
+ * last, then by creation order as a stable tiebreak.
+ */
 export function nextQueuedJob(repoId: number, db: DB = getDb()): Job | undefined {
   return db
-    .select()
+    .select({ job: jobs })
     .from(jobs)
+    .leftJoin(issues, and(eq(issues.repoId, jobs.repoId), eq(issues.number, jobs.issueNumber)))
     .where(and(eq(jobs.repoId, repoId), eq(jobs.status, "queued")))
-    .orderBy(jobs.createdAt)
-    .get();
+    .orderBy(sql`COALESCE(${issues.priority}, 1e9)`, jobs.createdAt)
+    .get()?.job;
 }

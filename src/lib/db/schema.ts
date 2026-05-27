@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const repos = sqliteTable("repos", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -84,6 +84,26 @@ export const followupIssues = sqliteTable("followup_issues", {
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 
+export const issues = sqliteTable(
+  "issues",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repos.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(),
+    title: text("title").notNull(),
+    labels: text("labels").notNull().default("[]"),
+    state: text("state").notNull().default("open"),
+    priority: integer("priority").notNull().default(0),
+    syncedAt: integer("synced_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    repoNumberUnique: uniqueIndex("issues_repo_number_unique").on(t.repoId, t.number),
+    repoPriorityIdx: index("issues_repo_priority_idx").on(t.repoId, t.priority),
+  }),
+);
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -97,3 +117,5 @@ export type JobEvent = typeof jobEvents.$inferSelect;
 export type Adr = typeof adrs.$inferSelect;
 export type PromptTemplate = typeof promptTemplates.$inferSelect;
 export type FollowupIssue = typeof followupIssues.$inferSelect;
+export type Issue = typeof issues.$inferSelect;
+export type NewIssue = typeof issues.$inferInsert;

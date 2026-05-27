@@ -1,11 +1,12 @@
 "use client";
 
 import { DirectoryPicker } from "@/components/directory-picker";
-import { Badge } from "@/components/ui/badge";
+import { ModelSelect } from "@/components/model-select";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { RepoWithStats } from "@/lib/db/queries";
-import { addRepoAction, removeRepoAction, syncIssuesAction } from "@/lib/repos/actions";
+import { DEFAULT_MODEL } from "@/lib/models";
+import { addRepoAction, removeRepoAction } from "@/lib/repos/actions";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
@@ -28,35 +29,31 @@ export function RepoList({ repos }: { repos: RepoWithStats[] }) {
 function RepoCard({ repo }: { repo: RepoWithStats }) {
   const [pending, start] = useTransition();
   return (
-    <Card>
+    <Card className="transition-shadow hover:shadow-md">
       <CardHeader>
         <CardTitle>
           <Link href={`/repos/${repo.id}`} className="hover:underline">
             {repo.name}
           </Link>
         </CardTitle>
-        <p className="text-xs text-neutral-500">{repo.path}</p>
+        <p className="truncate text-xs text-neutral-500">{repo.path}</p>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="flex items-center gap-2 text-sm">
-          <span>Active: {repo.activeJobs}</span>
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {repo.recentJobs.map((j) => (
-            <Badge key={j.id} status={j.status}>
-              #{j.issueNumber} {j.status}
-            </Badge>
-          ))}
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full bg-neutral-200 px-2 py-0.5 dark:bg-neutral-700">
+            {repo.queuedCount} Queue
+          </span>
+          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-800 dark:bg-blue-900 dark:text-blue-100">
+            {repo.workingCount} läuft
+          </span>
+          <span className="rounded-full bg-green-100 px-2 py-0.5 text-green-800 dark:bg-green-900 dark:text-green-100">
+            {repo.mergedCount} erledigt
+          </span>
         </div>
         <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={pending}
-            onClick={() => start(() => syncIssuesAction(repo.id).then(() => {}))}
-          >
-            Sync issues
-          </Button>
+          <Link href={`/repos/${repo.id}`}>
+            <Button size="sm">Öffnen</Button>
+          </Link>
           <Button
             size="sm"
             variant="destructive"
@@ -80,6 +77,7 @@ function AddRepoForm({ onDone }: { onDone: () => void }) {
   const [pending, start] = useTransition();
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
+  const [model, setModel] = useState(DEFAULT_MODEL);
   const [picking, setPicking] = useState(false);
 
   return (
@@ -89,7 +87,7 @@ function AddRepoForm({ onDone }: { onDone: () => void }) {
           className="grid gap-2 sm:grid-cols-2"
           action={() => {
             start(async () => {
-              await addRepoAction({ path, name });
+              await addRepoAction({ path, name, defaultModel: model });
               onDone();
             });
           }}
@@ -99,7 +97,7 @@ function AddRepoForm({ onDone }: { onDone: () => void }) {
             onChange={(e) => setName(e.target.value)}
             placeholder="Name"
             required
-            className="rounded border px-2 py-1 text-sm"
+            className="rounded border px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-950"
           />
           <div className="flex gap-2">
             <input
@@ -107,12 +105,16 @@ function AddRepoForm({ onDone }: { onDone: () => void }) {
               onChange={(e) => setPath(e.target.value)}
               placeholder="/abs/path/to/repo"
               required
-              className="flex-1 rounded border px-2 py-1 text-sm"
+              className="flex-1 rounded border px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-950"
             />
             <Button type="button" variant="outline" size="sm" onClick={() => setPicking(true)}>
               Browse…
             </Button>
           </div>
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <span className="text-neutral-500">Modell:</span>
+            <ModelSelect value={model} onChange={setModel} />
+          </label>
           <Button type="submit" disabled={pending || !path} className="sm:col-span-2">
             Save
           </Button>
