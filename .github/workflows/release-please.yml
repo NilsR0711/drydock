@@ -1,13 +1,14 @@
 name: Release Please
 
+# Releases are cut manually only: trigger this workflow from the Actions tab
+# (or `gh workflow run release-please.yml`) to create/update the release PR.
+# Merging that PR cuts the tag and GitHub release.
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
 
 # Only one release run at a time; never cancel an in-flight release.
 concurrency:
-  group: release-please-${{ github.ref }}
+  group: release-please
   cancel-in-progress: false
 
 permissions:
