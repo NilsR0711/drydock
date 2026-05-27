@@ -1,5 +1,5 @@
 import { type DB, createDb } from "@/lib/db/client";
-import { costByModel, dailyCosts, topJobs } from "@/lib/db/cost-queries";
+import { costByModel, dailyCosts, todayCost, topJobs } from "@/lib/db/cost-queries";
 import { jobs } from "@/lib/db/schema";
 import { addRepo } from "@/lib/repos/service";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -54,5 +54,21 @@ describe("cost queries", () => {
     const top = topJobs(10, db);
     expect(top[0]?.costUsd).toBeCloseTo(0.05);
     expect(top).toHaveLength(2);
+  });
+
+  it("todayCost filters by repo when given a repoId", () => {
+    const b = addRepo({ path: "/b", name: "b" }, db).id;
+    const now = Math.floor(Date.now() / 1000);
+    db.insert(jobs).values({ repoId: b, issueNumber: 9, startedAt: now, costUsd: 1 }).run();
+    expect(todayCost(db, repoId)).toBeCloseTo(0.07);
+    expect(todayCost(db, b)).toBeCloseTo(1);
+    expect(todayCost(db)).toBeCloseTo(1.07);
+  });
+
+  it("dailyCosts filters by repo", () => {
+    const b = addRepo({ path: "/b2", name: "b2" }, db).id;
+    const now = Math.floor(Date.now() / 1000);
+    db.insert(jobs).values({ repoId: b, issueNumber: 9, startedAt: now, costUsd: 1 }).run();
+    expect(dailyCosts(db, repoId)[0]?.costUsd).toBeCloseTo(0.07);
   });
 });
