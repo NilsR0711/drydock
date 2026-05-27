@@ -4,6 +4,9 @@ import { type Issue, type Job, type Repo, issues, jobs, repos } from "./schema";
 
 export interface RepoWithStats extends Repo {
   activeJobs: number;
+  queuedCount: number;
+  workingCount: number;
+  mergedCount: number;
   recentJobs: Job[];
 }
 
@@ -23,10 +26,16 @@ export function listReposWithStats(db: DB = getDb()): RepoWithStats[] {
       .where(eq(jobs.repoId, repo.id))
       .orderBy(desc(jobs.createdAt))
       .all();
-    const active = repoJobs.filter((j) =>
-      ["queued", "working", "ci_running", "retrying"].includes(j.status),
-    ).length;
-    return { ...repo, activeJobs: active, recentJobs: repoJobs.slice(0, 5) };
+    const count = (statuses: string[]) =>
+      repoJobs.filter((j) => statuses.includes(j.status)).length;
+    return {
+      ...repo,
+      activeJobs: count(["queued", "working", "ci_running", "retrying"]),
+      queuedCount: count(["queued"]),
+      workingCount: count(["working", "ci_running", "retrying"]),
+      mergedCount: count(["merged"]),
+      recentJobs: repoJobs.slice(0, 5),
+    };
   });
 }
 
