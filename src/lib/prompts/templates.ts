@@ -32,7 +32,9 @@ export function getActiveTemplate(
 
 /** Active repo template content, or the code-level default for that name. */
 export function resolveTemplateContent(repoId: number, name: string, db: DB = getDb()): string {
-  return getActiveTemplate(repoId, name, db)?.content ?? DEFAULT_TEMPLATES[name as TemplateName] ?? "";
+  return (
+    getActiveTemplate(repoId, name, db)?.content ?? DEFAULT_TEMPLATES[name as TemplateName] ?? ""
+  );
 }
 
 export function listVersions(repoId: number, name: string, db: DB = getDb()): PromptTemplate[] {
