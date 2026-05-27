@@ -1,32 +1,246 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CommandResult } from "@/lib/exec/runner";
+import type { CommandResult, CommandRunner } from "@/lib/exec/runner";
+import { EtagCache } from "@/lib/github/etag-cache";
 import { GhClient, GhError } from "@/lib/github/gh";
+import { withPriority } from "@/lib/github/priority";
+import { RateLimitError, RateLimitGovernor } from "@/lib/github/rate-limit";
 
 function fakeRunner(result: Partial<CommandResult>) {
-  return vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, ...result }));
+  const impl: CommandRunner = async () => ({ stdout: "", stderr: "", exitCode: 0, ...result });
+  return vi.fn(impl);
+}
+
+/** Build a `gh api --include` stdout string from status, headers, and body. */
+function includeResponse(opts: {
+  status: number;
+  statusText?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}): string {
+  const head = [`HTTP/2.0 ${opts.status} ${opts.statusText ?? "OK"}`];
+  for (const [k, v] of Object.entries(opts.headers ?? {})) head.push(`${k}: ${v}`);
+  return `${head.join("\r\n")}\r\n\r\n${opts.body ?? ""}`;
+}
+
+/** A REST `/issues` item as returned by `gh api`. */
+function restIssue(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    number: 7,
+    title: "Fix bug",
+    labels: [{ name: "drydock:queue" }],
+    user: { login: "octocat" },
+    author_association: "MEMBER",
+    ...over,
+  };
 }
 
 describe("GhClient.listIssues", () => {
-  it("parses issue JSON", async () => {
+  it("fetches the labelled issues via a conditional gh api request", async () => {
     const runner = fakeRunner({
-      stdout: JSON.stringify([
-        { number: 7, title: "Fix bug", labels: [{ name: "drydock:queue" }] },
-      ]),
+      stdout: includeResponse({ status: 200, body: JSON.stringify([restIssue()]) }),
     });
     const gh = new GhClient("/repo", runner);
     const issues = await gh.listIssues("drydock:queue");
     expect(issues).toHaveLength(1);
     expect(issues[0]?.number).toBe(7);
-    expect(runner).toHaveBeenCalledWith(
-      "gh",
-      expect.arrayContaining(["issue", "list", "--label", "drydock:queue"]),
-      "/repo",
-    );
+    const [cmd, args, cwd] = runner.mock.calls[0] as [string, string[], string];
+    expect(cmd).toBe("gh");
+    expect(args[0]).toBe("api");
+    expect(args).toContain("--include");
+    expect(args[1]).toContain("/issues?");
+    expect(args[1]).toContain("labels=drydock%3Aqueue");
+    expect(cwd).toBe("/repo");
   });
 
-  it("throws on non-zero exit", async () => {
-    const gh = new GhClient("/repo", fakeRunner({ exitCode: 1, stderr: "boom" }));
+  it("filters out pull requests returned by the REST issues endpoint", async () => {
+    const runner = fakeRunner({
+      stdout: includeResponse({
+        status: 200,
+        body: JSON.stringify([
+          restIssue({ number: 7 }),
+          restIssue({ number: 8, pull_request: {} }),
+        ]),
+      }),
+    });
+    const gh = new GhClient("/repo", runner);
+    const issues = await gh.listIssues("drydock:queue");
+    expect(issues.map((i) => i.number)).toEqual([7]);
+  });
+
+  it("throws on an unexpected non-2xx status", async () => {
+    const gh = new GhClient(
+      "/repo",
+      fakeRunner({ exitCode: 1, stdout: includeResponse({ status: 500, statusText: "Boom" }) }),
+    );
     await expect(gh.listIssues("x")).rejects.toBeInstanceOf(GhError);
+  });
+});
+
+describe("GhClient rate-limit budgeting", () => {
+  function seededGovernor(remaining: number, limit = 5000) {
+    const gov = new RateLimitGovernor({ now: () => 1_000_000 });
+    gov.observe("core", { remaining, limit, reset: 2000 }); // resets far in the future
+    return gov;
+  }
+
+  it("gates a low-priority list fetch below the reserve fraction", async () => {
+    const runner = fakeRunner({ stdout: includeResponse({ status: 200, body: "[]" }) });
+    const gh = new GhClient("/repo", runner, seededGovernor(1000)); // 20% < 30% reserve
+    await expect(withPriority("low", () => gh.listAllIssues())).rejects.toBeInstanceOf(
+      RateLimitError,
+    );
+    expect(runner).not.toHaveBeenCalled(); // gated before any gh process runs
+  });
+
+  it("lets a high-priority list fetch through below the reserve fraction", async () => {
+    const runner = fakeRunner({ stdout: includeResponse({ status: 200, body: "[]" }) });
+    const gh = new GhClient("/repo", runner, seededGovernor(1000)); // 20%
+    await expect(gh.listAllIssues()).resolves.toEqual([]); // default priority is high
+    expect(runner).toHaveBeenCalledOnce();
+  });
+
+  it("gates every priority below the hard floor", async () => {
+    const runner = fakeRunner({ stdout: includeResponse({ status: 200, body: "[]" }) });
+    const gh = new GhClient("/repo", runner, seededGovernor(200)); // 4% < 5% floor
+    await expect(gh.listAllIssues()).rejects.toBeInstanceOf(RateLimitError); // high gated too
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("also gates write requests below the hard floor", async () => {
+    const runner = fakeRunner({});
+    const gh = new GhClient("/repo", runner, seededGovernor(200));
+    await expect(gh.addLabels(7, ["x"])).rejects.toBeInstanceOf(RateLimitError);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("updates the budget from response headers so later calls can gate", async () => {
+    const gov = new RateLimitGovernor({ now: () => 1_000_000 });
+    const runner = fakeRunner({
+      stdout: includeResponse({
+        status: 200,
+        headers: {
+          "x-ratelimit-limit": "5000",
+          "x-ratelimit-remaining": "1000", // 20%
+          "x-ratelimit-reset": "2000",
+          "x-ratelimit-resource": "core",
+        },
+        body: "[]",
+      }),
+    });
+    const gh = new GhClient("/repo", runner, gov);
+    await gh.listAllIssues(); // observes 20% remaining
+    // A subsequent low-priority request is now gated by the observed budget.
+    expect(gov.decide("core", "low").allowed).toBe(false);
+  });
+
+  it("backs off after a 429 until the reset window", async () => {
+    const gov = new RateLimitGovernor({ now: () => 1_000_000 });
+    const runner = fakeRunner({
+      exitCode: 1,
+      stdout: includeResponse({
+        status: 429,
+        statusText: "Too Many Requests",
+        headers: { "x-ratelimit-reset": "1030" }, // 30s out
+      }),
+    });
+    const gh = new GhClient("/repo", runner, gov);
+    await expect(gh.listAllIssues()).rejects.toBeInstanceOf(GhError);
+    const d = gov.decide("core", "high");
+    expect(d.allowed).toBe(false);
+    expect(d.allowed === false && d.reason).toBe("limited");
+    expect(d.allowed === false && d.retryAfterMs).toBe(30_000);
+  });
+
+  it("backs off when a write hits a rate limit reported on stderr", async () => {
+    const gov = new RateLimitGovernor({ now: () => 1_000_000 });
+    const runner = fakeRunner({ exitCode: 1, stderr: "gh: API rate limit exceeded for user" });
+    const gh = new GhClient("/repo", runner, gov);
+    await expect(gh.addLabels(7, ["x"])).rejects.toBeInstanceOf(GhError);
+    expect(gov.decide("core", "high").allowed).toBe(false);
+  });
+});
+
+describe("GhClient ETag conditional polling", () => {
+  it("sends If-None-Match and reuses the cached body on a 304 without spending budget", async () => {
+    const cache = new EtagCache();
+    const gov = new RateLimitGovernor();
+    const first = fakeRunner({
+      stdout: includeResponse({
+        status: 200,
+        headers: { etag: '"v1"' },
+        body: JSON.stringify([restIssue({ number: 7 })]),
+      }),
+    });
+    const gh1 = new GhClient("/repo", first, gov, cache);
+    const a = await gh1.listAllIssues();
+    expect(a.map((i) => i.number)).toEqual([7]);
+
+    const second = fakeRunner({ exitCode: 0, stdout: includeResponse({ status: 304, body: "" }) });
+    const gh2 = new GhClient("/repo", second, gov, cache);
+    const b = await gh2.listAllIssues();
+    expect(b.map((i) => i.number)).toEqual([7]); // served from cache
+    const [, args] = second.mock.calls[0] as [string, string[]];
+    expect(args).toContain("-H");
+    expect(args).toContain('If-None-Match: "v1"');
+  });
+
+  it("keys the ETag cache per repository to avoid cross-repo collisions", async () => {
+    const cache = new EtagCache();
+    const gov = new RateLimitGovernor();
+    const runnerA = fakeRunner({
+      stdout: includeResponse({
+        status: 200,
+        headers: { etag: '"a"' },
+        body: JSON.stringify([restIssue({ number: 1 })]),
+      }),
+    });
+    await new GhClient("/repoA", runnerA, gov, cache).listAllIssues();
+    // A different repo with no cached etag must not send If-None-Match.
+    const runnerB = fakeRunner({
+      stdout: includeResponse({ status: 200, body: JSON.stringify([restIssue({ number: 2 })]) }),
+    });
+    await new GhClient("/repoB", runnerB, gov, cache).listAllIssues();
+    const [, argsB] = runnerB.mock.calls[0] as [string, string[]];
+    expect(argsB).not.toContain("-H");
+  });
+});
+
+describe("GhClient.refreshRateLimit", () => {
+  it("seeds the governor from the free rate_limit endpoint", async () => {
+    const gov = new RateLimitGovernor({ now: () => 1_000_000 });
+    const runner = fakeRunner({
+      stdout: JSON.stringify({
+        resources: {
+          core: { limit: 5000, remaining: 1000, reset: 2000 },
+          search: { limit: 30, remaining: 30, reset: 2000 },
+          graphql: { limit: 5000, remaining: 5000, reset: 2000 },
+        },
+      }),
+    });
+    const gh = new GhClient("/repo", runner, gov);
+    await gh.refreshRateLimit();
+    expect(runner).toHaveBeenCalledWith("gh", ["api", "rate_limit"], "/repo");
+    expect(gov.snapshot("core")).toEqual({ limit: 5000, remaining: 1000, reset: 2000 });
+    expect(gov.decide("core", "low").allowed).toBe(false); // 20% < reserve
+  });
+
+  it("never gates the rate_limit probe itself, even below the floor", async () => {
+    const gov = new RateLimitGovernor({ now: () => 1_000_000 });
+    gov.observe("core", { remaining: 1, limit: 5000, reset: 2000 }); // below floor
+    const runner = fakeRunner({
+      stdout: JSON.stringify({
+        resources: { core: { limit: 5000, remaining: 4000, reset: 3000 } },
+      }),
+    });
+    const gh = new GhClient("/repo", runner, gov);
+    await expect(gh.refreshRateLimit()).resolves.toBeUndefined();
+    expect(runner).toHaveBeenCalledOnce();
+    expect(gov.snapshot("core")?.remaining).toBe(4000);
+  });
+
+  it("tolerates a failed probe without throwing", async () => {
+    const gh = new GhClient("/repo", fakeRunner({ exitCode: 1, stderr: "boom" }));
+    await expect(gh.refreshRateLimit()).resolves.toBeUndefined();
   });
 });
 
@@ -165,33 +379,27 @@ describe("GhClient.failedRunLog", () => {
 describe("GhClient issue read/write", () => {
   it("listAllIssues fetches open issues with author metadata", async () => {
     const runner = fakeRunner({
-      stdout: JSON.stringify([
-        {
-          number: 1,
-          title: "A",
-          labels: [],
-          state: "open",
-          author: { login: "octocat" },
-          authorAssociation: "MEMBER",
-        },
-      ]),
+      stdout: includeResponse({
+        status: 200,
+        body: JSON.stringify([
+          {
+            number: 1,
+            title: "A",
+            labels: [],
+            user: { login: "octocat" },
+            author_association: "MEMBER",
+          },
+        ]),
+      }),
     });
     const gh = new GhClient("/repo", runner);
     const issues = await gh.listAllIssues();
-    expect(runner).toHaveBeenCalledWith(
-      "gh",
-      [
-        "issue",
-        "list",
-        "--state",
-        "open",
-        "--json",
-        "number,title,labels,state,author,authorAssociation",
-        "--limit",
-        "200",
-      ],
-      "/repo",
-    );
+    const [cmd, args] = runner.mock.calls[0] as [string, string[]];
+    expect(cmd).toBe("gh");
+    expect(args[0]).toBe("api");
+    expect(args).toContain("--include");
+    expect(args[1]).toContain("/issues?");
+    expect(args[1]).toContain("state=open");
     expect(issues[0]).toMatchObject({
       number: 1,
       title: "A",
@@ -202,7 +410,10 @@ describe("GhClient issue read/write", () => {
 
   it("listAllIssues tolerates issues without author metadata", async () => {
     const runner = fakeRunner({
-      stdout: JSON.stringify([{ number: 2, title: "B", labels: [], state: "open" }]),
+      stdout: includeResponse({
+        status: 200,
+        body: JSON.stringify([{ number: 2, title: "B", labels: [] }]),
+      }),
     });
     const gh = new GhClient("/repo", runner);
     const issues = await gh.listAllIssues();

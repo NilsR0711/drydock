@@ -132,6 +132,25 @@ export class RateLimitGovernor {
 export const sharedGovernor = new RateLimitGovernor();
 
 /**
+ * Thrown when the governor gates a request before it is sent: a `low`-priority
+ * request below the reserve fraction, any request below the hard floor, or any
+ * request during a 429 backoff window. `retryAfterMs` is how long until the
+ * budget is expected to recover.
+ */
+export class RateLimitError extends Error {
+  constructor(
+    readonly reason: "reserve" | "floor" | "limited",
+    readonly resource: RateResource,
+    readonly retryAfterMs: number,
+  ) {
+    super(
+      `github ${resource} rate limit gated (${reason}); retry in ~${Math.ceil(retryAfterMs / 1000)}s`,
+    );
+    this.name = "RateLimitError";
+  }
+}
+
+/**
  * Derive a per-resource snapshot from response headers (case-insensitive keys
  * are expected to be lower-cased by the caller). Returns null when the
  * rate-limit headers are absent or name an unknown resource.

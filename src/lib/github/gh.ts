@@ -1,21 +1,47 @@
 import { z } from "zod";
-import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
+import { type CommandResult, type CommandRunner, spawnRunner } from "@/lib/exec/runner";
+import { type EtagCache, sharedEtagCache } from "./etag-cache";
+import { parseIncludeResponse } from "./gh-response";
+import { currentPriority } from "./priority";
+import {
+  parseRateLimitHeaders,
+  RateLimitError,
+  type RateLimitGovernor,
+  type RateResource,
+  sharedGovernor,
+} from "./rate-limit";
 
-export const ghIssueSchema = z
+/**
+ * REST `/issues` item (as returned by `gh api`). The REST endpoint includes
+ * pull requests in the issue list (they carry a `pull_request` field), so the
+ * transform flags them for the caller to filter out. Field names differ from
+ * the CLI's `--json` output (`user`/`author_association` vs `author`).
+ */
+const ghRestIssueSchema = z
   .object({
     number: z.number(),
     title: z.string(),
     labels: z.array(z.object({ name: z.string() })).default([]),
-    author: z.object({ login: z.string() }).nullish(),
-    authorAssociation: z.string().nullish(),
+    user: z.object({ login: z.string() }).nullish(),
+    author_association: z.string().nullish(),
+    pull_request: z.unknown().optional(),
   })
   .transform((d) => ({
     number: d.number,
     title: d.title,
     labels: d.labels,
-    author: d.author?.login ?? null,
-    authorAssociation: d.authorAssociation ?? null,
+    author: d.user?.login ?? null,
+    authorAssociation: d.author_association ?? null,
+    isPullRequest: d.pull_request !== undefined,
   }));
+
+/** Rate-limit snapshot shape from the free `gh api rate_limit` endpoint. */
+const rateLimitProbeSchema = z.object({
+  resources: z.record(
+    z.string(),
+    z.object({ limit: z.number(), remaining: z.number(), reset: z.number() }),
+  ),
+});
 
 /**
  * A listed issue. `author`/`authorAssociation` are optional because only some
@@ -79,52 +105,127 @@ function flagEq(flag: string, value: string): string {
   return `${flag}=${value}`;
 }
 
-/** Thin wrapper around the `gh` CLI; runner is injectable for tests. */
+/** A 429 (or a primary-limit 403 with `remaining: 0`) is a hard rate-limit. */
+function isRateLimitStatus(status: number | null, headers: Record<string, string>): boolean {
+  return status === 429 || (status === 403 && headers["x-ratelimit-remaining"] === "0");
+}
+
+/**
+ * Thin wrapper around the `gh` CLI; runner is injectable for tests.
+ *
+ * Every request is metered by a shared {@link RateLimitGovernor}: it is gated
+ * before spawning when the budget is tight (background work yields first, and
+ * nothing drains the budget below the hard floor), the budget is refreshed from
+ * observed response headers, and an actual 429 triggers a backoff. List fetches
+ * additionally use conditional requests (ETag) so unchanged lists cost nothing.
+ */
 export class GhClient {
   constructor(
     private readonly cwd: string,
     private readonly run: CommandRunner = spawnRunner,
+    private readonly governor: RateLimitGovernor = sharedGovernor,
+    private readonly etags: EtagCache = sharedEtagCache,
   ) {}
 
-  async listIssues(label: string): Promise<GhIssue[]> {
-    const res = await this.run(
-      "gh",
-      ["issue", "list", "--label", label, "--json", "number,title,labels", "--limit", "100"],
-      this.cwd,
-    );
-    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue list failed");
-    const parsed = z.array(ghIssueSchema).safeParse(JSON.parse(res.stdout || "[]"));
+  /** Throw if the governor gates a request of the current priority. */
+  private gate(resource: RateResource = "core"): void {
+    const decision = this.governor.decide(resource, currentPriority());
+    if (!decision.allowed) {
+      throw new RateLimitError(decision.reason, resource, decision.retryAfterMs);
+    }
+  }
+
+  /**
+   * Gate, run a `gh` command, and note a 429 reported on stderr. Used by every
+   * non-list, non-probe call (list fetches use {@link conditionalList} so they
+   * can also read rate-limit/ETag headers).
+   */
+  private async exec(args: string[], resource: RateResource = "core"): Promise<CommandResult> {
+    this.gate(resource);
+    const res = await this.run("gh", args, this.cwd);
+    if (res.exitCode !== 0 && /rate limit|429 too many/i.test(res.stderr)) {
+      this.governor.note429(resource);
+    }
+    return res;
+  }
+
+  /**
+   * Refresh the governor from GitHub's `/rate_limit` endpoint, which does not
+   * itself count against any budget. Best-effort: a failed probe is ignored so
+   * a transient error never blocks a sweep. Never gated (it is what unblocks).
+   */
+  async refreshRateLimit(): Promise<void> {
+    const res = await this.run("gh", ["api", "rate_limit"], this.cwd);
+    if (res.exitCode !== 0) return;
+    let parsed: z.infer<typeof rateLimitProbeSchema>;
+    try {
+      parsed = rateLimitProbeSchema.parse(JSON.parse(res.stdout || "{}"));
+    } catch {
+      return;
+    }
+    for (const resource of ["core", "graphql", "search"] as const) {
+      const r = parsed.resources[resource];
+      if (r) this.governor.observe(resource, r);
+    }
+  }
+
+  /**
+   * Conditional GET of an issues list via `gh api --include`. Sends the cached
+   * ETag as `If-None-Match`; on a 304 the unchanged body is reused (no budget
+   * spent). Observes rate-limit headers, backs off on a 429, and caches the
+   * ETag of a fresh 200. Pull requests are filtered out.
+   */
+  private async conditionalList(cacheKey: string, query: string): Promise<GhIssue[]> {
+    this.gate("core");
+    const prior = this.etags.get(cacheKey);
+    const args = ["api", `repos/{owner}/{repo}/issues?${query}`, "--include"];
+    if (prior) args.push("-H", `If-None-Match: ${prior.etag}`);
+
+    const res = await this.run("gh", args, this.cwd);
+    const response = parseIncludeResponse(res.stdout);
+
+    const rl = parseRateLimitHeaders(response.headers);
+    if (rl) this.governor.observe(rl.resource, rl.snapshot);
+
+    let body: string;
+    if (response.status === 304 && prior) {
+      body = prior.body; // unchanged list: no budget consumed
+    } else if (isRateLimitStatus(response.status, response.headers)) {
+      const reset = Number(response.headers["x-ratelimit-reset"]);
+      this.governor.note429("core", Number.isFinite(reset) ? reset : undefined);
+      throw new GhError(`gh api rate limited (status ${response.status})`);
+    } else if (response.status === 200) {
+      const etag = response.headers.etag;
+      if (etag) this.etags.set(cacheKey, etag, response.body);
+      body = response.body;
+    } else {
+      throw new GhError(res.stderr || `gh api failed (status ${response.status ?? "unknown"})`);
+    }
+
+    const parsed = z.array(ghRestIssueSchema).safeParse(JSON.parse(body || "[]"));
     if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
-    return parsed.data;
+    return parsed.data
+      .filter((i) => !i.isPullRequest)
+      .map(({ isPullRequest: _pr, ...rest }) => rest);
+  }
+
+  async listIssues(label: string): Promise<GhIssue[]> {
+    const query = `state=open&per_page=100&labels=${encodeURIComponent(label)}`;
+    return this.conditionalList(`${this.cwd}::label:${label}`, query);
   }
 
   async listAllIssues(): Promise<GhIssue[]> {
-    const res = await this.run(
-      "gh",
-      [
-        "issue",
-        "list",
-        "--state",
-        "open",
-        "--json",
-        "number,title,labels,state,author,authorAssociation",
-        "--limit",
-        "200",
-      ],
-      this.cwd,
-    );
-    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue list failed");
-    const parsed = z.array(ghIssueSchema).safeParse(JSON.parse(res.stdout || "[]"));
-    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
-    return parsed.data;
+    return this.conditionalList(`${this.cwd}::all`, "state=open&per_page=100");
   }
 
   async viewIssue(issueNumber: number): Promise<IssueDetail> {
-    const res = await this.run(
-      "gh",
-      ["issue", "view", String(issueNumber), "--json", "number,title,body,state,labels,comments"],
-      this.cwd,
-    );
+    const res = await this.exec([
+      "issue",
+      "view",
+      String(issueNumber),
+      "--json",
+      "number,title,body,state,labels,comments",
+    ]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue view failed");
     const parsed = ghIssueDetailSchema.safeParse(JSON.parse(res.stdout || "{}"));
     if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
@@ -149,7 +250,7 @@ export class GhClient {
     if (patch.body !== undefined) args.push(flagEq("--body", patch.body));
     // Nothing to change: avoid a malformed `gh issue edit <n>` call that errors.
     if (args.length === 3) return;
-    const res = await this.run("gh", args, this.cwd);
+    const res = await this.exec(args);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue edit failed");
   }
 
@@ -162,11 +263,7 @@ export class GhClient {
     name: string,
     opts: { color?: string; description?: string } = {},
   ): Promise<void> {
-    const list = await this.run(
-      "gh",
-      ["label", "list", "--json", "name", "--limit", "200"],
-      this.cwd,
-    );
+    const list = await this.exec(["label", "list", "--json", "name", "--limit", "200"]);
     const text = list.stdout.trim();
     if (list.exitCode === 0 && text) {
       try {
@@ -179,7 +276,7 @@ export class GhClient {
     const args = ["label", "create", name];
     if (opts.color) args.push("--color", opts.color);
     if (opts.description) args.push("--description", opts.description);
-    const res = await this.run("gh", args, this.cwd);
+    const res = await this.exec(args);
     // A concurrent create can win the race; treat "already exists" as success.
     if (res.exitCode !== 0 && !/already exists/i.test(res.stderr)) {
       throw new GhError(res.stderr || "gh label create failed");
@@ -187,39 +284,37 @@ export class GhClient {
   }
 
   async addLabels(issueNumber: number, labels: string[]): Promise<void> {
-    const res = await this.run(
-      "gh",
-      ["issue", "edit", String(issueNumber), flagEq("--add-label", labels.join(","))],
-      this.cwd,
-    );
+    const res = await this.exec([
+      "issue",
+      "edit",
+      String(issueNumber),
+      flagEq("--add-label", labels.join(",")),
+    ]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue edit failed");
   }
 
   async removeLabels(issueNumber: number, labels: string[]): Promise<void> {
-    const res = await this.run(
-      "gh",
-      ["issue", "edit", String(issueNumber), flagEq("--remove-label", labels.join(","))],
-      this.cwd,
-    );
+    const res = await this.exec([
+      "issue",
+      "edit",
+      String(issueNumber),
+      flagEq("--remove-label", labels.join(",")),
+    ]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue edit failed");
   }
 
   async closeIssue(issueNumber: number): Promise<void> {
-    const res = await this.run("gh", ["issue", "close", String(issueNumber)], this.cwd);
+    const res = await this.exec(["issue", "close", String(issueNumber)]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue close failed");
   }
 
   async reopenIssue(issueNumber: number): Promise<void> {
-    const res = await this.run("gh", ["issue", "reopen", String(issueNumber)], this.cwd);
+    const res = await this.exec(["issue", "reopen", String(issueNumber)]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue reopen failed");
   }
 
   async prChecks(prNumber: number): Promise<PrCheck[]> {
-    const res = await this.run(
-      "gh",
-      ["pr", "checks", String(prNumber), "--json", "name,state,bucket"],
-      this.cwd,
-    );
+    const res = await this.exec(["pr", "checks", String(prNumber), "--json", "name,state,bucket"]);
     // `gh pr checks` exits non-zero when checks fail; still emits JSON.
     const text = res.stdout.trim();
     if (!text) {
@@ -232,11 +327,7 @@ export class GhClient {
   }
 
   async prHeadSha(prNumber: number): Promise<string> {
-    const res = await this.run(
-      "gh",
-      ["pr", "view", String(prNumber), "--json", "headRefOid"],
-      this.cwd,
-    );
+    const res = await this.exec(["pr", "view", String(prNumber), "--json", "headRefOid"]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr view failed");
     const parsed = z.object({ headRefOid: z.string() }).safeParse(JSON.parse(res.stdout || "{}"));
     if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
@@ -244,20 +335,17 @@ export class GhClient {
   }
 
   async commentIssue(issueNumber: number, body: string): Promise<void> {
-    const res = await this.run(
-      "gh",
-      ["issue", "comment", String(issueNumber), flagEq("--body", body)],
-      this.cwd,
-    );
+    const res = await this.exec(["issue", "comment", String(issueNumber), flagEq("--body", body)]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue comment failed");
   }
 
   async createIssue(title: string, body: string): Promise<number> {
-    const res = await this.run(
-      "gh",
-      ["issue", "create", flagEq("--title", title), flagEq("--body", body)],
-      this.cwd,
-    );
+    const res = await this.exec([
+      "issue",
+      "create",
+      flagEq("--title", title),
+      flagEq("--body", body),
+    ]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue create failed");
     const match = res.stdout.match(/\/issues\/(\d+)/);
     if (!match?.[1]) throw new GhError(`could not parse issue number from: ${res.stdout}`);
@@ -271,6 +359,10 @@ export class GhClient {
    * Returns an empty string (never garbage) when no failed run can be found.
    */
   async failedRunLog(prNumber: number): Promise<string> {
+    // Best-effort and never-throwing: when the budget is gated, skip silently
+    // rather than raise — the caller treats an empty log as "no detail yet".
+    if (!this.governor.decide("core", currentPriority()).allowed) return "";
+
     // 1. Resolve the PR head branch.
     const prRes = await this.run(
       "gh",
@@ -317,11 +409,7 @@ export class GhClient {
   }
 
   async mergePr(prNumber: number): Promise<void> {
-    const res = await this.run(
-      "gh",
-      ["pr", "merge", String(prNumber), "--squash", "--auto"],
-      this.cwd,
-    );
+    const res = await this.exec(["pr", "merge", String(prNumber), "--squash", "--auto"]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr merge failed");
   }
 
@@ -331,18 +419,14 @@ export class GhClient {
     title: string;
     body: string;
   }): Promise<number> {
-    const res = await this.run(
-      "gh",
-      [
-        "pr",
-        "create",
-        flagEq("--head", input.head),
-        flagEq("--base", input.base),
-        flagEq("--title", input.title),
-        flagEq("--body", input.body),
-      ],
-      this.cwd,
-    );
+    const res = await this.exec([
+      "pr",
+      "create",
+      flagEq("--head", input.head),
+      flagEq("--base", input.base),
+      flagEq("--title", input.title),
+      flagEq("--body", input.body),
+    ]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr create failed");
     const match = res.stdout.match(/\/pull\/(\d+)/);
     if (!match?.[1]) throw new GhError(`could not parse PR number from: ${res.stdout}`);
