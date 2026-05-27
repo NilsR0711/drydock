@@ -1,9 +1,18 @@
 import { AppShell } from "@/components/app-shell";
+import { Providers } from "@/components/providers";
 import { pendingCount } from "@/lib/adr/service";
 import type { Metadata } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Drydock",
@@ -18,9 +27,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     // DB may not exist yet on first boot
   }
   return (
-    <html lang="en">
+    <html
+      lang="en"
+      className={`${inter.variable} ${jetbrainsMono.variable}`}
+      suppressHydrationWarning
+    >
       <body>
-        <AppShell adrPending={pending}>{children}</AppShell>
+        <Providers>
+          <AppShell adrPending={pending}>{children}</AppShell>
+        </Providers>
       </body>
     </html>
   );
