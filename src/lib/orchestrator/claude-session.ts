@@ -3,6 +3,8 @@ import type { Job } from "@/lib/db/schema";
 import { jobs } from "@/lib/db/schema";
 import { type StreamRunner, spawnStreamRunner } from "@/lib/exec/stream-runner";
 import { type LogBroker, getBroker } from "@/lib/stream/broker";
+import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
+import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
 import { StreamJsonParser } from "@/lib/stream/parser";
 import { eq } from "drizzle-orm";
 import { transitionJob } from "./jobs";
@@ -143,7 +145,9 @@ export async function resumeClaudeSession(
   const runner = deps.runner ?? spawnStreamRunner;
   const broker = deps.broker ?? getBroker();
   const parser = new StreamJsonParser();
-  const prompt = `CI failed. Fix the failure and keep changes minimal.\n\nFailed CI log:\n${failedLog}`;
+  const prompt = renderTemplate(resolveTemplateContent(job.repoId, TEMPLATE_NAMES.ciFix, db), {
+    CI_LOG: failedLog,
+  });
 
   const handle = runner("claude", buildResumeArgs(prompt, sessionId), cwd, {
     onStdout: (chunk) => {
