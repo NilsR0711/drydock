@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
