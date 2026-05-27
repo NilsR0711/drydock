@@ -1,6 +1,6 @@
 import { type DB, getDb } from "@/lib/db/client";
 import { todayCost } from "@/lib/db/cost-queries";
-import { settings } from "@/lib/db/schema";
+import { repos, settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -42,7 +42,7 @@ export function saveSettings(patch: Partial<Settings>, db: DB = getDb()): Settin
 
 export interface GateResult {
   allowed: boolean;
-  reason?: "paused" | "cost_limit";
+  reason?: "paused" | "cost_limit" | "repo_cost_limit";
 }
 
 /** Whether the driver loop may start new jobs right now (SPEC §6.1). */
@@ -50,5 +50,15 @@ export function jobsAllowed(db: DB = getDb()): GateResult {
   const s = getSettings(db);
   if (s.paused) return { allowed: false, reason: "paused" };
   if (todayCost(db) >= s.dailyCostLimitUsd) return { allowed: false, reason: "cost_limit" };
+  return { allowed: true };
+}
+
+/** Whether new jobs may start for a specific repo (its own daily limit). */
+export function repoJobsAllowed(repoId: number, db: DB = getDb()): GateResult {
+  const repo = db.select().from(repos).where(eq(repos.id, repoId)).get();
+  if (!repo) return { allowed: false, reason: "repo_cost_limit" };
+  if (todayCost(db, repoId) >= repo.dailyCostLimitUsd) {
+    return { allowed: false, reason: "repo_cost_limit" };
+  }
   return { allowed: true };
 }
