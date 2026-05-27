@@ -94,6 +94,61 @@ export const prCheckSchema = z.object({
 });
 export type PrCheck = z.infer<typeof prCheckSchema>;
 
+/** A single comment within a PR review thread. */
+export interface ReviewThreadComment {
+  /** GraphQL node id (used as a reaction subject). */
+  id: string;
+  databaseId: number | null;
+  author: string;
+  body: string;
+}
+
+/** A PR review thread (issue #18): the unit Drydock tracks per feedback item. */
+export interface ReviewThread {
+  /** GraphQL node id (used to reply to / resolve the thread). */
+  id: string;
+  isResolved: boolean;
+  isOutdated: boolean;
+  path: string | null;
+  line: number | null;
+  comments: ReviewThreadComment[];
+}
+
+/** A reaction Drydock may add to acknowledge a review comment. */
+export type ReactionContent = "EYES" | "THUMBS_UP" | "ROCKET" | "CONFUSED";
+
+const reviewThreadsSchema = z.object({
+  data: z.object({
+    repository: z.object({
+      pullRequest: z
+        .object({
+          reviewThreads: z.object({
+            nodes: z.array(
+              z.object({
+                id: z.string(),
+                isResolved: z.boolean().default(false),
+                isOutdated: z.boolean().default(false),
+                path: z.string().nullish(),
+                line: z.number().nullish(),
+                comments: z.object({
+                  nodes: z.array(
+                    z.object({
+                      id: z.string(),
+                      databaseId: z.number().nullish(),
+                      body: z.string().default(""),
+                      author: z.object({ login: z.string() }).nullish(),
+                    }),
+                  ),
+                }),
+              }),
+            ),
+          }),
+        })
+        .nullish(),
+    }),
+  }),
+});
+
 export class GhError extends Error {}
 
 /**
@@ -431,5 +486,134 @@ export class GhClient {
     const match = res.stdout.match(/\/pull\/(\d+)/);
     if (!match?.[1]) throw new GhError(`could not parse PR number from: ${res.stdout}`);
     return Number(match[1]);
+  }
+
+  /**
+   * Resolve the repo's `owner` and `name`, cached for the client's lifetime.
+   * GraphQL queries (review threads) need these explicitly — unlike REST, `gh
+   * api graphql` does not substitute the `{owner}/{repo}` placeholders.
+   */
+  private slug: { owner: string; name: string } | undefined;
+  private async repoSlug(): Promise<{ owner: string; name: string }> {
+    if (this.slug) return this.slug;
+    const res = await this.exec(["repo", "view", "--json", "nameWithOwner"]);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh repo view failed");
+    const parsed = z
+      .object({ nameWithOwner: z.string() })
+      .safeParse(JSON.parse(res.stdout || "{}"));
+    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
+    const [owner, name] = parsed.data.nameWithOwner.split("/");
+    if (!owner || !name) throw new GhError(`unexpected repo slug: ${parsed.data.nameWithOwner}`);
+    this.slug = { owner, name };
+    return this.slug;
+  }
+
+  /**
+   * List the PR's review threads (issue #18) via GraphQL: their resolution
+   * state, node ids (for reply/resolve), and comments (for the trusted-reviewer
+   * gate and idempotency marker scan).
+   */
+  async listReviewThreads(prNumber: number): Promise<ReviewThread[]> {
+    const { owner, name } = await this.repoSlug();
+    const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated path line comments(first:100){nodes{id databaseId body author{login}}}}}}}}`;
+    const res = await this.exec(
+      [
+        "api",
+        "graphql",
+        "-F",
+        `owner=${owner}`,
+        "-F",
+        `name=${name}`,
+        "-F",
+        `number=${prNumber}`,
+        "-f",
+        `query=${query}`,
+      ],
+      "graphql",
+    );
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh api graphql failed");
+    const parsed = reviewThreadsSchema.safeParse(JSON.parse(res.stdout || "{}"));
+    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
+    const nodes = parsed.data.data.repository.pullRequest?.reviewThreads.nodes ?? [];
+    return nodes.map((t) => ({
+      id: t.id,
+      isResolved: t.isResolved,
+      isOutdated: t.isOutdated,
+      path: t.path ?? null,
+      line: t.line ?? null,
+      comments: t.comments.nodes.map((c) => ({
+        id: c.id,
+        databaseId: c.databaseId ?? null,
+        author: c.author?.login ?? "",
+        body: c.body,
+      })),
+    }));
+  }
+
+  /** Post a reply on a review thread (GraphQL thread-reply mutation). */
+  async replyToReviewThread(threadId: string, body: string): Promise<void> {
+    const query = `mutation($threadId:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){comment{id}}}`;
+    const res = await this.exec(
+      [
+        "api",
+        "graphql",
+        "-F",
+        `threadId=${threadId}`,
+        "-f",
+        `body=${body}`,
+        "-f",
+        `query=${query}`,
+      ],
+      "graphql",
+    );
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh review reply failed");
+  }
+
+  /**
+   * Edit one of our existing review-thread replies in place (GraphQL
+   * `updatePullRequestReviewComment`). Lets the feedback loop update a prior
+   * status reply instead of posting a duplicate.
+   */
+  async updateReviewComment(commentId: string, body: string): Promise<void> {
+    const query = `mutation($id:ID!,$body:String!){updatePullRequestReviewComment(input:{pullRequestReviewCommentId:$id,body:$body}){pullRequestReviewComment{id}}}`;
+    const res = await this.exec(
+      ["api", "graphql", "-F", `id=${commentId}`, "-f", `body=${body}`, "-f", `query=${query}`],
+      "graphql",
+    );
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh update review comment failed");
+  }
+
+  /** Mark a review thread as resolved (GraphQL `resolveReviewThread`). */
+  async resolveReviewThread(threadId: string): Promise<void> {
+    const query = `mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}`;
+    const res = await this.exec(
+      ["api", "graphql", "-F", `threadId=${threadId}`, "-f", `query=${query}`],
+      "graphql",
+    );
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh resolve thread failed");
+  }
+
+  /**
+   * Acknowledge a review comment with a reaction. A repeated reaction is a
+   * no-op on GitHub's side ("already has this reaction"), so that is tolerated.
+   */
+  async reactToReviewComment(commentId: string, content: ReactionContent): Promise<void> {
+    const query = `mutation($subjectId:ID!,$content:ReactionContent!){addReaction(input:{subjectId:$subjectId,content:$content}){reaction{content}}}`;
+    const res = await this.exec(
+      [
+        "api",
+        "graphql",
+        "-F",
+        `subjectId=${commentId}`,
+        "-F",
+        `content=${content}`,
+        "-f",
+        `query=${query}`,
+      ],
+      "graphql",
+    );
+    if (res.exitCode !== 0 && !/already has this reaction/i.test(res.stderr)) {
+      throw new GhError(res.stderr || "gh add reaction failed");
+    }
   }
 }

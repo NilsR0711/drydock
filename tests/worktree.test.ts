@@ -40,6 +40,22 @@ describe("WorktreeManager", () => {
     expect(wt.branch).toBe("drydock/issue-13-job-42");
   });
 
+  it("prepareForBranch fetches and checks out an existing branch", async () => {
+    const { calls, run } = recordingRunner();
+    const wt = await new WorktreeManager(run).prepareForBranch(repo, "drydock/issue-9-job-3", "3");
+    expect(wt.branch).toBe("drydock/issue-9-job-3");
+    expect(wt.path).toContain("fb-3");
+    expect(calls[0]?.args).toEqual(["-C", repo.path, "fetch", "origin", "drydock/issue-9-job-3"]);
+    expect(calls[1]?.args).toEqual([
+      "-C",
+      repo.path,
+      "worktree",
+      "add",
+      wt.path,
+      "drydock/issue-9-job-3",
+    ]);
+  });
+
   it("commitAndPush stages, commits and pushes the branch", async () => {
     const { calls, run } = recordingRunner();
     const m = new WorktreeManager(run);
