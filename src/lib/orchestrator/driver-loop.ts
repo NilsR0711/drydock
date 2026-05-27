@@ -16,6 +16,7 @@ import { createJob, listJobsByStatus, nextQueuedJob, transitionJob } from "./job
 import { driveReviewFeedback } from "./review-feedback-driver";
 import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
+import { buildSubtaskGenerator, decomposeRepo } from "./subtask-driver";
 
 export interface DriveTickDeps {
   db?: DB;
@@ -25,8 +26,29 @@ export interface DriveTickDeps {
   forgeFor?: (repo: Repo) => ForgeClient;
   /** Auto-triage entry point (injectable for tests). */
   triage?: (repo: Repo, forge: ForgeClient, fetched: GhIssue[], db: DB) => Promise<TriageResult[]>;
+  /** Decomposition sweep entry point (injectable for tests). */
+  decompose?: (repo: Repo, forge: ForgeClient, candidates: GhIssue[], db: DB) => Promise<void>;
   /** Review-feedback sweep entry point (injectable for tests). */
   reviewFeedback?: (db: DB) => Promise<void>;
+}
+
+/**
+ * Default decomposition step: split work-candidate issues into subtasks using
+ * an agent one-shot fallback for prose, scoped to the repo's checkout. Bounded
+ * to issues actually queued/ready for work by the caller.
+ */
+function defaultDecompose(
+  repo: Repo,
+  forge: ForgeClient,
+  candidates: GhIssue[],
+  db: DB,
+): Promise<void> {
+  const generate = buildSubtaskGenerator({
+    command: getSettings(db).claudePath,
+    model: repo.defaultModel,
+    cwd: repo.path,
+  });
+  return decomposeRepo(repo, forge, candidates, db, { generate });
 }
 
 // A failed attempt is a job that ended parked for a human or aborted; merged
@@ -128,6 +150,7 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   const repos = listRepos(db);
 
   const triage = deps.triage ?? triageRepo;
+  const decompose = deps.decompose ?? defaultDecompose;
   for (const repo of repos) {
     // The background sweep runs at `low` priority so its GitHub calls yield the
     // rate-limit budget to interactive routes and active jobs (which run at the
@@ -150,6 +173,20 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
         const cfg = repoAutomation(repo);
         if (cfg.autoTriageEnabled) {
           await triage(repo, forge, fetched, db);
+        }
+
+        // Opt-in decomposition (issue #19): split large work-candidate issues
+        // into tracked subtasks before they are worked. Bounded to issues that
+        // are queued or carry a ready label, to cap the per-issue detail fetch.
+        if (cfg.autoDecompose) {
+          const candidates = fetched.filter((gh) => {
+            const labelNames = gh.labels.map((l) => l.name);
+            return (
+              labelNames.includes(repo.queueLabel) ||
+              labelNames.some((l) => cfg.readyLabels.includes(l))
+            );
+          });
+          if (candidates.length > 0) await decompose(repo, forge, candidates, db);
         }
 
         for (const gh of fetched) {

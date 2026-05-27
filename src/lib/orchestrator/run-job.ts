@@ -7,6 +7,7 @@ import type { Job, Repo } from "@/lib/db/schema";
 import { getForge } from "@/lib/forge/registry";
 import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { listIssues } from "@/lib/issues/service";
+import { listSubtasks } from "@/lib/issues/subtasks";
 import { notify } from "@/lib/notify/service";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
@@ -14,6 +15,8 @@ import { getSettings } from "@/lib/settings/service";
 import { type AgentSessionResult, resumeAgentSession, spawnAgentSession } from "./agent-session";
 import { ciBabysitter } from "./ci-babysitter";
 import { getJob, recordEvent, transitionJob } from "./jobs";
+import { markSubtasksDone, markSubtasksWorking, subtaskPromptSection } from "./subtask-driver";
+import type { SubtaskStatus } from "./subtask-state";
 
 /** CLI path override for an agent, from global settings. */
 function commandForAgent(provider: AgentProvider, db: DB): string {
@@ -100,11 +103,26 @@ async function runJobCore(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
     wt = await worktrees.prepare(repo, job.id, job.issueNumber);
     recordEvent(job.id, "worktree", { path: wt.path, branch: wt.branch }, db);
 
-    const prompt = renderTemplate(resolveTemplateContent(repo.id, TEMPLATE_NAMES.main, db), {
+    let prompt = renderTemplate(resolveTemplateContent(repo.id, TEMPLATE_NAMES.main, db), {
       ISSUE_NUM: job.issueNumber,
       BRANCH: wt.branch,
       REPO_NAME: repo.name,
     });
+
+    // Decomposed issues (issue #19, opt-in): surface the ordered subtasks in the
+    // prompt and mark them in progress so the UI reflects work starting. The
+    // subtasks were prepared by the decomposition sweep; here we only consume
+    // them, leaving non-decomposed issues entirely unaffected.
+    if (repo.autoDecompose) {
+      const subtasks = listSubtasks(repo.id, job.issueNumber, db);
+      if (subtasks.length > 0) {
+        prompt += subtaskPromptSection(
+          subtasks.map((s) => ({ title: s.title, status: s.status as SubtaskStatus })),
+        );
+        markSubtasksWorking(repo.id, job.issueNumber, db);
+      }
+    }
+
     const session = await runSession(getJob(job.id, db) as Job, prompt, wt.path);
     if (session.exitCode !== 0) {
       return transitionJob(
@@ -140,7 +158,12 @@ async function runJobCore(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
     });
     transitionJob(job.id, "ci_running", { branch: wt.branch, prNumber }, db);
 
-    return await runBabysitter(getJob(job.id, db) as Job, prNumber);
+    const final = await runBabysitter(getJob(job.id, db) as Job, prNumber);
+    // A merged job lands the whole decomposed issue: mark every subtask done.
+    if (repo.autoDecompose && final.status === "merged") {
+      markSubtasksDone(repo.id, job.issueNumber, db);
+    }
+    return final;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     recordEvent(job.id, "error", { message }, db);
