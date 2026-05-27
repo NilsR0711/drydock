@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // gracefulShutdown reads the default getDb() singleton, so point it at memory.
 beforeEach(() => {
-  process.env.AUTOCLAUDE_DB = ":memory:";
+  process.env.DRYDOCK_DB = ":memory:";
   vi.resetModules();
 });
 

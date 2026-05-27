@@ -6,9 +6,9 @@ export const repos = sqliteTable("repos", {
   path: text("path").notNull(),
   name: text("name").notNull(),
   defaultBranch: text("default_branch").notNull().default("main"),
-  queueLabel: text("queue_label").notNull().default("autoclaude:queue"),
-  workingLabel: text("working_label").notNull().default("autoclaude:working"),
-  needsHumanLabel: text("needs_human_label").notNull().default("autoclaude:needs-human"),
+  queueLabel: text("queue_label").notNull().default("drydock:queue"),
+  workingLabel: text("working_label").notNull().default("drydock:working"),
+  needsHumanLabel: text("needs_human_label").notNull().default("drydock:needs-human"),
   defaultModel: text("default_model").notNull().default("claude-sonnet-4-5"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });

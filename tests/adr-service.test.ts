@@ -55,7 +55,7 @@ describe("chokidar watcher", () => {
     const adrDir = join(repoRoot, "docs/adr");
     mkdirSync(adrDir, { recursive: true });
 
-    process.env.AUTOCLAUDE_DB = ":memory:";
+    process.env.DRYDOCK_DB = ":memory:";
     const watchers = watchAdrDirs([{ path: repoRoot }]);
     await new Promise<void>((resolve) => {
       watchers[0]?.on("ready", () => resolve());
@@ -65,7 +65,7 @@ describe("chokidar watcher", () => {
     await new Promise((r) => setTimeout(r, 400));
     await Promise.all(watchers.map((w) => w.close()));
 
-    // The watcher uses the default getDb() singleton (AUTOCLAUDE_DB=:memory:).
+    // The watcher uses the default getDb() singleton (DRYDOCK_DB=:memory:).
     const { getDb } = await import("@/lib/db/client");
     const rows = listAdrs(undefined, getDb());
     expect(rows.some((r) => r.title === "ADR 001: Watched decision")).toBe(true);

@@ -574,7 +574,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'autoclaude:queue'"
+          "default": "'drydock:queue'"
         },
         "working_label": {
           "name": "working_label",
@@ -582,7 +582,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'autoclaude:working'"
+          "default": "'drydock:working'"
         },
         "needs_human_label": {
           "name": "needs_human_label",
@@ -590,7 +590,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'autoclaude:needs-human'"
+          "default": "'drydock:needs-human'"
         },
         "default_model": {
           "name": "default_model",

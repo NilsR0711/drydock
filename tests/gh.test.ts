@@ -10,16 +10,16 @@ describe("GhClient.listIssues", () => {
   it("parses issue JSON", async () => {
     const runner = fakeRunner({
       stdout: JSON.stringify([
-        { number: 7, title: "Fix bug", labels: [{ name: "autoclaude:queue" }] },
+        { number: 7, title: "Fix bug", labels: [{ name: "drydock:queue" }] },
       ]),
     });
     const gh = new GhClient("/repo", runner);
-    const issues = await gh.listIssues("autoclaude:queue");
+    const issues = await gh.listIssues("drydock:queue");
     expect(issues).toHaveLength(1);
     expect(issues[0]?.number).toBe(7);
     expect(runner).toHaveBeenCalledWith(
       "gh",
-      expect.arrayContaining(["issue", "list", "--label", "autoclaude:queue"]),
+      expect.arrayContaining(["issue", "list", "--label", "drydock:queue"]),
       "/repo",
     );
   });

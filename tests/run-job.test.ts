@@ -15,7 +15,7 @@ beforeEach(() => {
 });
 
 function fakeWorktrees(removed: { v: boolean }) {
-  const wt: Worktree = { path: "/wt", branch: "autoclaude/issue-1-job-1" };
+  const wt: Worktree = { path: "/wt", branch: "drydock/issue-1-job-1" };
   return {
     prepare: vi.fn(async () => wt),
     commitAndPush: vi.fn(async () => {}),
@@ -53,7 +53,7 @@ describe("runJob", () => {
     expect(deps.worktrees.prepare).toHaveBeenCalled();
     expect(deps.worktrees.commitAndPush).toHaveBeenCalled();
     expect(deps.createPr).toHaveBeenCalledWith(
-      expect.objectContaining({ head: "autoclaude/issue-1-job-1", base: "main" }),
+      expect.objectContaining({ head: "drydock/issue-1-job-1", base: "main" }),
     );
     expect(deps.runBabysitter).toHaveBeenCalled();
     expect(removed.v).toBe(true);

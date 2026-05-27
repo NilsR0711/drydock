@@ -1,4 +1,4 @@
-# AutoClaude — Progress
+# Drydock — Progress
 
 Phase tracking. Continuously maintained; survives context compaction.
 

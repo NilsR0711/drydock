@@ -14,7 +14,7 @@ beforeEach(() => {
 });
 
 function gh(number: number, title: string): GhIssue {
-  return { number, title, labels: [{ name: "autoclaude:queue" }] };
+  return { number, title, labels: [{ name: "drydock:queue" }] };
 }
 
 describe("issues service", () => {

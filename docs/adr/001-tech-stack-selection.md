@@ -5,7 +5,7 @@
 
 ## Context
 
-AutoClaude is a local single-user tool that autonomously processes GitHub issues
+Drydock is a local single-user tool that autonomously processes GitHub issues
 through Claude Code subprocesses. It needs server-side process management,
 embedded persistence, live logs (realtime), and a UI. The spec (§2) mandates the
 stack.

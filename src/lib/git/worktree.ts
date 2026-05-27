@@ -8,9 +8,9 @@ export interface Worktree {
   branch: string;
 }
 
-/** Root for app-owned worktrees; override with AUTOCLAUDE_HOME. */
+/** Root for app-owned worktrees; override with DRYDOCK_HOME. */
 export function worktreeHome(): string {
-  return process.env.AUTOCLAUDE_HOME ?? join(homedir(), ".autoclaude");
+  return process.env.DRYDOCK_HOME ?? join(homedir(), ".drydock");
 }
 
 function sanitize(name: string): string {
@@ -50,7 +50,7 @@ export class WorktreeManager {
   }
 
   async prepare(repo: Repo, jobId: number, issueNumber = 0): Promise<Worktree> {
-    const branch = `autoclaude/issue-${issueNumber}-job-${jobId}`;
+    const branch = `drydock/issue-${issueNumber}-job-${jobId}`;
     const path = join(worktreeHome(), "worktrees", sanitize(repo.name), `job-${jobId}`);
     await this.withRepoLock(repo.path, () =>
       this.git(["-C", repo.path, "worktree", "add", "-b", branch, path, repo.defaultBranch]),

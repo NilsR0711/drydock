@@ -7,9 +7,9 @@ export const repoInputSchema = z.object({
   path: z.string().min(1, "path is required"),
   name: z.string().min(1, "name is required"),
   defaultBranch: z.string().min(1).default("main"),
-  queueLabel: z.string().min(1).default("autoclaude:queue"),
-  workingLabel: z.string().min(1).default("autoclaude:working"),
-  needsHumanLabel: z.string().min(1).default("autoclaude:needs-human"),
+  queueLabel: z.string().min(1).default("drydock:queue"),
+  workingLabel: z.string().min(1).default("drydock:working"),
+  needsHumanLabel: z.string().min(1).default("drydock:needs-human"),
   defaultModel: z.string().min(1).default("claude-opus-4-7"),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;

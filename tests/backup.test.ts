@@ -22,7 +22,7 @@ describe("runBackup", () => {
 
   it("copies the DB into a timestamped backup file", () => {
     const root = tmp();
-    const dbPath = join(root, "autoclaude.db");
+    const dbPath = join(root, "drydock.db");
     writeFileSync(dbPath, "sqlite-bytes");
     const backupDir = join(root, "backups");
     const dest = runBackup(dbPath, backupDir);
@@ -33,13 +33,13 @@ describe("runBackup", () => {
 
   it("prunes backups older than the retention window", () => {
     const root = tmp();
-    const dbPath = join(root, "autoclaude.db");
+    const dbPath = join(root, "drydock.db");
     writeFileSync(dbPath, "x");
     const backupDir = join(root, "backups");
 
     // create an old backup and age it past retention
     mkdirSync(backupDir, { recursive: true });
-    const old = join(backupDir, "autoclaude-old.db");
+    const old = join(backupDir, "drydock-old.db");
     writeFileSync(old, "old");
     const ancient = (Date.now() - (RETENTION_DAYS + 2) * 86400_000) / 1000;
     utimesSync(old, ancient, ancient);

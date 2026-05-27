@@ -67,7 +67,7 @@ let singleton: DB | undefined;
 /** Process-wide DB used by Server Actions / RSC. */
 export function getDb(): DB {
   if (!singleton) {
-    const path = process.env.AUTOCLAUDE_DB ?? resolve(process.cwd(), "data/autoclaude.db");
+    const path = process.env.DRYDOCK_DB ?? resolve(process.cwd(), "data/drydock.db");
     singleton = createDb(path);
     // Bootstrap the orchestrator lazily here (node server runtime only) so that
     // instrumentation.ts stays free of node-only imports (ADR 006).

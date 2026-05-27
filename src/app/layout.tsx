@@ -6,7 +6,7 @@ import "./globals.css";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "AutoClaude",
+  title: "Drydock",
   description: "Autonomously process GitHub issues via Claude Code",
 };
 

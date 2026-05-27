@@ -65,9 +65,9 @@ CREATE TABLE `repos` (
 	`path` text NOT NULL,
 	`name` text NOT NULL,
 	`default_branch` text DEFAULT 'main' NOT NULL,
-	`queue_label` text DEFAULT 'autoclaude:queue' NOT NULL,
-	`working_label` text DEFAULT 'autoclaude:working' NOT NULL,
-	`needs_human_label` text DEFAULT 'autoclaude:needs-human' NOT NULL,
+	`queue_label` text DEFAULT 'drydock:queue' NOT NULL,
+	`working_label` text DEFAULT 'drydock:working' NOT NULL,
+	`needs_human_label` text DEFAULT 'drydock:needs-human' NOT NULL,
 	`default_model` text DEFAULT 'claude-sonnet-4-5' NOT NULL,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL
 );

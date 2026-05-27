@@ -18,7 +18,7 @@ describe("WorktreeManager", () => {
   it("prepare adds a worktree on a new branch off the default branch", async () => {
     const { calls, run } = recordingRunner();
     const wt = await new WorktreeManager(run).prepare(repo, 42);
-    expect(wt.branch).toBe("autoclaude/issue-0-job-42");
+    expect(wt.branch).toBe("drydock/issue-0-job-42");
     expect(wt.path).toContain("job-42");
     const add = calls.find((c) => c.args[2] === "worktree" && c.args[3] === "add");
     expect(add).toBeDefined();
@@ -28,7 +28,7 @@ describe("WorktreeManager", () => {
       "worktree",
       "add",
       "-b",
-      "autoclaude/issue-0-job-42",
+      "drydock/issue-0-job-42",
       wt.path,
       "main",
     ]);
@@ -37,7 +37,7 @@ describe("WorktreeManager", () => {
   it("prepare uses the issue number in the branch when given", async () => {
     const { run } = recordingRunner();
     const wt = await new WorktreeManager(run).prepare(repo, 42, 13);
-    expect(wt.branch).toBe("autoclaude/issue-13-job-42");
+    expect(wt.branch).toBe("drydock/issue-13-job-42");
   });
 
   it("commitAndPush stages, commits and pushes the branch", async () => {
@@ -91,13 +91,13 @@ describe("WorktreeManager", () => {
     expect(order).toEqual(["a-start", "a-end", "b"]);
   });
 
-  it("worktreeHome honours AUTOCLAUDE_HOME", () => {
-    const prev = process.env.AUTOCLAUDE_HOME;
-    process.env.AUTOCLAUDE_HOME = "/custom/home";
+  it("worktreeHome honours DRYDOCK_HOME", () => {
+    const prev = process.env.DRYDOCK_HOME;
+    process.env.DRYDOCK_HOME = "/custom/home";
     expect(worktreeHome()).toBe("/custom/home");
     // biome-ignore lint/performance/noDelete: restoring original test env
-    if (prev === undefined) delete process.env.AUTOCLAUDE_HOME;
-    else process.env.AUTOCLAUDE_HOME = prev;
+    if (prev === undefined) delete process.env.DRYDOCK_HOME;
+    else process.env.DRYDOCK_HOME = prev;
   });
 
   it("throws when a git command fails", async () => {

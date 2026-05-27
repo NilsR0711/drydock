@@ -14,7 +14,7 @@ describe("repos service", () => {
     const repo = addRepo({ path: "/tmp/foo", name: "foo" }, db);
     expect(repo.id).toBeGreaterThan(0);
     expect(repo.defaultBranch).toBe("main");
-    expect(repo.queueLabel).toBe("autoclaude:queue");
+    expect(repo.queueLabel).toBe("drydock:queue");
   });
 
   it("rejects empty path", () => {

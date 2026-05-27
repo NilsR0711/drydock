@@ -1,4 +1,4 @@
-# AutoClaude
+# Drydock
 
 A local, single-user web app (http://localhost:3737) that autonomously processes
 GitHub issues through Claude Code subprocesses — with CI babysitting, auto-merge,
@@ -22,8 +22,8 @@ pnpm build          # production build
 pnpm dev            # dev server on http://127.0.0.1:3737
 ```
 
-The database lives at `data/autoclaude.db` (gitignored) and migrates itself on
-first connection. Override the path with `AUTOCLAUDE_DB`.
+The database lives at `data/drydock.db` (gitignored) and migrates itself on
+first connection. Override the path with `DRYDOCK_DB`.
 
 ### Requirements
 

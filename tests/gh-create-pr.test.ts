@@ -10,7 +10,7 @@ describe("GhClient.createPr", () => {
       return { stdout: "https://github.com/acme/x/pull/123\n", stderr: "", exitCode: 0 };
     };
     const num = await new GhClient("/repo", run).createPr({
-      head: "autoclaude/issue-5-job-1",
+      head: "drydock/issue-5-job-1",
       base: "main",
       title: "Fix #5",
       body: "Closes #5",
@@ -20,7 +20,7 @@ describe("GhClient.createPr", () => {
       "pr",
       "create",
       "--head",
-      "autoclaude/issue-5-job-1",
+      "drydock/issue-5-job-1",
       "--base",
       "main",
       "--title",

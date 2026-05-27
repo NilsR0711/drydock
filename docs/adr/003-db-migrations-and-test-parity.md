@@ -6,7 +6,7 @@
 ## Context
 
 We need schema persistence (SQLite) and a way to spin up isolated databases in
-unit tests without hitting the real `data/autoclaude.db` file or any external
+unit tests without hitting the real `data/drydock.db` file or any external
 service. The schema must stay in sync between test and production.
 
 ## Decision
@@ -15,7 +15,7 @@ service. The schema must stay in sync between test and production.
 `createDb(path)` factory opens a `better-sqlite3` connection and runs the
 drizzle migrator against those artifacts. Tests call `createDb(":memory:")` for a
 fresh, throwaway database; production uses `getDb()` which resolves the path from
-`AUTOCLAUDE_DB` or `data/autoclaude.db`. WAL and `foreign_keys = ON` are enabled.
+`DRYDOCK_DB` or `data/drydock.db`. WAL and `foreign_keys = ON` are enabled.
 
 ## Consequences
 

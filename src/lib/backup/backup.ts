@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync 
 import { join } from "node:path";
 
 export const RETENTION_DAYS = 7;
-const BACKUP_PREFIX = "autoclaude-";
+const BACKUP_PREFIX = "drydock-";
 
 /**
  * Copy the SQLite file into `backupDir` with a timestamped name and prune

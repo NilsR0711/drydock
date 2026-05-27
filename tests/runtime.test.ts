@@ -14,12 +14,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 let home: string;
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "ac-"));
-  process.env.AUTOCLAUDE_HOME = home;
+  process.env.DRYDOCK_HOME = home;
   setDrainMode(false);
 });
 afterEach(() => {
   // biome-ignore lint/performance/noDelete: cleaning up test env
-  delete process.env.AUTOCLAUDE_HOME;
+  delete process.env.DRYDOCK_HOME;
 });
 
 describe("drain mode", () => {

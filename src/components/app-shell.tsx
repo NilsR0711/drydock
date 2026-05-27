@@ -19,7 +19,7 @@ export function AppShell({
     <div className="flex min-h-screen">
       <aside className="hidden w-56 shrink-0 border-r border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-900 sm:block">
         <Link href="/" className="mb-6 block text-lg font-semibold tracking-tight">
-          AutoClaude
+          Drydock
         </Link>
         <nav className="flex flex-col gap-1">
           {NAV.map((item) => (

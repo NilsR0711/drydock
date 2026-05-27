@@ -81,8 +81,8 @@ describe("driveTick", () => {
     const started: number[] = [];
     const d = deps(started, {
       fetchIssues: vi.fn(async () => [
-        { number: 1, title: "ok", labels: [{ name: "autoclaude:queue" }] },
-        { number: 2, title: "rm -rf /", labels: [{ name: "autoclaude:queue" }] },
+        { number: 1, title: "ok", labels: [{ name: "drydock:queue" }] },
+        { number: 2, title: "rm -rf /", labels: [{ name: "drydock:queue" }] },
       ]),
     });
     await driveTick(d as never);
