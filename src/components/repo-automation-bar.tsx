@@ -34,6 +34,7 @@ function splitInput(value: string): string[] {
 export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoTriage, setAutoTriage] = useState(repo.autoTriageEnabled);
   const [autoProcess, setAutoProcess] = useState(repo.autoProcessEnabled);
+  const [autoHeal, setAutoHeal] = useState(repo.autoHealCi);
   const [ready, setReady] = useState(parseList(repo.readyLabels).join(", "));
   const [blocking, setBlocking] = useState(parseList(repo.blockingLabels).join(", "));
   const [whitelist, setWhitelist] = useState(parseList(repo.autoLabelWhitelist).join(", "));
@@ -103,14 +104,26 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
           />
           Auto-process ready issues
         </label>
+        <label className="flex items-center gap-1.5 text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={autoHeal}
+            onChange={(e) => {
+              setAutoHeal(e.target.checked);
+              persist({ autoHealCi: e.target.checked });
+            }}
+          />
+          Auto-heal failing CI
+        </label>
         {pending && <span className="text-xs text-muted-foreground">Saving…</span>}
         {saved && <span className="text-xs text-success">Saved</span>}
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Opt-in. Both stages are off by default and consume paid agent usage. Triage may only apply
-        whitelisted labels; auto-processing works issues that are <em>ready</em> and not blocked.
-        Drydock never auto-merges — a human always reviews the PR.
+        Opt-in. All stages are off by default and consume paid agent usage. Triage may only apply
+        whitelisted labels; auto-processing works issues that are <em>ready</em> and not blocked;
+        auto-heal attempts bounded, verified fixes for failing CI (never external or AI-review
+        checks). Drydock never auto-merges — a human always reviews the PR.
       </p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

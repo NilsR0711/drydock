@@ -20,6 +20,8 @@ export const repos = sqliteTable("repos", {
   // Opt-in autonomous automation (both default off). See ADR 016.
   autoTriageEnabled: integer("auto_triage_enabled", { mode: "boolean" }).notNull().default(false),
   autoProcessEnabled: integer("auto_process_enabled", { mode: "boolean" }).notNull().default(false),
+  // Opt-in CI auto-healing (default off). See ADR 017.
+  autoHealCi: integer("auto_heal_ci", { mode: "boolean" }).notNull().default(false),
   // JSON string arrays; parsed via repoAutomation(). Any ready label triggers,
   // any blocking label vetoes; triage may only apply whitelisted labels.
   readyLabels: text("ready_labels")
@@ -137,6 +139,56 @@ export const issues = sqliteTable(
   }),
 );
 
+/**
+ * One CI auto-heal session, bound to a job's PR at a specific head SHA (ADR
+ * 017). When the PR head moves, the in-flight session is marked `superseded`
+ * and a fresh one is opened for the new SHA. `status` is a HealingStatus.
+ */
+export const healingSessions = sqliteTable(
+  "healing_sessions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    jobId: integer("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    prNumber: integer("pr_number").notNull(),
+    headSha: text("head_sha").notNull(),
+    status: text("status").notNull().default("triaging"),
+    createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    jobIdx: index("healing_sessions_job_idx").on(t.jobId),
+    prShaIdx: index("healing_sessions_pr_sha_idx").on(t.prNumber, t.headSha),
+  }),
+);
+
+/**
+ * One heal attempt within a session: the classified failure it targeted, its
+ * fingerprint (for per-fingerprint budgeting), the head SHA before/after the
+ * agent ran, and the verified outcome. `status`: repairing | healed | rejected.
+ */
+export const healingAttempts = sqliteTable(
+  "healing_attempts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sessionId: integer("session_id")
+      .notNull()
+      .references(() => healingSessions.id, { onDelete: "cascade" }),
+    fingerprint: text("fingerprint").notNull(),
+    category: text("category").notNull(),
+    checkName: text("check_name").notNull(),
+    status: text("status").notNull().default("repairing"),
+    beforeSha: text("before_sha"),
+    afterSha: text("after_sha"),
+    createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    sessionIdx: index("healing_attempts_session_idx").on(t.sessionId),
+    fingerprintIdx: index("healing_attempts_fingerprint_idx").on(t.sessionId, t.fingerprint),
+  }),
+);
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -152,3 +204,7 @@ export type PromptTemplate = typeof promptTemplates.$inferSelect;
 export type FollowupIssue = typeof followupIssues.$inferSelect;
 export type Issue = typeof issues.$inferSelect;
 export type NewIssue = typeof issues.$inferInsert;
+export type HealingSession = typeof healingSessions.$inferSelect;
+export type NewHealingSession = typeof healingSessions.$inferInsert;
+export type HealingAttempt = typeof healingAttempts.$inferSelect;
+export type NewHealingAttempt = typeof healingAttempts.$inferInsert;

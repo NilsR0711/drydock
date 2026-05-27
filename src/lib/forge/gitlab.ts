@@ -243,6 +243,11 @@ export class GitlabForge implements ForgeClient {
     return jobs.map((j) => ({ name: j.name, state: mapJobStatus(j.status) }));
   }
 
+  async prHeadSha(prNumber: number): Promise<string> {
+    const res = await this.mutate("GET", `/merge_requests/${prNumber}`);
+    return z.object({ sha: z.string() }).parse(safeJson(res.body, {})).sha;
+  }
+
   async failedRunLog(prNumber: number): Promise<string> {
     try {
       const pipelineId = await this.latestPipelineId(prNumber);

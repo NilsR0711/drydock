@@ -57,6 +57,13 @@
       "when": 1779915502826,
       "tag": "0007_material_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1779917422717,
+      "tag": "0008_round_jack_power",
+      "breakpoints": true
     }
   ]
 }

@@ -32,6 +32,7 @@ export const repoInputSchema = z.object({
   sequential: z.boolean().default(true),
   autoTriageEnabled: z.boolean().default(false),
   autoProcessEnabled: z.boolean().default(false),
+  autoHealCi: z.boolean().default(false),
   readyLabels: jsonStringArray('["ready","ready-for-agent","ready-to-work"]'),
   blockingLabels: jsonStringArray(
     '["blocked","question","needs-human","needs-discussion","wontfix","duplicate","invalid"]',

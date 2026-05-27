@@ -76,6 +76,8 @@ describe("repos service", () => {
     const repo = addRepo({ path: "/auto", name: "auto" }, db);
     expect(repo.autoTriageEnabled).toBe(false);
     expect(repo.autoProcessEnabled).toBe(false);
+    expect(repo.autoHealCi).toBe(false);
+    expect(repoAutomation(repo).autoHealCi).toBe(false);
     expect(repo.maxAttempts).toBe(3);
     expect(repo.minAuthorAssociation).toBe("approved");
     const cfg = repoAutomation(repo);
@@ -92,6 +94,7 @@ describe("repos service", () => {
       {
         autoTriageEnabled: true,
         autoProcessEnabled: true,
+        autoHealCi: true,
         readyLabels: ["go"],
         blockingLabels: ["hold"],
         autoLabelWhitelist: ["bug", "ready"],
@@ -103,6 +106,8 @@ describe("repos service", () => {
     );
     expect(updated.autoTriageEnabled).toBe(true);
     expect(updated.autoProcessEnabled).toBe(true);
+    expect(updated.autoHealCi).toBe(true);
+    expect(repoAutomation(updated).autoHealCi).toBe(true);
     expect(updated.maxAttempts).toBe(5);
     expect(updated.minAuthorAssociation).toBe("any");
     const cfg = repoAutomation(updated);

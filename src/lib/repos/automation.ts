@@ -4,6 +4,7 @@ import type { Repo } from "@/lib/db/schema";
 export interface RepoAutomation {
   autoTriageEnabled: boolean;
   autoProcessEnabled: boolean;
+  autoHealCi: boolean;
   readyLabels: string[];
   blockingLabels: string[];
   autoLabelWhitelist: string[];
@@ -29,6 +30,7 @@ export function repoAutomation(repo: Repo): RepoAutomation {
   return {
     autoTriageEnabled: repo.autoTriageEnabled,
     autoProcessEnabled: repo.autoProcessEnabled,
+    autoHealCi: repo.autoHealCi,
     readyLabels: parseStringArray(repo.readyLabels),
     blockingLabels: parseStringArray(repo.blockingLabels),
     autoLabelWhitelist: parseStringArray(repo.autoLabelWhitelist),

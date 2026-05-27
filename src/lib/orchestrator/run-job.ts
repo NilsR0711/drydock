@@ -89,6 +89,10 @@ async function runJobCore(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
           resumeAgentSession(rj, sessionId, failedLog, repo.path, { db, provider, command }).then(
             () => undefined,
           ),
+        // Opt-in structured CI auto-healing (issue #16, ADR 017).
+        autoHeal: repo.autoHealCi
+          ? { headSha: (pr) => forge.prHeadSha(pr), provider: repo.platform }
+          : undefined,
       }));
 
   let wt: Worktree | undefined;
