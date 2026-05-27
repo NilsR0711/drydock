@@ -1,8 +1,14 @@
+import { RepoList } from "@/components/repo-list";
+import { listReposWithStats } from "@/lib/db/queries";
+
+export const dynamic = "force-dynamic";
+
 export default function DashboardPage() {
+  const repos = listReposWithStats();
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Dashboard</h1>
-      <p className="text-sm text-neutral-500">AutoClaude läuft. Repos folgen in Phase 1.</p>
+      <RepoList repos={repos} />
     </div>
   );
 }

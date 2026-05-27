@@ -3,3 +3,5 @@
 - [000](adr/000-template.md) — ADR template
 - [001](adr/001-tech-stack-selection.md) — Tech Stack Selection (Phase 0)
 - [002](adr/002-vendored-ui-primitives.md) — Vendor UI primitives instead of shadcn CLI (Phase 0)
+- [003](adr/003-db-migrations-and-test-parity.md) — Drizzle migrations uniform in prod/tests (Phase 1)
+- [004](adr/004-injectable-command-runner.md) — Injectable command runner for CLI subprocesses (Phase 1)

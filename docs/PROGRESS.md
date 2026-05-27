@@ -5,7 +5,7 @@ Phase tracking. Continuously maintained; survives context compaction.
 ## Phases
 
 - [x] Phase 0 – Bootstrap
-- [ ] Phase 1 – DB + Repos CRUD
+- [x] Phase 1 – DB + Repos CRUD
 - [ ] Phase 2 – Orchestrator skeleton + job lifecycle (mock Claude)
 - [ ] Phase 3 – Stream-JSON parser + SSE broker
 - [ ] Phase 4 – Real Claude subprocess + cost tracking
@@ -16,12 +16,12 @@ Phase tracking. Continuously maintained; survives context compaction.
 
 ## Current focus
 
-Phase 0 complete. Next: Phase 1 (Drizzle schema, repos CRUD, gh wrapper).
+Phase 1 complete. Next: Phase 2 (orchestrator skeleton, state machine, mock-claude job lifecycle).
 
 ## Last 5 actions
 
-- Git repo init, toolchain verified (Node 22, pnpm 10).
-- package.json + stack installed (Next 15, drizzle, better-sqlite3, vitest, biome).
-- Next/Tailwind/Biome/Vitest config + scaffold (layout, page, instrumentation stub).
-- ADR 000/001/002 + DECISIONS index created.
-- Trivial test (cn) written; test/biome/build all green.
+- Full Drizzle schema (7 tables) + generated migration 0000.
+- createDb factory (in-memory for tests), queries, repos service (add/update/remove).
+- GhClient wrapper with injectable runner; Server Actions for CRUD + issue sync.
+- Vendored UI primitives (button/card/badge), RepoList + dashboard wired.
+- ADR 003/004; 12 tests green; biome + build green. Tag phase-1.
