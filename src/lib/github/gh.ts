@@ -231,6 +231,18 @@ export class GhClient {
     return parsed.data;
   }
 
+  async prHeadSha(prNumber: number): Promise<string> {
+    const res = await this.run(
+      "gh",
+      ["pr", "view", String(prNumber), "--json", "headRefOid"],
+      this.cwd,
+    );
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr view failed");
+    const parsed = z.object({ headRefOid: z.string() }).safeParse(JSON.parse(res.stdout || "{}"));
+    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
+    return parsed.data.headRefOid;
+  }
+
   async commentIssue(issueNumber: number, body: string): Promise<void> {
     const res = await this.run(
       "gh",

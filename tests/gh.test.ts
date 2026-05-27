@@ -42,6 +42,25 @@ describe("GhClient.prChecks", () => {
   });
 });
 
+describe("GhClient.prHeadSha", () => {
+  it("returns the PR head commit SHA", async () => {
+    const runner = fakeRunner({ stdout: JSON.stringify({ headRefOid: "deadbeef" }) });
+    const gh = new GhClient("/repo", runner);
+    const sha = await gh.prHeadSha(12);
+    expect(sha).toBe("deadbeef");
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      ["pr", "view", "12", "--json", "headRefOid"],
+      "/repo",
+    );
+  });
+
+  it("throws on non-zero exit", async () => {
+    const gh = new GhClient("/repo", fakeRunner({ exitCode: 1, stderr: "boom" }));
+    await expect(gh.prHeadSha(12)).rejects.toBeInstanceOf(GhError);
+  });
+});
+
 describe("GhClient.createIssue", () => {
   it("extracts the created issue number from the URL", async () => {
     const gh = new GhClient("/repo", fakeRunner({ stdout: "https://github.com/o/r/issues/42\n" }));

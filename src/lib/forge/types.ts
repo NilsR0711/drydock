@@ -38,6 +38,8 @@ export interface ForgeClient {
   closeIssue(issueNumber: number): Promise<void>;
   reopenIssue(issueNumber: number): Promise<void>;
   prChecks(prNumber: number): Promise<PrCheck[]>;
+  /** Current head commit SHA of the PR/MR (binds CI auto-heal sessions). */
+  prHeadSha(prNumber: number): Promise<string>;
   commentIssue(issueNumber: number, body: string): Promise<void>;
   createIssue(title: string, body: string): Promise<number>;
   failedRunLog(prNumber: number): Promise<string>;
