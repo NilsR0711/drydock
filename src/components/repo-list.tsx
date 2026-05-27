@@ -1,5 +1,6 @@
 "use client";
 
+import { DirectoryPicker } from "@/components/directory-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -70,40 +71,63 @@ function RepoCard({ repo }: { repo: RepoWithStats }) {
   );
 }
 
+/** Basename without importing the server-only fs helper into the client bundle. */
+function basename(path: string): string {
+  return path.replace(/\/+$/, "").split("/").pop() ?? "";
+}
+
 function AddRepoForm({ onDone }: { onDone: () => void }) {
   const [pending, start] = useTransition();
+  const [name, setName] = useState("");
+  const [path, setPath] = useState("");
+  const [picking, setPicking] = useState(false);
+
   return (
     <Card>
       <CardContent className="pt-4">
         <form
           className="grid gap-2 sm:grid-cols-2"
-          action={(fd: FormData) => {
+          action={() => {
             start(async () => {
-              await addRepoAction({
-                path: String(fd.get("path") ?? ""),
-                name: String(fd.get("name") ?? ""),
-              });
+              await addRepoAction({ path, name });
               onDone();
             });
           }}
         >
           <input
-            name="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             placeholder="Name"
             required
             className="rounded border px-2 py-1 text-sm"
           />
-          <input
-            name="path"
-            placeholder="/abs/path/to/repo"
-            required
-            className="rounded border px-2 py-1 text-sm"
-          />
-          <Button type="submit" disabled={pending} className="sm:col-span-2">
+          <div className="flex gap-2">
+            <input
+              value={path}
+              onChange={(e) => setPath(e.target.value)}
+              placeholder="/abs/path/to/repo"
+              required
+              className="flex-1 rounded border px-2 py-1 text-sm"
+            />
+            <Button type="button" variant="outline" size="sm" onClick={() => setPicking(true)}>
+              Browse…
+            </Button>
+          </div>
+          <Button type="submit" disabled={pending || !path} className="sm:col-span-2">
             Save
           </Button>
         </form>
       </CardContent>
+      {picking && (
+        <DirectoryPicker
+          onClose={() => setPicking(false)}
+          onSelect={(p) => {
+            setPath(p);
+            if (!name.trim()) setName(basename(p));
+            setPicking(false);
+          }}
+        />
+      )}
     </Card>
   );
 }
