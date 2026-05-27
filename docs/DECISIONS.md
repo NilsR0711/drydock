@@ -9,3 +9,4 @@
 - [006](adr/006-process-singleton.md) — Orchestrator instrumentation singleton (Phase 2)
 - [007](adr/007-sse-over-websocket.md) — SSE over WebSocket + stream parser strategy (Phase 3)
 - [008](adr/008-cost-tracking-source.md) — Cost tracking source of truth (Phase 4)
+- [009](adr/009-ci-retry-strategy.md) — CI babysitter & retry strategy (Phase 5)

@@ -22,6 +22,28 @@ export interface ClaudeSessionResult {
   outputTokens: number;
 }
 
+/** SPEC §6.3 CI-retry invocation: resume the session with Haiku, fewer turns. */
+export function buildResumeArgs(
+  prompt: string,
+  sessionId: string,
+  model = "claude-haiku-4-5",
+  maxTurns = 15,
+): string[] {
+  return [
+    "-p",
+    prompt,
+    "--resume",
+    sessionId,
+    "--max-turns",
+    String(maxTurns),
+    "--model",
+    model,
+    "--output-format",
+    "stream-json",
+    "--verbose",
+  ];
+}
+
 export function buildClaudeArgs(prompt: string, model: string, maxTurns: number): string[] {
   // SPEC §6.2 invocation.
   return [
