@@ -10,7 +10,7 @@ export const repoInputSchema = z.object({
   queueLabel: z.string().min(1).default("autoclaude:queue"),
   workingLabel: z.string().min(1).default("autoclaude:working"),
   needsHumanLabel: z.string().min(1).default("autoclaude:needs-human"),
-  defaultModel: z.string().min(1).default("claude-sonnet-4-5"),
+  defaultModel: z.string().min(1).default("claude-opus-4-7"),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 

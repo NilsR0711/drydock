@@ -2,7 +2,8 @@ import { estimateCost, priceForModel } from "@/lib/orchestrator/pricing";
 import { describe, expect, it } from "vitest";
 
 describe("pricing", () => {
-  it("knows Sonnet 4.5 and Haiku 4.5 rates", () => {
+  it("knows Opus 4.7, Sonnet 4.5 and Haiku 4.5 rates", () => {
+    expect(priceForModel("claude-opus-4-7")).toEqual({ inputPerMTok: 15, outputPerMTok: 75 });
     expect(priceForModel("claude-sonnet-4-5")).toEqual({ inputPerMTok: 3, outputPerMTok: 15 });
     expect(priceForModel("claude-haiku-4-5")).toEqual({ inputPerMTok: 1, outputPerMTok: 5 });
   });

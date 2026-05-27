@@ -7,3 +7,4 @@ data
 next-env.d.ts
 .env*
 coverage
+tsconfig.tsbuildinfo

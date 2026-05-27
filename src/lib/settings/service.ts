@@ -9,7 +9,7 @@ export const settingsSchema = z.object({
   dailyCostLimitUsd: z.number().nonnegative().default(10),
   pollIntervalSec: z.number().int().positive().default(30),
   maxTurns: z.number().int().positive().default(40),
-  defaultModel: z.string().default("claude-sonnet-4-5"),
+  defaultModel: z.string().default("claude-opus-4-7"),
   claudePath: z.string().default("claude"),
   ghPath: z.string().default("gh"),
   maxParallelJobs: z.number().int().positive().default(3),

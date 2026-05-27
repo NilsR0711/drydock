@@ -77,7 +77,7 @@ export async function spawnClaudeSession(
   const db = deps.db ?? getDb();
   const runner = deps.runner ?? spawnStreamRunner;
   const broker = deps.broker ?? getBroker();
-  const model = job.model ?? "claude-sonnet-4-5";
+  const model = job.model ?? "claude-opus-4-7";
   const parser = new StreamJsonParser();
 
   transitionJob(job.id, "working", { model }, db);
