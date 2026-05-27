@@ -17,11 +17,18 @@ export interface DriveTickDeps {
 }
 
 const OPEN_STATES = ["queued", "working", "ci_running", "ci_failed", "retrying"] as const;
+// Non-terminal, already-started states. A repo with any such job is "in flight":
+// for sequential repos the next issue waits until this clears (merged/needs_human/aborted).
+const IN_FLIGHT_STATES = ["working", "ci_running", "ci_failed", "retrying"] as const;
 
 function hasOpenJob(db: DB, repoId: number, issueNumber: number): boolean {
   return listJobsByStatus([...OPEN_STATES], db).some(
     (j) => j.repoId === repoId && j.issueNumber === issueNumber,
   );
+}
+
+function repoHasInFlightJob(db: DB, repoId: number): boolean {
+  return listJobsByStatus([...IN_FLIGHT_STATES], db).some((j) => j.repoId === repoId);
 }
 
 function issuePriority(db: DB, repoId: number, issueNumber: number): number {
@@ -52,14 +59,16 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
 
   for (const repo of repos) {
     try {
-      const fetch = deps.fetchIssues ?? ((p, label) => new GhClient(p).listIssues(label));
+      const fetch = deps.fetchIssues ?? ((p, _label) => new GhClient(p).listAllIssues());
       const fetched = await fetch(repo.path, repo.queueLabel);
       syncIssuesFromGh(repo.id, fetched, db);
       for (const gh of fetched) {
+        const labelNames = gh.labels.map((l) => l.name);
+        if (!labelNames.includes(repo.queueLabel)) continue; // backlog issues aren't scheduled
         const verdict = evaluateIssue({
           number: gh.number,
           title: gh.title,
-          labels: gh.labels.map((l) => l.name),
+          labels: labelNames,
         });
         if (verdict.decision !== "approved") continue;
         if (hasOpenJob(db, repo.id, gh.number)) continue;
@@ -71,14 +80,26 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   }
 
   const max = getSettings(db).maxParallelJobs;
+  // Sequential repos may start at most one job per tick; track those started here
+  // so a second queued issue for the same repo isn't picked before its job leaves
+  // "queued" within this same loop.
+  const startedSequentialRepos = new Set<number>();
   while (!isDraining() && jobsAllowed(db).allowed && activeJobCount() < max) {
     let picked: Job | undefined;
     for (const repo of repos) {
       if (!repoJobsAllowed(repo.id, db).allowed) continue;
+      if (
+        repo.sequential &&
+        (repoHasInFlightJob(db, repo.id) || startedSequentialRepos.has(repo.id))
+      )
+        continue;
       const candidate = nextQueuedJob(repo.id, db);
       if (candidate && (!picked || lessUrgent(db, picked, candidate))) picked = candidate;
     }
     if (!picked) break;
+
+    const repoOfPicked = repos.find((r) => r.id === picked!.repoId);
+    if (repoOfPicked?.sequential) startedSequentialRepos.add(picked.repoId);
 
     const jobId = picked.id;
     // Claim it out of "queued" synchronously so it isn't re-picked next turn.

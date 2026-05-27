@@ -2,7 +2,7 @@ import { type DB, createDb } from "@/lib/db/client";
 import { type Job, jobs } from "@/lib/db/schema";
 import { reorderIssues, syncIssuesFromGh } from "@/lib/issues/service";
 import { driveTick } from "@/lib/orchestrator/driver-loop";
-import { createJob, listJobsByStatus } from "@/lib/orchestrator/jobs";
+import { createJob, getJob, listJobsByStatus } from "@/lib/orchestrator/jobs";
 import { setDrainMode } from "@/lib/orchestrator/runtime";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
@@ -13,7 +13,10 @@ let db: DB;
 let repoId: number;
 beforeEach(() => {
   db = createDb(":memory:");
-  repoId = addRepo({ path: "/repo", name: "acme", defaultModel: "claude-opus-4-7" }, db).id;
+  repoId = addRepo(
+    { path: "/repo", name: "acme", defaultModel: "claude-opus-4-7", sequential: false },
+    db,
+  ).id;
   setDrainMode(false);
 });
 
@@ -106,6 +109,45 @@ describe("driveTick", () => {
     const seen = listJobsByStatus(["queued", "merged"], db);
     expect(seen.some((j) => j.issueNumber === 1)).toBe(true);
     expect(seen.some((j) => j.issueNumber === 2)).toBe(false);
+  });
+
+  it("sequential repo starts only one in-flight job at a time", async () => {
+    saveSettings({ maxParallelJobs: 5 }, db);
+    const seqRepo = addRepo({ path: "/seq", name: "seq", sequential: true }, db).id;
+    const fetchIssues = vi.fn(async () => [
+      { number: 1, title: "one", labels: [{ name: "drydock:queue" }] },
+      { number: 2, title: "two", labels: [{ name: "drydock:queue" }] },
+    ]);
+    const started: number[] = [];
+    // runJob leaves the job in "working" (in-flight, not terminal)
+    const runJob = vi.fn(async (jobId: number) => {
+      started.push(jobId);
+      return getJob(jobId, db) as Job;
+    });
+    await driveTick({ db, fetchIssues, runJob } as never);
+    const seqStarted = started.filter((id) => getJob(id, db)?.repoId === seqRepo);
+    expect(seqStarted).toHaveLength(1);
+  });
+
+  it("parallel repo starts multiple jobs up to the budget", async () => {
+    saveSettings({ maxParallelJobs: 5 }, db);
+    const parRepo = addRepo({ path: "/par", name: "par", sequential: false }, db).id;
+    const fetchIssues = vi.fn(async (path: string) =>
+      path === "/par"
+        ? [
+            { number: 1, title: "one", labels: [{ name: "drydock:queue" }] },
+            { number: 2, title: "two", labels: [{ name: "drydock:queue" }] },
+          ]
+        : [],
+    );
+    const started: number[] = [];
+    const runJob = vi.fn(async (jobId: number) => {
+      started.push(jobId);
+      return getJob(jobId, db) as Job;
+    });
+    await driveTick({ db, fetchIssues, runJob } as never);
+    const parStarted = started.filter((id) => getJob(id, db)?.repoId === parRepo);
+    expect(parStarted.length).toBeGreaterThanOrEqual(2);
   });
 
   it("swallows a runJob error so the loop survives", async () => {

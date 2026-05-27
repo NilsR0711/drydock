@@ -13,6 +13,7 @@ export const repoInputSchema = z.object({
   defaultModel: z.string().min(1).default("claude-opus-4-7"),
   dailyCostLimitUsd: z.number().nonnegative().default(10),
   adrGating: z.boolean().default(false),
+  sequential: z.boolean().default(true),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 
