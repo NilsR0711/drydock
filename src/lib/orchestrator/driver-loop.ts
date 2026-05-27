@@ -13,6 +13,7 @@ import { type TriageResult, triageRepo } from "@/lib/issues/triage";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
 import { createJob, listJobsByStatus, nextQueuedJob, transitionJob } from "./jobs";
+import { driveReviewFeedback } from "./review-feedback-driver";
 import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
 
@@ -24,6 +25,8 @@ export interface DriveTickDeps {
   forgeFor?: (repo: Repo) => ForgeClient;
   /** Auto-triage entry point (injectable for tests). */
   triage?: (repo: Repo, forge: ForgeClient, fetched: GhIssue[], db: DB) => Promise<TriageResult[]>;
+  /** Review-feedback sweep entry point (injectable for tests). */
+  reviewFeedback?: (db: DB) => Promise<void>;
 }
 
 // A failed attempt is a job that ended parked for a human or aborted; merged
@@ -213,6 +216,16 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
     void runJob(jobId)
       .catch((err) => console.error(`[driver] job ${jobId} failed`, err))
       .finally(() => unregisterActiveJob(jobId));
+  }
+
+  // Drive the opt-in PR review-feedback lifecycle (issue #18) as a low-priority
+  // background sweep, so its forge calls yield the rate-limit budget to active
+  // jobs. Repos that have not opted in are skipped cheaply inside the sweep.
+  const reviewFeedback = deps.reviewFeedback ?? ((d: DB) => driveReviewFeedback({ db: d }));
+  try {
+    await withPriority("low", () => reviewFeedback(db));
+  } catch (err) {
+    console.error("[driver] review-feedback sweep failed", err);
   }
 }
 
