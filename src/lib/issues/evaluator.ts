@@ -15,10 +15,19 @@ export interface EvaluatableIssue {
 const BLOCK_LABELS = ["blocked", "wontfix", "question", "needs-human", "needs-discussion"];
 
 const REVIEW_PATTERNS: { label: string; re: RegExp }[] = [
-  { label: "destructive command", re: /\brm\s+-rf\b|\bdrop\s+table\b|\bgit\s+push\s+--force\b|disable\s+auth/i },
-  { label: "secret material", re: /\bapi[_-]?key\b|\bpassword\b|\bsecret\b|\.env\b|\bsk-[a-z0-9]/i },
+  {
+    label: "destructive command",
+    re: /\brm\s+-rf\b|\bdrop\s+table\b|\bgit\s+push\s+--force\b|disable\s+auth/i,
+  },
+  {
+    label: "secret material",
+    re: /\bapi[_-]?key\b|\bpassword\b|\bsecret\b|\.env\b|\bsk-[a-z0-9]/i,
+  },
   { label: "exfiltration", re: /\bcurl\b|\bwget\b|webhook|pastebin/i },
-  { label: "privileged area", re: /\bauth(entication|orization)?\b|\bpayment|\bbilling\b|\bdeploy|\bsecurity\b|\bci\/cd\b/i },
+  {
+    label: "privileged area",
+    re: /\bauth(entication|orization)?\b|\bpayment|\bbilling\b|\bdeploy|\bsecurity\b|\bci\/cd\b/i,
+  },
 ];
 
 /**

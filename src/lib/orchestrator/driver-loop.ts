@@ -7,8 +7,8 @@ import { syncIssuesFromGh } from "@/lib/issues/service";
 import { getSettings, jobsAllowed } from "@/lib/settings/service";
 import { and, eq } from "drizzle-orm";
 import { createJob, listJobsByStatus, nextQueuedJob, transitionJob } from "./jobs";
-import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
 import { runJob as defaultRunJob } from "./run-job";
+import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
 
 export interface DriveTickDeps {
   db?: DB;
@@ -88,4 +88,50 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
       .catch((err) => console.error(`[driver] job ${jobId} failed`, err))
       .finally(() => unregisterActiveJob(jobId));
   }
+}
+
+let timer: ReturnType<typeof setTimeout> | undefined;
+let running = false;
+let ticking = false;
+
+export interface StartLoopOptions {
+  intervalMs?: number;
+  tick?: () => Promise<void>;
+}
+
+/**
+ * Start the self-scheduling driver loop. Idempotent. An immediate tick runs,
+ * then one every intervalMs. Overlapping ticks are skipped via a re-entrancy
+ * guard. Default interval comes from settings.pollIntervalSec.
+ */
+export function startDriverLoop(opts: StartLoopOptions = {}): void {
+  if (running) return;
+  running = true;
+  const tick = opts.tick ?? (() => driveTick());
+  const intervalMs = opts.intervalMs ?? getSettings().pollIntervalSec * 1000;
+
+  const schedule = () => {
+    timer = setTimeout(run, intervalMs);
+  };
+  const run = async () => {
+    if (!running) return;
+    if (!ticking) {
+      ticking = true;
+      try {
+        await tick();
+      } catch (err) {
+        console.error("[driver] tick failed", err);
+      } finally {
+        ticking = false;
+      }
+    }
+    if (running) schedule();
+  };
+  void run(); // immediate first tick
+}
+
+export function stopDriverLoop(): void {
+  running = false;
+  if (timer) clearTimeout(timer);
+  timer = undefined;
 }

@@ -2,6 +2,8 @@ import { getDb } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { recoverInterruptedJobs } from "./driver";
+import { startDriverLoop, stopDriverLoop } from "./driver-loop";
+import { acquireInstanceLock, setDrainMode, waitForIdle } from "./runtime";
 
 /**
  * Orchestrator singleton. instrumentation.ts calls this once on server start.
@@ -20,8 +22,14 @@ export function clearAbort(jobId: number): void {
   abortHandles.delete(jobId);
 }
 
-/** SPEC §8: mark in-flight jobs interrupted and SIGTERM their subprocesses. */
-export function gracefulShutdown(): void {
+/**
+ * SPEC §8: drain new work, let in-flight jobs settle briefly, then mark any
+ * still-running jobs interrupted and SIGTERM their subprocesses.
+ */
+export async function gracefulShutdown(): Promise<void> {
+  setDrainMode(true);
+  stopDriverLoop();
+  await waitForIdle(5000);
   try {
     const db = getDb();
     db.update(jobs)
@@ -45,9 +53,19 @@ export function startOrchestrator(): void {
     console.error("[orchestrator] recovery failed", err);
   }
 
-  const onSignal = (sig: NodeJS.Signals) => {
+  // Start the scheduler loop in the real server only (skip under Vitest so the
+  // test suite doesn't leave a polling timer running).
+  if (!process.env.VITEST) {
+    if (acquireInstanceLock()) {
+      startDriverLoop();
+    } else {
+      console.warn("[orchestrator] another instance holds the lock; driver loop not started");
+    }
+  }
+
+  const onSignal = async (sig: NodeJS.Signals) => {
     console.log(`[orchestrator] ${sig} received, shutting down gracefully`);
-    gracefulShutdown();
+    await gracefulShutdown();
     process.exit(0);
   };
   process.once("SIGINT", onSignal);

@@ -1,6 +1,6 @@
+import type { Repo } from "@/lib/db/schema";
 import type { CommandResult, CommandRunner } from "@/lib/exec/runner";
 import { WorktreeManager, worktreeHome } from "@/lib/git/worktree";
-import type { Repo } from "@/lib/db/schema";
 import { describe, expect, it } from "vitest";
 
 const repo = { id: 7, path: "/repos/acme", name: "acme", defaultBranch: "main" } as Repo;
@@ -23,7 +23,14 @@ describe("WorktreeManager", () => {
     const add = calls.find((c) => c.args[2] === "worktree" && c.args[3] === "add");
     expect(add).toBeDefined();
     expect(add?.args).toEqual([
-      "-C", repo.path, "worktree", "add", "-b", "autoclaude/issue-0-job-42", wt.path, "main",
+      "-C",
+      repo.path,
+      "worktree",
+      "add",
+      "-b",
+      "autoclaude/issue-0-job-42",
+      wt.path,
+      "main",
     ]);
   });
 
@@ -60,7 +67,9 @@ describe("WorktreeManager", () => {
   it("serializes mutations on the same repo path", async () => {
     const order: string[] = [];
     let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
     let first = true;
     const run: CommandRunner = async (_cmd, args) => {
       if (args.includes("add") && first) {
@@ -86,6 +95,7 @@ describe("WorktreeManager", () => {
     const prev = process.env.AUTOCLAUDE_HOME;
     process.env.AUTOCLAUDE_HOME = "/custom/home";
     expect(worktreeHome()).toBe("/custom/home");
+    // biome-ignore lint/performance/noDelete: restoring original test env
     if (prev === undefined) delete process.env.AUTOCLAUDE_HOME;
     else process.env.AUTOCLAUDE_HOME = prev;
   });

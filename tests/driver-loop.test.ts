@@ -1,11 +1,11 @@
 import { type DB, createDb } from "@/lib/db/client";
 import { type Job, jobs } from "@/lib/db/schema";
+import { reorderIssues, syncIssuesFromGh } from "@/lib/issues/service";
 import { driveTick } from "@/lib/orchestrator/driver-loop";
 import { createJob, listJobsByStatus } from "@/lib/orchestrator/jobs";
 import { setDrainMode } from "@/lib/orchestrator/runtime";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
-import { reorderIssues, syncIssuesFromGh } from "@/lib/issues/service";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -33,11 +33,15 @@ function deps(started: number[], over: Record<string, unknown> = {}) {
 describe("driveTick", () => {
   it("starts queued jobs up to maxParallelJobs, lowest issue priority first", async () => {
     saveSettings({ maxParallelJobs: 2 }, db);
-    syncIssuesFromGh(repoId, [
-      { number: 10, title: "#10", labels: [] },
-      { number: 20, title: "#20", labels: [] },
-      { number: 30, title: "#30", labels: [] },
-    ], db);
+    syncIssuesFromGh(
+      repoId,
+      [
+        { number: 10, title: "#10", labels: [] },
+        { number: 20, title: "#20", labels: [] },
+        { number: 30, title: "#30", labels: [] },
+      ],
+      db,
+    );
     reorderIssues(repoId, [30, 20, 10], db); // 30 highest priority
     createJob({ repoId, issueNumber: 10 }, db);
     createJob({ repoId, issueNumber: 20 }, db);

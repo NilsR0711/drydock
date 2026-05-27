@@ -17,11 +17,16 @@ describe("GhClient.createPr", () => {
     });
     expect(num).toBe(123);
     expect(calls[0]).toEqual([
-      "pr", "create",
-      "--head", "autoclaude/issue-5-job-1",
-      "--base", "main",
-      "--title", "Fix #5",
-      "--body", "Closes #5",
+      "pr",
+      "create",
+      "--head",
+      "autoclaude/issue-5-job-1",
+      "--base",
+      "main",
+      "--title",
+      "Fix #5",
+      "--body",
+      "Closes #5",
     ]);
   });
 

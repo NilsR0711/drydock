@@ -18,6 +18,7 @@ beforeEach(() => {
   setDrainMode(false);
 });
 afterEach(() => {
+  // biome-ignore lint/performance/noDelete: cleaning up test env
   delete process.env.AUTOCLAUDE_HOME;
 });
 
@@ -31,7 +32,9 @@ describe("drain mode", () => {
   it("waitForIdle resolves once active jobs drain", async () => {
     registerActiveJob(1);
     let resolved = false;
-    const p = waitForIdle(1000, 5).then(() => (resolved = true));
+    const p = waitForIdle(1000, 5).then(() => {
+      resolved = true;
+    });
     await new Promise((r) => setTimeout(r, 20));
     expect(resolved).toBe(false);
     unregisterActiveJob(1);
@@ -53,7 +56,10 @@ describe("instance lock", () => {
   });
 
   it("refuses when a live pid holds the lock", () => {
-    writeFileSync(join(home, "instance.lock"), JSON.stringify({ pid: process.pid, ts: Date.now() }));
+    writeFileSync(
+      join(home, "instance.lock"),
+      JSON.stringify({ pid: process.pid, ts: Date.now() }),
+    );
     expect(acquireInstanceLock()).toBe(false);
   });
 });

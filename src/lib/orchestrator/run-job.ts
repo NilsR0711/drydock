@@ -1,11 +1,15 @@
 import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
+import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { GhClient } from "@/lib/github/gh";
-import { WorktreeManager, type Worktree } from "@/lib/git/worktree";
 import { listIssues } from "@/lib/issues/service";
 import { ciBabysitter } from "./ci-babysitter";
-import { resumeClaudeSession, spawnClaudeSession, type ClaudeSessionResult } from "./claude-session";
+import {
+  type ClaudeSessionResult,
+  resumeClaudeSession,
+  spawnClaudeSession,
+} from "./claude-session";
 import { getJob, recordEvent, transitionJob } from "./jobs";
 
 interface WorktreeApi {
@@ -18,7 +22,12 @@ export interface RunJobDeps {
   db?: DB;
   worktrees?: WorktreeApi;
   runSession?: (job: Job, prompt: string, cwd: string) => Promise<ClaudeSessionResult>;
-  createPr?: (input: { head: string; base: string; title: string; body: string }) => Promise<number>;
+  createPr?: (input: {
+    head: string;
+    base: string;
+    title: string;
+    body: string;
+  }) => Promise<number>;
   runBabysitter?: (job: Job, prNumber: number) => Promise<Job>;
 }
 
@@ -26,7 +35,7 @@ function buildPrompt(repoName: string, issueNumber: number, branch: string): str
   return [
     `You are working on GitHub issue #${issueNumber} in the repository "${repoName}".`,
     `You are on branch "${branch}". Implement the change the issue asks for.`,
-    `Keep the change focused and commit-ready. Do not push or open a PR yourself.`,
+    "Keep the change focused and commit-ready. Do not push or open a PR yourself.",
   ].join("\n");
 }
 
