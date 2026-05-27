@@ -21,6 +21,33 @@ describe("repos service", () => {
     expect(() => addRepo({ path: "", name: "x" }, db)).toThrow();
   });
 
+  it("defaults the platform to github (no regression for existing repos)", () => {
+    const repo = addRepo({ path: "/gh", name: "gh" }, db);
+    expect(repo.platform).toBe("github");
+    expect(repo.apiBaseUrl).toBeNull();
+    expect(repo.apiToken).toBeNull();
+  });
+
+  it("adds a gitlab repo with a self-hosted base URL and token", () => {
+    const repo = addRepo(
+      {
+        path: "/gl",
+        name: "gl",
+        platform: "gitlab",
+        apiBaseUrl: "https://gitlab.corp.local",
+        apiToken: "glpat-xyz",
+      },
+      db,
+    );
+    expect(repo.platform).toBe("gitlab");
+    expect(repo.apiBaseUrl).toBe("https://gitlab.corp.local");
+    expect(repo.apiToken).toBe("glpat-xyz");
+  });
+
+  it("rejects an unknown platform", () => {
+    expect(() => addRepo({ path: "/x", name: "x", platform: "bitbucket" } as never, db)).toThrow();
+  });
+
   it("new repo defaults to the opus model (schema/service consistent)", () => {
     const repo = addRepo({ path: "/m", name: "m" }, db);
     expect(repo.defaultModel).toBe("claude-opus-4-7");

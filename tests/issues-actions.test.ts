@@ -3,6 +3,7 @@ process.env.DRYDOCK_DB = ":memory:";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/lib/db/client";
 import { issues, repos } from "@/lib/db/schema";
+import { __setForgeFactory } from "@/lib/forge/registry";
 import {
   addToQueueAction,
   commentIssueAction,
@@ -11,7 +12,6 @@ import {
   setIssueStateAction,
   viewIssueAction,
 } from "@/lib/issues/actions";
-import { __setGhFactory } from "@/lib/issues/gh-factory";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -49,7 +49,7 @@ describe("issue server actions", () => {
   let gh: ReturnType<typeof fakeGh>;
   beforeEach(() => {
     gh = fakeGh();
-    __setGhFactory(() => gh as never);
+    __setForgeFactory(() => gh as never);
   });
 
   it("addToQueueAction adds the queue label via gh and locally", async () => {

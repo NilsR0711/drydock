@@ -4,8 +4,8 @@ import type { AgentProvider } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
+import { getForge } from "@/lib/forge/registry";
 import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
-import { GhClient } from "@/lib/github/gh";
 import { listIssues } from "@/lib/issues/service";
 import { notify } from "@/lib/notify/service";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
@@ -72,18 +72,18 @@ async function runJobCore(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
   if (job.status === "queued") transitionJob(job.id, "working", {}, db);
 
   const worktrees = deps.worktrees ?? new WorktreeManager();
-  const gh = new GhClient(repo.path);
+  const forge = getForge(repo);
   const provider = getAgentProvider(job.agent);
   const command = commandForAgent(provider, db);
   const runSession =
     deps.runSession ??
     ((j, prompt, cwd) => spawnAgentSession(j, prompt, cwd, { db, provider, command }));
-  const createPr = deps.createPr ?? ((input) => gh.createPr(input));
+  const createPr = deps.createPr ?? ((input) => forge.createPr(input));
   const runBabysitter =
     deps.runBabysitter ??
     ((j, prNumber) =>
       ciBabysitter(j, prNumber, {
-        gh,
+        gh: forge,
         db,
         resumeSession: (rj, sessionId, failedLog) =>
           resumeAgentSession(rj, sessionId, failedLog, repo.path, { db, provider, command }).then(

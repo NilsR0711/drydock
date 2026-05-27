@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getRepo } from "@/lib/db/queries";
-import { getGh } from "@/lib/issues/gh-factory";
+import { getForge } from "@/lib/forge/registry";
 import {
   listIssues,
   reorderIssues,
@@ -15,7 +15,7 @@ import { createJob } from "@/lib/orchestrator/jobs";
 export async function syncRepoIssuesAction(repoId: number) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  const gh = getGh(repo.path);
+  const gh = getForge(repo);
   const fetched = await gh.listAllIssues();
   syncIssuesFromGh(repoId, fetched);
   revalidatePath(`/repos/${repoId}`);
@@ -41,7 +41,7 @@ export async function startIssueAction(repoId: number, issueNumber: number) {
 export async function addToQueueAction(repoId: number, issueNumber: number) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  const gh = getGh(repo.path);
+  const gh = getForge(repo);
   await gh.ensureLabel(repo.queueLabel, {
     color: "1f6feb",
     description: "Queued for processing by Drydock",
@@ -56,7 +56,7 @@ export async function addToQueueAction(repoId: number, issueNumber: number) {
 export async function removeFromQueueAction(repoId: number, issueNumber: number) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  await getGh(repo.path).removeLabels(issueNumber, [repo.queueLabel]);
+  await getForge(repo).removeLabels(issueNumber, [repo.queueLabel]);
   setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, false);
   revalidatePath(`/repos/${repoId}`);
   return listIssues(repoId);
@@ -66,7 +66,7 @@ export async function removeFromQueueAction(repoId: number, issueNumber: number)
 export async function viewIssueAction(repoId: number, issueNumber: number) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  return getGh(repo.path).viewIssue(issueNumber);
+  return getForge(repo).viewIssue(issueNumber);
 }
 
 /** Edit issue title and/or body. */
@@ -77,7 +77,7 @@ export async function editIssueAction(
 ) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  await getGh(repo.path).editIssue(issueNumber, patch);
+  await getForge(repo).editIssue(issueNumber, patch);
   revalidatePath(`/repos/${repoId}`);
 }
 
@@ -85,7 +85,7 @@ export async function editIssueAction(
 export async function commentIssueAction(repoId: number, issueNumber: number, body: string) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  await getGh(repo.path).commentIssue(issueNumber, body);
+  await getForge(repo).commentIssue(issueNumber, body);
 }
 
 /** Add or remove labels on an issue (GitHub + local cache for the queue label). */
@@ -97,7 +97,7 @@ export async function setIssueLabelsAction(
 ) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  const gh = getGh(repo.path);
+  const gh = getForge(repo);
   if (add.includes(repo.queueLabel)) {
     await gh.ensureLabel(repo.queueLabel, {
       color: "1f6feb",
@@ -120,7 +120,7 @@ export async function setIssueStateAction(
 ) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  const gh = getGh(repo.path);
+  const gh = getForge(repo);
   if (state === "closed") await gh.closeIssue(issueNumber);
   else await gh.reopenIssue(issueNumber);
   revalidatePath(`/repos/${repoId}`);

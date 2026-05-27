@@ -66,6 +66,8 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 🔌 **Pluggable agents** — choose `claude` or `codex` per repo (with a global default in settings); a preflight check verifies the selected CLI is installed.
 
+🦊 **GitHub & GitLab** — choose the platform per repo. GitLab (gitlab.com or self-hosted) uses the REST API v4 with a per-repo base URL + access token — no extra CLI to install.
+
 🔧 **CI babysitting & auto-merge** — polls `gh pr checks`, merges on green, and on red resumes the session with a CI-fix prompt (up to **3 retries**), then files a follow-up issue and hands off.
 
 📡 **Live logs over SSE** — the agent's NDJSON output is parsed incrementally, persisted, and streamed to the browser in real time.
@@ -161,9 +163,12 @@ pnpm test           # run the unit suite (167 tests, fully offline)
 | Node.js | ≥ 20.9 (22 recommended) | matches the CI matrix |
 | pnpm | 10.x | `corepack enable` picks it up from `packageManager` |
 | [`claude`](https://docs.claude.com/en/docs/claude-code) CLI | latest | on `PATH`, authenticated |
-| [`gh`](https://cli.github.com) CLI | latest | on `PATH`, authenticated for your repos |
+| [`gh`](https://cli.github.com) CLI | latest | on `PATH`, authenticated — for **GitHub** repos |
 
-CLI paths are configurable under **Settings** if they're not on `PATH`.
+CLI paths are configurable under **Settings** if they're not on `PATH`. **GitLab** repos
+need no extra CLI — they use the REST API with a per-repo base URL + access token instead.
+For self-hosted instances behind a corporate CA or proxy, set `NODE_EXTRA_CA_CERTS` and/or
+`HTTPS_PROXY` in Drydock's environment (see [ADR 015](docs/adr/015-gitlab-forge-support.md)).
 
 ## Configuration
 
@@ -175,7 +180,7 @@ Drydock is configured at runtime from the **Settings** page and per-repo control
 | `DRYDOCK_DB` | `data/drydock.db` | SQLite file path (use `:memory:` for ephemeral runs) |
 
 **Settings (global):** pause switch · daily cost limit · `claude`/`gh` CLI paths.
-**Per repo:** default model · serial vs. parallel processing · queue label (default `drydock:queue`).
+**Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · default model · serial vs. parallel processing · queue label (default `drydock:queue`).
 
 ## Screens
 
@@ -199,7 +204,8 @@ src/
 └─ lib/
    ├─ orchestrator/      # driver loop, state machine, sessions, CI babysitter
    ├─ issues/            # backlog sync, queue, server actions
-   ├─ github/            # gh CLI wrapper
+   ├─ forge/             # platform abstraction (github + gitlab) + registry
+   ├─ github/            # gh CLI wrapper (the github forge)
    ├─ exec/ · stream/    # subprocess runner + stream-json parser
    ├─ db/                # Drizzle schema, queries, migrations
    ├─ adr/ · prompts/    # ADR watcher/review, prompt templates
