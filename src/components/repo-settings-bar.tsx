@@ -1,12 +1,16 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { AgentSelect } from "@/components/agent-select";
 import { ModelSelect } from "@/components/model-select";
 import { useToast } from "@/components/ui/toast";
+import type { AgentId } from "@/lib/agents/types";
 import type { Repo } from "@/lib/db/schema";
+import { defaultModelForAgent } from "@/lib/models";
 import { updateRepoAction } from "@/lib/repos/actions";
 
 export function RepoSettingsBar({ repo }: { repo: Repo }) {
+  const [agent, setAgent] = useState(repo.agent as AgentId);
   const [model, setModel] = useState(repo.defaultModel);
   const [limit, setLimit] = useState(repo.dailyCostLimitUsd);
   const [adrGating, setAdrGating] = useState(repo.adrGating);
@@ -35,6 +39,15 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
   function change(value: string) {
     setModel(value);
     persist({ defaultModel: value });
+  }
+
+  function changeAgent(value: AgentId) {
+    // Switching agents resets the model to that agent's default so the repo
+    // never points at a model the selected agent can't run.
+    const nextModel = defaultModelForAgent(value);
+    setAgent(value);
+    setModel(nextModel);
+    persist({ agent: value, defaultModel: nextModel });
   }
 
   function changeLimit(value: number) {
@@ -81,8 +94,10 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
         />
         Sequential (wait for merge)
       </label>
+      <span className="text-muted-foreground">Agent:</span>
+      <AgentSelect value={agent} onChange={changeAgent} />
       <span className="text-muted-foreground">Model:</span>
-      <ModelSelect value={model} onChange={change} />
+      <ModelSelect value={model} onChange={change} agent={agent} />
       {pending && <span className="text-xs text-muted-foreground">Saving…</span>}
       {saved && <span className="text-xs text-success">Saved</span>}
     </div>
