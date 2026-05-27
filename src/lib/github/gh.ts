@@ -48,6 +48,15 @@ export type PrCheck = z.infer<typeof prCheckSchema>;
 
 export class GhError extends Error {}
 
+/**
+ * Join a flag and a user-controlled value as a single `--flag=value` token.
+ * Using the `=` form prevents `gh`/cobra from interpreting a value that begins
+ * with `-` (e.g. a title like "-rf") as another flag (argument injection).
+ */
+function flagEq(flag: string, value: string): string {
+  return `${flag}=${value}`;
+}
+
 /** Thin wrapper around the `gh` CLI; runner is injectable for tests. */
 export class GhClient {
   constructor(
@@ -105,8 +114,10 @@ export class GhClient {
 
   async editIssue(issueNumber: number, patch: { title?: string; body?: string }): Promise<void> {
     const args = ["issue", "edit", String(issueNumber)];
-    if (patch.title !== undefined) args.push("--title", patch.title);
-    if (patch.body !== undefined) args.push("--body", patch.body);
+    if (patch.title !== undefined) args.push(flagEq("--title", patch.title));
+    if (patch.body !== undefined) args.push(flagEq("--body", patch.body));
+    // Nothing to change: avoid a malformed `gh issue edit <n>` call that errors.
+    if (args.length === 3) return;
     const res = await this.run("gh", args, this.cwd);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue edit failed");
   }
@@ -114,7 +125,7 @@ export class GhClient {
   async addLabels(issueNumber: number, labels: string[]): Promise<void> {
     const res = await this.run(
       "gh",
-      ["issue", "edit", String(issueNumber), "--add-label", labels.join(",")],
+      ["issue", "edit", String(issueNumber), flagEq("--add-label", labels.join(","))],
       this.cwd,
     );
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue edit failed");
@@ -123,7 +134,7 @@ export class GhClient {
   async removeLabels(issueNumber: number, labels: string[]): Promise<void> {
     const res = await this.run(
       "gh",
-      ["issue", "edit", String(issueNumber), "--remove-label", labels.join(",")],
+      ["issue", "edit", String(issueNumber), flagEq("--remove-label", labels.join(","))],
       this.cwd,
     );
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue edit failed");
@@ -159,7 +170,7 @@ export class GhClient {
   async commentIssue(issueNumber: number, body: string): Promise<void> {
     const res = await this.run(
       "gh",
-      ["issue", "comment", String(issueNumber), "--body", body],
+      ["issue", "comment", String(issueNumber), flagEq("--body", body)],
       this.cwd,
     );
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue comment failed");
@@ -168,21 +179,65 @@ export class GhClient {
   async createIssue(title: string, body: string): Promise<number> {
     const res = await this.run(
       "gh",
-      ["issue", "create", "--title", title, "--body", body],
+      ["issue", "create", flagEq("--title", title), flagEq("--body", body)],
       this.cwd,
     );
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue create failed");
     const match = res.stdout.match(/\/issues\/(\d+)/);
-    return match?.[1] ? Number(match[1]) : 0;
+    if (!match?.[1]) throw new GhError(`could not parse issue number from: ${res.stdout}`);
+    return Number(match[1]);
   }
 
+  /**
+   * Fetch the failed-step log of the CI run for a PR. `gh run view` is keyed by
+   * run id, not PR, so we (1) resolve the PR's head branch, (2) find the most
+   * recent failed run on that branch, and (3) read its `--log-failed` output.
+   * Returns an empty string (never garbage) when no failed run can be found.
+   */
   async failedRunLog(prNumber: number): Promise<string> {
-    const res = await this.run(
+    // 1. Resolve the PR head branch.
+    const prRes = await this.run(
       "gh",
-      ["run", "view", "--log-failed", "--branch-pr", String(prNumber)],
+      ["pr", "view", String(prNumber), "--json", "headRefName"],
       this.cwd,
     );
-    return res.stdout.slice(-8000);
+    if (prRes.exitCode !== 0) return "";
+    let branch: string;
+    try {
+      branch = z
+        .object({ headRefName: z.string() })
+        .parse(JSON.parse(prRes.stdout || "{}")).headRefName;
+    } catch {
+      return "";
+    }
+    if (!branch) return "";
+
+    // 2. Find the most recent failed run on that branch.
+    const listRes = await this.run(
+      "gh",
+      ["run", "list", "--branch", branch, "--json", "databaseId,conclusion", "--limit", "20"],
+      this.cwd,
+    );
+    if (listRes.exitCode !== 0) return "";
+    let runs: { databaseId: number; conclusion: string }[];
+    try {
+      runs = z
+        .array(z.object({ databaseId: z.number(), conclusion: z.string().default("") }))
+        .parse(JSON.parse(listRes.stdout || "[]"));
+    } catch {
+      return "";
+    }
+    const failed = runs.find((r) => r.conclusion === "failure");
+    if (!failed) return "";
+
+    // 3. Read the failed-step log of that run.
+    const logRes = await this.run(
+      "gh",
+      ["run", "view", String(failed.databaseId), "--log-failed"],
+      this.cwd,
+    );
+    if (logRes.exitCode !== 0) return "";
+    return logRes.stdout.slice(-8000);
   }
 
   async mergePr(prNumber: number): Promise<void> {
@@ -205,14 +260,10 @@ export class GhClient {
       [
         "pr",
         "create",
-        "--head",
-        input.head,
-        "--base",
-        input.base,
-        "--title",
-        input.title,
-        "--body",
-        input.body,
+        flagEq("--head", input.head),
+        flagEq("--base", input.base),
+        flagEq("--title", input.title),
+        flagEq("--body", input.body),
       ],
       this.cwd,
     );

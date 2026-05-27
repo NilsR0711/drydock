@@ -9,7 +9,7 @@ export const repos = sqliteTable("repos", {
   queueLabel: text("queue_label").notNull().default("drydock:queue"),
   workingLabel: text("working_label").notNull().default("drydock:working"),
   needsHumanLabel: text("needs_human_label").notNull().default("drydock:needs-human"),
-  defaultModel: text("default_model").notNull().default("claude-sonnet-4-5"),
+  defaultModel: text("default_model").notNull().default("claude-opus-4-7"),
   dailyCostLimitUsd: real("daily_cost_limit_usd").notNull().default(10),
   adrGating: integer("adr_gating", { mode: "boolean" }).notNull().default(false),
   sequential: integer("sequential", { mode: "boolean" }).notNull().default(true),
