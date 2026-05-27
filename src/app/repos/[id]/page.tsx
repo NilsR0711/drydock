@@ -1,21 +1,55 @@
-import { getRepo } from "@/lib/db/queries";
+import { IssueQueue } from "@/components/issue-queue";
+import { RepoActivity } from "@/components/repo-activity";
+import { RepoSettingsBar } from "@/components/repo-settings-bar";
+import { getDb } from "@/lib/db/client";
+import { getRepoWorkspace } from "@/lib/db/queries";
+import { jobEvents } from "@/lib/db/schema";
+import { getSettings } from "@/lib/settings/service";
+import { eq } from "drizzle-orm";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
-export default async function RepoDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function RepoWorkspacePage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id } = await params;
-  const repo = getRepo(Number(id));
-  if (!repo) notFound();
+  const ws = getRepoWorkspace(Number(id));
+  if (!ws) notFound();
+  const settings = getSettings();
+
+  const initialLog = ws.activeJob
+    ? getDb()
+        .select()
+        .from(jobEvents)
+        .where(eq(jobEvents.jobId, ws.activeJob.id))
+        .all()
+        .map((e) => ({ id: e.id, type: e.type, payload: JSON.parse(e.payload) }))
+    : [];
+
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">{repo.name}</h1>
-      <p className="text-sm text-neutral-500">{repo.path}</p>
-      <dl className="grid gap-1 text-sm">
-        <div>Default branch: {repo.defaultBranch}</div>
-        <div>Queue label: {repo.queueLabel}</div>
-        <div>Default model: {repo.defaultModel}</div>
-      </dl>
+    <div className="space-y-6">
+      <div>
+        <Link href="/" className="text-xs text-neutral-500 hover:underline">
+          ← Dashboard
+        </Link>
+        <h1 className="mt-1 text-2xl font-bold tracking-tight">{ws.repo.name}</h1>
+        <p className="text-sm text-neutral-500">{ws.repo.path}</p>
+      </div>
+
+      <RepoSettingsBar repo={ws.repo} />
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <IssueQueue
+          repoId={ws.repo.id}
+          initialIssues={ws.issues}
+          pollIntervalSec={settings.pollIntervalSec}
+        />
+        <RepoActivity activeJob={ws.activeJob} recentJobs={ws.recentJobs} initialLog={initialLog} />
+      </div>
     </div>
   );
 }
