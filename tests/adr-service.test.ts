@@ -71,14 +71,23 @@ describe("chokidar watcher", () => {
     await new Promise<void>((resolve) => {
       watchers[0]?.on("ready", () => resolve());
     });
-    writeFileSync(join(adrDir, "001-test.md"), "# ADR 001: Watched decision\n");
-    // wait for the add event to fire
-    await new Promise((r) => setTimeout(r, 400));
-    await Promise.all(watchers.map((w) => w.close()));
-
     // The watcher uses the default getDb() singleton (DRYDOCK_DB=:memory:).
     const { getDb } = await import("@/lib/db/client");
-    const rows = listAdrs(undefined, getDb());
-    expect(rows.some((r) => r.title === "ADR 001: Watched decision")).toBe(true);
+    writeFileSync(join(adrDir, "001-test.md"), "# ADR 001: Watched decision\n");
+
+    // Poll until the add event has been processed instead of racing a fixed
+    // sleep — chokidar's add event can fire late under load.
+    const seen = async () => {
+      for (let i = 0; i < 100; i++) {
+        if (listAdrs(undefined, getDb()).some((r) => r.title === "ADR 001: Watched decision")) {
+          return true;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return false;
+    };
+    const found = await seen();
+    await Promise.all(watchers.map((w) => w.close()));
+    expect(found).toBe(true);
   }, 10000);
 });
