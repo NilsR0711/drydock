@@ -97,12 +97,27 @@ describe("GitlabForge.listIssues", () => {
         method: "GET",
         match: "/issues",
         response: {
-          body: JSON.stringify([{ iid: 7, title: "Fix bug", labels: ["drydock:queue"] }]),
+          body: JSON.stringify([
+            {
+              iid: 7,
+              title: "Fix bug",
+              labels: ["drydock:queue"],
+              author: { username: "octocat" },
+            },
+          ]),
         },
       },
     ]);
     const issues = await forge.listIssues("drydock:queue");
-    expect(issues).toEqual([{ number: 7, title: "Fix bug", labels: [{ name: "drydock:queue" }] }]);
+    expect(issues).toEqual([
+      {
+        number: 7,
+        title: "Fix bug",
+        labels: [{ name: "drydock:queue" }],
+        author: "octocat",
+        authorAssociation: null,
+      },
+    ]);
     expect(calls[0]?.url).toContain("labels=drydock%3Aqueue");
     expect(calls[0]?.url).toContain("state=opened");
   });
