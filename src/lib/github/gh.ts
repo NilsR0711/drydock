@@ -90,4 +90,27 @@ export class GhClient {
     );
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr merge failed");
   }
+
+  async createPr(input: {
+    head: string;
+    base: string;
+    title: string;
+    body: string;
+  }): Promise<number> {
+    const res = await this.run(
+      "gh",
+      [
+        "pr", "create",
+        "--head", input.head,
+        "--base", input.base,
+        "--title", input.title,
+        "--body", input.body,
+      ],
+      this.cwd,
+    );
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr create failed");
+    const match = res.stdout.match(/\/pull\/(\d+)/);
+    if (!match?.[1]) throw new GhError(`could not parse PR number from: ${res.stdout}`);
+    return Number(match[1]);
+  }
 }
