@@ -132,7 +132,7 @@ function AddRepoForm({ onDone }: { onDone: () => void }) {
           </div>
           {/* biome-ignore lint/a11y/noLabelWithoutControl: the control is the ModelSelect child */}
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <span className="text-muted-foreground">Modell:</span>
+            <span className="text-muted-foreground">Model:</span>
             <ModelSelect value={model} onChange={setModel} />
           </label>
           <Button type="submit" disabled={pending || !path} className="sm:col-span-2">
