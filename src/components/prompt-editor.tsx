@@ -2,7 +2,8 @@
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { saveTemplateAction } from "@/lib/prompts/actions";
+import { loadTemplateAction, saveTemplateAction } from "@/lib/prompts/actions";
+import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { SUPPORTED_VARIABLES, renderTemplate } from "@/lib/prompts/render";
 import Editor from "@monaco-editor/react";
 import { useState, useTransition } from "react";
@@ -19,22 +20,33 @@ interface VersionInfo {
 export function PromptEditor({
   repos,
   initialContent,
-  versions,
+  initialVersions,
 }: {
   repos: RepoOption[];
   initialContent: string;
-  versions: VersionInfo[];
+  initialVersions: VersionInfo[];
 }) {
   const [content, setContent] = useState(initialContent);
   const [repoId, setRepoId] = useState(repos[0]?.id ?? 0);
-  const [name, setName] = useState("default");
+  const [name, setName] = useState<string>(TEMPLATE_NAMES.main);
+  const [versions, setVersions] = useState<VersionInfo[]>(initialVersions);
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState<number | null>(null);
+
+  function load(nextRepo: number, nextName: string) {
+    start(async () => {
+      const res = await loadTemplateAction(nextRepo, nextName);
+      setContent(res.content);
+      setVersions(res.versions);
+      setSaved(null);
+    });
+  }
 
   const preview = renderTemplate(content, {
     ISSUE_NUM: 42,
     BRANCH: "fix/issue-42",
     REPO_NAME: "acme",
+    CI_LOG: "example CI failure output",
   });
 
   return (
@@ -42,14 +54,20 @@ export function PromptEditor({
       <Card>
         <CardHeader>
           <CardTitle>Editor</CardTitle>
-          <p className="text-xs text-neutral-500">Variables: {SUPPORTED_VARIABLES.join(", ")}</p>
+          <p className="text-xs text-muted-foreground">
+            Variables: {SUPPORTED_VARIABLES.join(", ")}
+          </p>
         </CardHeader>
         <CardContent className="space-y-2">
           <div className="flex gap-2">
             <select
-              className="rounded border px-2 py-1 text-sm"
+              className="rounded border border-card-border bg-background px-2 py-1 text-sm"
               value={repoId}
-              onChange={(e) => setRepoId(Number(e.target.value))}
+              onChange={(e) => {
+                const id = Number(e.target.value);
+                setRepoId(id);
+                load(id, name);
+              }}
             >
               {repos.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -57,13 +75,19 @@ export function PromptEditor({
                 </option>
               ))}
             </select>
-            <input
-              className="rounded border px-2 py-1 text-sm"
+            <select
+              className="rounded border border-card-border bg-background px-2 py-1 text-sm"
               value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
+              onChange={(e) => {
+                setName(e.target.value);
+                load(repoId, e.target.value);
+              }}
+            >
+              <option value={TEMPLATE_NAMES.main}>Main</option>
+              <option value={TEMPLATE_NAMES.ciFix}>CI fix</option>
+            </select>
           </div>
-          <div className="h-72 border">
+          <div className="h-72 border border-card-border">
             <Editor
               defaultLanguage="markdown"
               value={content}
@@ -77,12 +101,14 @@ export function PromptEditor({
               start(async () => {
                 const row = await saveTemplateAction({ repoId, name, content });
                 setSaved(row.version);
+                const res = await loadTemplateAction(repoId, name);
+                setVersions(res.versions);
               })
             }
           >
             Save version
           </Button>
-          {saved !== null && <span className="ml-2 text-xs text-green-600">Saved v{saved}</span>}
+          {saved !== null && <span className="ml-2 text-xs text-success">Saved v{saved}</span>}
         </CardContent>
       </Card>
       <Card>
@@ -92,7 +118,7 @@ export function PromptEditor({
         <CardContent>
           <pre className="whitespace-pre-wrap text-xs">{preview}</pre>
           <h3 className="mt-4 mb-1 text-sm font-semibold">Versions</h3>
-          <ul className="text-xs text-neutral-500">
+          <ul className="text-xs text-muted-foreground">
             {versions.map((v) => (
               <li key={v.version}>v{v.version}</li>
             ))}

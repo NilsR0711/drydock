@@ -15,6 +15,13 @@
       "when": 1779886484237,
       "tag": "0001_fearless_risque",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1779892405810,
+      "tag": "0002_marvelous_starfox",
+      "breakpoints": true
     }
   ]
 }

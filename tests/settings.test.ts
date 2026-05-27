@@ -1,7 +1,7 @@
 import { type DB, createDb } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
 import { addRepo } from "@/lib/repos/service";
-import { getSettings, jobsAllowed, saveSettings } from "@/lib/settings/service";
+import { getSettings, jobsAllowed, repoJobsAllowed, saveSettings } from "@/lib/settings/service";
 import { beforeEach, describe, expect, it } from "vitest";
 
 let db: DB;
@@ -52,5 +52,27 @@ describe("jobsAllowed gate", () => {
   it("allows when under limit and not paused", () => {
     saveSettings({ dailyCostLimitUsd: 100 }, db);
     expect(jobsAllowed(db).allowed).toBe(true);
+  });
+});
+
+describe("repoJobsAllowed gate", () => {
+  it("blocks when the repo's daily cost hits its limit", () => {
+    const repo = addRepo({ path: "/r5", name: "r5", dailyCostLimitUsd: 5 }, db);
+    db.insert(jobs)
+      .values({
+        repoId: repo.id,
+        issueNumber: 1,
+        startedAt: Math.floor(Date.now() / 1000),
+        costUsd: 6,
+      })
+      .run();
+    const gate = repoJobsAllowed(repo.id, db);
+    expect(gate.allowed).toBe(false);
+    expect(gate.reason).toBe("repo_cost_limit");
+  });
+
+  it("allows below the repo limit", () => {
+    const repo = addRepo({ path: "/r6", name: "r6", dailyCostLimitUsd: 5 }, db);
+    expect(repoJobsAllowed(repo.id, db).allowed).toBe(true);
   });
 });

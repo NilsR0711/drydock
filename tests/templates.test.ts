@@ -1,9 +1,11 @@
 import { type DB, createDb } from "@/lib/db/client";
+import { DEFAULT_TEMPLATES, TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import {
   MAX_VERSIONS,
   getActiveTemplate,
   listVersions,
   renderTemplate,
+  resolveTemplateContent,
   saveTemplate,
 } from "@/lib/prompts/templates";
 import { addRepo } from "@/lib/repos/service";
@@ -28,6 +30,23 @@ describe("renderTemplate", () => {
 
   it("leaves unknown tokens and missing vars untouched", () => {
     expect(renderTemplate("$ISSUE_NUM $UNKNOWN", {})).toBe("$ISSUE_NUM $UNKNOWN");
+  });
+
+  it("substitutes $CI_LOG", () => {
+    expect(renderTemplate("log:\n$CI_LOG", { CI_LOG: "boom" })).toBe("log:\nboom");
+  });
+});
+
+describe("resolveTemplateContent", () => {
+  it("falls back to the code default when no row exists", () => {
+    expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.main, db)).toBe(
+      DEFAULT_TEMPLATES.default,
+    );
+  });
+
+  it("returns the stored repo template when present", () => {
+    saveTemplate({ repoId, name: TEMPLATE_NAMES.main, content: "custom $ISSUE_NUM" }, db);
+    expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.main, db)).toBe("custom $ISSUE_NUM");
   });
 });
 

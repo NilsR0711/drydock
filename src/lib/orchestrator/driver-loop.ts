@@ -4,7 +4,7 @@ import { type Job, issues } from "@/lib/db/schema";
 import { GhClient, type GhIssue } from "@/lib/github/gh";
 import { evaluateIssue } from "@/lib/issues/evaluator";
 import { syncIssuesFromGh } from "@/lib/issues/service";
-import { getSettings, jobsAllowed } from "@/lib/settings/service";
+import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
 import { and, eq } from "drizzle-orm";
 import { createJob, listJobsByStatus, nextQueuedJob, transitionJob } from "./jobs";
 import { runJob as defaultRunJob } from "./run-job";
@@ -74,6 +74,7 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   while (!isDraining() && jobsAllowed(db).allowed && activeJobCount() < max) {
     let picked: Job | undefined;
     for (const repo of repos) {
+      if (!repoJobsAllowed(repo.id, db).allowed) continue;
       const candidate = nextQueuedJob(repo.id, db);
       if (candidate && (!picked || lessUrgent(db, picked, candidate))) picked = candidate;
     }

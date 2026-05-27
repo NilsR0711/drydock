@@ -21,6 +21,17 @@ describe("repos service", () => {
     expect(() => addRepo({ path: "", name: "x" }, db)).toThrow();
   });
 
+  it("new repo gets the default daily cost limit", () => {
+    const repo = addRepo({ path: "/r", name: "r" }, db);
+    expect(repo.dailyCostLimitUsd).toBe(10);
+  });
+
+  it("updateRepo can change the daily cost limit", () => {
+    const repo = addRepo({ path: "/r2", name: "r2" }, db);
+    const updated = updateRepo(repo.id, { dailyCostLimitUsd: 25 }, db);
+    expect(updated.dailyCostLimitUsd).toBe(25);
+  });
+
   it("updates a repo", () => {
     const repo = addRepo({ path: "/tmp/foo", name: "foo" }, db);
     const updated = updateRepo(repo.id, { name: "bar", defaultModel: "claude-haiku-4-5" }, db);

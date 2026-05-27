@@ -11,6 +11,7 @@ export const repoInputSchema = z.object({
   workingLabel: z.string().min(1).default("drydock:working"),
   needsHumanLabel: z.string().min(1).default("drydock:needs-human"),
   defaultModel: z.string().min(1).default("claude-opus-4-7"),
+  dailyCostLimitUsd: z.number().nonnegative().default(10),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 

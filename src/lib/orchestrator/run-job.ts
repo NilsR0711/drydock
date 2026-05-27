@@ -4,6 +4,8 @@ import type { Job, Repo } from "@/lib/db/schema";
 import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { GhClient } from "@/lib/github/gh";
 import { listIssues } from "@/lib/issues/service";
+import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
+import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
 import { ciBabysitter } from "./ci-babysitter";
 import {
   type ClaudeSessionResult,
@@ -29,14 +31,6 @@ export interface RunJobDeps {
     body: string;
   }) => Promise<number>;
   runBabysitter?: (job: Job, prNumber: number) => Promise<Job>;
-}
-
-function buildPrompt(repoName: string, issueNumber: number, branch: string): string {
-  return [
-    `You are working on GitHub issue #${issueNumber} in the repository "${repoName}".`,
-    `You are on branch "${branch}". Implement the change the issue asks for.`,
-    "Keep the change focused and commit-ready. Do not push or open a PR yourself.",
-  ].join("\n");
 }
 
 /**
@@ -74,7 +68,11 @@ export async function runJob(jobId: number, deps: RunJobDeps = {}): Promise<Job>
     wt = await worktrees.prepare(repo, job.id, job.issueNumber);
     recordEvent(job.id, "worktree", { path: wt.path, branch: wt.branch }, db);
 
-    const prompt = buildPrompt(repo.name, job.issueNumber, wt.branch);
+    const prompt = renderTemplate(resolveTemplateContent(repo.id, TEMPLATE_NAMES.main, db), {
+      ISSUE_NUM: job.issueNumber,
+      BRANCH: wt.branch,
+      REPO_NAME: repo.name,
+    });
     const session = await runSession(getJob(job.id, db) as Job, prompt, wt.path);
     if (session.exitCode !== 0) {
       return transitionJob(job.id, "needs_human", { errorMessage: "claude exited non-zero" }, db);

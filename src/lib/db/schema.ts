@@ -10,6 +10,7 @@ export const repos = sqliteTable("repos", {
   workingLabel: text("working_label").notNull().default("drydock:working"),
   needsHumanLabel: text("needs_human_label").notNull().default("drydock:needs-human"),
   defaultModel: text("default_model").notNull().default("claude-sonnet-4-5"),
+  dailyCostLimitUsd: real("daily_cost_limit_usd").notNull().default(10),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 
@@ -70,6 +71,7 @@ export const jobEvents = sqliteTable(
 export const adrs = sqliteTable("adrs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   jobId: integer("job_id").references(() => jobs.id, { onDelete: "set null" }),
+  repoId: integer("repo_id").references(() => repos.id, { onDelete: "cascade" }),
   filePath: text("file_path").notNull(),
   title: text("title").notNull(),
   status: text("status").notNull().default("pending_review"),

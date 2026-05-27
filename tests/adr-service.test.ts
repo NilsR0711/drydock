@@ -9,6 +9,7 @@ import {
   setAdrStatus,
 } from "@/lib/adr/service";
 import { type DB, createDb } from "@/lib/db/client";
+import { addRepo } from "@/lib/repos/service";
 import { beforeEach, describe, expect, it } from "vitest";
 
 let db: DB;
@@ -31,6 +32,16 @@ describe("ADR registration", () => {
     expect(adr.status).toBe("pending_review");
     expect(adr.title).toBe("Title");
     expect(pendingCount(db)).toBe(1);
+  });
+
+  it("registers and lists ADRs filtered by repo", () => {
+    const a = addRepo({ path: "/a", name: "a" }, db).id;
+    const b = addRepo({ path: "/b", name: "b" }, db).id;
+    registerAdr({ repoId: a, filePath: "/a/docs/adr/1.md", content: "# A" }, db);
+    registerAdr({ repoId: b, filePath: "/b/docs/adr/1.md", content: "# B" }, db);
+    expect(listAdrs(undefined, db, a).map((x) => x.title)).toEqual(["A"]);
+    expect(listAdrs(undefined, db, b).map((x) => x.title)).toEqual(["B"]);
+    expect(listAdrs(undefined, db)).toHaveLength(2);
   });
 
   it("is idempotent per file path", () => {

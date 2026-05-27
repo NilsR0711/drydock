@@ -61,6 +61,23 @@ describe("driveTick", () => {
     expect(started[0]).toBe(issue30Job.id);
   });
 
+  it("skips a repo over its cost limit but starts another repo's job", async () => {
+    const repoA = addRepo({ path: "/a", name: "a", dailyCostLimitUsd: 1 }, db).id;
+    const repoB = addRepo({ path: "/b", name: "b", dailyCostLimitUsd: 100 }, db).id;
+    const now = Math.floor(Date.now() / 1000);
+    // repoA already spent over its limit today
+    db.insert(jobs)
+      .values({ repoId: repoA, issueNumber: 99, status: "merged", startedAt: now, costUsd: 5 })
+      .run();
+    const jobA = createJob({ repoId: repoA, issueNumber: 1 }, db);
+    const jobB = createJob({ repoId: repoB, issueNumber: 2 }, db);
+    const started: number[] = [];
+    await driveTick(deps(started) as never);
+    expect(started).toContain(jobB.id);
+    expect(started).not.toContain(jobA.id);
+    expect(db.select().from(jobs).where(eq(jobs.id, jobA.id)).get()?.status).toBe("queued");
+  });
+
   it("starts nothing when paused", async () => {
     saveSettings({ paused: true }, db);
     createJob({ repoId, issueNumber: 1 }, db);

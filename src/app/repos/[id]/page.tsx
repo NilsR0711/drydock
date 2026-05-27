@@ -1,7 +1,11 @@
 import { IssueQueue } from "@/components/issue-queue";
 import { RepoActivity } from "@/components/repo-activity";
+import { RepoAdrPanel } from "@/components/repo-adr-panel";
+import { RepoCostPanel } from "@/components/repo-cost-panel";
 import { RepoSettingsBar } from "@/components/repo-settings-bar";
+import { listAdrs } from "@/lib/adr/service";
 import { getDb } from "@/lib/db/client";
+import { dailyCosts, todayCost } from "@/lib/db/cost-queries";
 import { getRepoWorkspace } from "@/lib/db/queries";
 import { jobEvents } from "@/lib/db/schema";
 import { getSettings } from "@/lib/settings/service";
@@ -20,9 +24,14 @@ export default async function RepoWorkspacePage({
   const ws = getRepoWorkspace(Number(id));
   if (!ws) notFound();
   const settings = getSettings();
+  const db = getDb();
+
+  const todayUsd = todayCost(db, ws.repo.id);
+  const daily = dailyCosts(db, ws.repo.id).map((d) => ({ day: d.day, costUsd: d.costUsd }));
+  const repoAdrs = listAdrs(undefined, db, ws.repo.id);
 
   const initialLog = ws.activeJob
-    ? getDb()
+    ? db
         .select()
         .from(jobEvents)
         .where(eq(jobEvents.jobId, ws.activeJob.id))
@@ -49,6 +58,8 @@ export default async function RepoWorkspacePage({
           pollIntervalSec={settings.pollIntervalSec}
         />
         <RepoActivity activeJob={ws.activeJob} recentJobs={ws.recentJobs} initialLog={initialLog} />
+        <RepoCostPanel todayUsd={todayUsd} limitUsd={ws.repo.dailyCostLimitUsd} daily={daily} />
+        <RepoAdrPanel adrs={repoAdrs} />
       </div>
     </div>
   );
