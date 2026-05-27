@@ -17,6 +17,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 function fakeGh() {
   return {
+    ensureLabel: vi.fn(async () => {}),
     addLabels: vi.fn(async () => {}),
     removeLabels: vi.fn(async () => {}),
     viewIssue: vi.fn(async () => ({
@@ -55,6 +56,15 @@ describe("issue server actions", () => {
     const repoId = seedRepoWithIssue(3);
     await addToQueueAction(repoId, 3);
     expect(gh.addLabels).toHaveBeenCalledWith(3, ["drydock:queue"]);
+  });
+
+  it("addToQueueAction ensures the queue label exists before applying it", async () => {
+    const repoId = seedRepoWithIssue(3);
+    await addToQueueAction(repoId, 3);
+    expect(gh.ensureLabel).toHaveBeenCalledWith("drydock:queue", expect.any(Object));
+    const ensureOrder = gh.ensureLabel.mock.invocationCallOrder[0] ?? 0;
+    const addOrder = gh.addLabels.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY;
+    expect(ensureOrder).toBeLessThan(addOrder);
   });
 
   it("removeFromQueueAction removes the queue label via gh", async () => {

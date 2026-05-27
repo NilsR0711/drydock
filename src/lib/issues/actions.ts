@@ -41,7 +41,12 @@ export async function startIssueAction(repoId: number, issueNumber: number) {
 export async function addToQueueAction(repoId: number, issueNumber: number) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  await getGh(repo.path).addLabels(issueNumber, [repo.queueLabel]);
+  const gh = getGh(repo.path);
+  await gh.ensureLabel(repo.queueLabel, {
+    color: "1f6feb",
+    description: "Queued for processing by Drydock",
+  });
+  await gh.addLabels(issueNumber, [repo.queueLabel]);
   setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true);
   revalidatePath(`/repos/${repoId}`);
   return listIssues(repoId);
@@ -93,6 +98,12 @@ export async function setIssueLabelsAction(
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
   const gh = getGh(repo.path);
+  if (add.includes(repo.queueLabel)) {
+    await gh.ensureLabel(repo.queueLabel, {
+      color: "1f6feb",
+      description: "Queued for processing by Drydock",
+    });
+  }
   if (add.length) await gh.addLabels(issueNumber, add);
   if (remove.length) await gh.removeLabels(issueNumber, remove);
   if (add.includes(repo.queueLabel)) setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true);

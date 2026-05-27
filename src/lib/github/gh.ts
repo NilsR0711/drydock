@@ -122,6 +122,39 @@ export class GhClient {
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue edit failed");
   }
 
+  /**
+   * Ensure a label exists in the repo before it's applied to an issue. Looks it
+   * up first so an existing label (with its own color/description) is left
+   * untouched, and only creates it when missing. Tolerates a concurrent create.
+   */
+  async ensureLabel(
+    name: string,
+    opts: { color?: string; description?: string } = {},
+  ): Promise<void> {
+    const list = await this.run(
+      "gh",
+      ["label", "list", "--json", "name", "--limit", "200"],
+      this.cwd,
+    );
+    const text = list.stdout.trim();
+    if (list.exitCode === 0 && text) {
+      try {
+        const parsed = z.array(z.object({ name: z.string() })).safeParse(JSON.parse(text));
+        if (parsed.success && parsed.data.some((l) => l.name === name)) return;
+      } catch {
+        // unparseable output: fall through and try to create the label
+      }
+    }
+    const args = ["label", "create", name];
+    if (opts.color) args.push("--color", opts.color);
+    if (opts.description) args.push("--description", opts.description);
+    const res = await this.run("gh", args, this.cwd);
+    // A concurrent create can win the race; treat "already exists" as success.
+    if (res.exitCode !== 0 && !/already exists/i.test(res.stderr)) {
+      throw new GhError(res.stderr || "gh label create failed");
+    }
+  }
+
   async addLabels(issueNumber: number, labels: string[]): Promise<void> {
     const res = await this.run(
       "gh",

@@ -217,3 +217,53 @@ describe("GhClient issue read/write", () => {
     expect(runner).toHaveBeenCalledWith("gh", ["issue", "reopen", "5"], "/repo");
   });
 });
+
+describe("GhClient.ensureLabel", () => {
+  it("does not create the label when it already exists", async () => {
+    const runner = vi.fn(async () => ({
+      stdout: JSON.stringify([{ name: "drydock:queue" }, { name: "bug" }]),
+      stderr: "",
+      exitCode: 0,
+    }));
+    const gh = new GhClient("/repo", runner);
+    await gh.ensureLabel("drydock:queue");
+    expect(runner).toHaveBeenCalledTimes(1);
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      ["label", "list", "--json", "name", "--limit", "200"],
+      "/repo",
+    );
+  });
+
+  it("creates the label when missing, with color and description", async () => {
+    const runner = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: JSON.stringify([{ name: "bug" }]), stderr: "", exitCode: 0 })
+      .mockResolvedValueOnce({ stdout: "", stderr: "", exitCode: 0 });
+    const gh = new GhClient("/repo", runner);
+    await gh.ensureLabel("drydock:queue", { color: "1f6feb", description: "Queued" });
+    expect(runner).toHaveBeenLastCalledWith(
+      "gh",
+      ["label", "create", "drydock:queue", "--color", "1f6feb", "--description", "Queued"],
+      "/repo",
+    );
+  });
+
+  it("tolerates a concurrent create (label already exists)", async () => {
+    const runner = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "[]", stderr: "", exitCode: 0 })
+      .mockResolvedValueOnce({ stdout: "", stderr: "label already exists", exitCode: 1 });
+    const gh = new GhClient("/repo", runner);
+    await expect(gh.ensureLabel("drydock:queue")).resolves.toBeUndefined();
+  });
+
+  it("throws on a real create failure", async () => {
+    const runner = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "[]", stderr: "", exitCode: 0 })
+      .mockResolvedValueOnce({ stdout: "", stderr: "HTTP 403", exitCode: 1 });
+    const gh = new GhClient("/repo", runner);
+    await expect(gh.ensureLabel("drydock:queue")).rejects.toBeInstanceOf(GhError);
+  });
+});
