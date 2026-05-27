@@ -8,7 +8,7 @@ import { registerAdr } from "./service";
  * pending_review (SPEC §6.5). Returns watchers so the orchestrator can close
  * them on shutdown.
  */
-export function watchAdrDirs(repos: Array<{ path: string }>): FSWatcher[] {
+export function watchAdrDirs(repos: Array<{ id?: number; path: string }>): FSWatcher[] {
   return repos.map((repo) => {
     const dir = join(repo.path, "docs/adr");
     // chokidar v4 dropped glob support: watch the dir, filter `.md` here.
@@ -17,7 +17,7 @@ export function watchAdrDirs(repos: Array<{ path: string }>): FSWatcher[] {
       if (!filePath.endsWith(".md")) return;
       try {
         const content = readFileSync(filePath, "utf8");
-        registerAdr({ filePath, content });
+        registerAdr({ repoId: repo.id, filePath, content });
       } catch {
         // file vanished between event and read; ignore
       }

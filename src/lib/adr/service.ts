@@ -19,7 +19,7 @@ export function parseAdrTitle(content: string, filePath: string): string {
  * does not create a duplicate row (the watcher may fire add + change).
  */
 export function registerAdr(
-  input: { jobId?: number; filePath: string; content: string },
+  input: { jobId?: number; repoId?: number; filePath: string; content: string },
   db: DB = getDb(),
 ): Adr {
   const existing = db.select().from(adrs).where(eq(adrs.filePath, input.filePath)).get();
@@ -28,6 +28,7 @@ export function registerAdr(
     .insert(adrs)
     .values({
       jobId: input.jobId ?? null,
+      repoId: input.repoId ?? null,
       filePath: input.filePath,
       title: parseAdrTitle(input.content, input.filePath),
       status: "pending_review",
@@ -36,9 +37,17 @@ export function registerAdr(
     .get();
 }
 
-export function listAdrs(status: AdrStatus | undefined, db: DB = getDb()): Adr[] {
-  const q = db.select().from(adrs);
-  const rows = status ? q.where(eq(adrs.status, status)).all() : q.all();
+export function listAdrs(status: AdrStatus | undefined, db: DB = getDb(), repoId?: number): Adr[] {
+  const conditions = [];
+  if (status) conditions.push(eq(adrs.status, status));
+  if (repoId !== undefined) conditions.push(eq(adrs.repoId, repoId));
+  const rows = conditions.length
+    ? db
+        .select()
+        .from(adrs)
+        .where(and(...conditions))
+        .all()
+    : db.select().from(adrs).all();
   return rows.sort((a, b) => b.createdAt - a.createdAt);
 }
 
