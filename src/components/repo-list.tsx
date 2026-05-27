@@ -2,22 +2,43 @@
 
 import { DirectoryPicker } from "@/components/directory-picker";
 import { ModelSelect } from "@/components/model-select";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import type { RepoWithStats } from "@/lib/db/queries";
 import { DEFAULT_MODEL } from "@/lib/models";
 import { addRepoAction, removeRepoAction } from "@/lib/repos/actions";
+import { Plus } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
 export function RepoList({ repos }: { repos: RepoWithStats[] }) {
   const [showAdd, setShowAdd] = useState(false);
   return (
-    <div className="space-y-4">
-      <Button onClick={() => setShowAdd((v) => !v)}>{showAdd ? "Cancel" : "Add repo"}</Button>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold">
+          Repositories <span className="text-muted-foreground">({repos.length})</span>
+        </h2>
+        <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
+          {showAdd ? (
+            "Cancel"
+          ) : (
+            <>
+              <Plus /> Add repo
+            </>
+          )}
+        </Button>
+      </div>
       {showAdd && <AddRepoForm onDone={() => setShowAdd(false)} />}
-      {repos.length === 0 && <p className="text-sm text-neutral-500">No repos yet.</p>}
-      <div className="grid gap-4 sm:grid-cols-2">
+      {repos.length === 0 && !showAdd && (
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            No repositories yet. Add one to start automating issues.
+          </CardContent>
+        </Card>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2">
         {repos.map((repo) => (
           <RepoCard key={repo.id} repo={repo} />
         ))}
@@ -29,34 +50,32 @@ export function RepoList({ repos }: { repos: RepoWithStats[] }) {
 function RepoCard({ repo }: { repo: RepoWithStats }) {
   const [pending, start] = useTransition();
   return (
-    <Card className="transition-shadow hover:shadow-md">
-      <CardHeader>
-        <CardTitle>
-          <Link href={`/repos/${repo.id}`} className="hover:underline">
-            {repo.name}
-          </Link>
-        </CardTitle>
-        <p className="truncate text-xs text-neutral-500">{repo.path}</p>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap gap-2 text-xs">
-          <span className="rounded-full bg-neutral-200 px-2 py-0.5 dark:bg-neutral-700">
-            {repo.queuedCount} Queue
-          </span>
-          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-800 dark:bg-blue-900 dark:text-blue-100">
-            {repo.workingCount} läuft
-          </span>
-          <span className="rounded-full bg-green-100 px-2 py-0.5 text-green-800 dark:bg-green-900 dark:text-green-100">
-            {repo.mergedCount} erledigt
-          </span>
+    <Card className="hover-elevate transition-shadow hover:shadow-md">
+      <CardContent className="space-y-3 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <Link
+              href={`/repos/${repo.id}`}
+              className="font-mono text-sm font-semibold hover:underline"
+            >
+              {repo.name}
+            </Link>
+            <p className="truncate text-xs text-muted-foreground">{repo.path}</p>
+          </div>
+          {repo.workingCount > 0 && <Badge status="working">running</Badge>}
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <Badge tone="neutral">{repo.queuedCount} queued</Badge>
+          <Badge tone="primary">{repo.workingCount} running</Badge>
+          <Badge tone="success">{repo.mergedCount} merged</Badge>
         </div>
         <div className="flex gap-2">
           <Link href={`/repos/${repo.id}`}>
-            <Button size="sm">Öffnen</Button>
+            <Button size="sm">Open</Button>
           </Link>
           <Button
             size="sm"
-            variant="destructive"
+            variant="ghost"
             disabled={pending}
             onClick={() => start(() => removeRepoAction(repo.id))}
           >
@@ -97,7 +116,7 @@ function AddRepoForm({ onDone }: { onDone: () => void }) {
             onChange={(e) => setName(e.target.value)}
             placeholder="Name"
             required
-            className="rounded border px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
           />
           <div className="flex gap-2">
             <input
@@ -105,14 +124,15 @@ function AddRepoForm({ onDone }: { onDone: () => void }) {
               onChange={(e) => setPath(e.target.value)}
               placeholder="/abs/path/to/repo"
               required
-              className="flex-1 rounded border px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+              className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
             />
             <Button type="button" variant="outline" size="sm" onClick={() => setPicking(true)}>
               Browse…
             </Button>
           </div>
+          {/* biome-ignore lint/a11y/noLabelWithoutControl: the control is the ModelSelect child */}
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <span className="text-neutral-500">Modell:</span>
+            <span className="text-muted-foreground">Modell:</span>
             <ModelSelect value={model} onChange={setModel} />
           </label>
           <Button type="submit" disabled={pending || !path} className="sm:col-span-2">
