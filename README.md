@@ -62,7 +62,9 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 🗂️ **Backlog & queue board** — drag issues from a synced backlog into a sortable, priority-ordered queue. One issue or many in flight, per repo.
 
-🤖 **Autonomous implementation** — spawns `claude -p … --output-format stream-json`, streams the agent's work, and opens a pull request.
+🤖 **Autonomous implementation** — spawns a coding agent (`claude` or the `codex` CLI), streams its work, and opens a pull request.
+
+🔌 **Pluggable agents** — choose `claude` or `codex` per repo (with a global default in settings); a preflight check verifies the selected CLI is installed.
 
 🔧 **CI babysitting & auto-merge** — polls `gh pr checks`, merges on green, and on red resumes the session with a CI-fix prompt (up to **3 retries**), then files a follow-up issue and hands off.
 
@@ -70,7 +72,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 💸 **Cost tracking** — per-job and aggregate spend from the agent's reported `total_cost_usd` (or estimated from tokens), with a **daily cost limit** that gates the driver loop.
 
-⏯️ **Global pause & per-repo controls** — pause everything from the navbar, pick a model per repo, toggle serial vs. parallel processing, and customize the queue label.
+⏯️ **Global pause & per-repo controls** — pause everything from the navbar, pick an agent and model per repo, toggle serial vs. parallel processing, and customize the queue label.
 
 📐 **ADR review queue** — a file watcher surfaces new `docs/adr/*.md` decisions for approve/reject.
 
