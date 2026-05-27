@@ -70,7 +70,7 @@ describe("runJob", () => {
     const deps = baseDeps(removed);
     const job = createJob({ repoId, issueNumber: 1 }, db);
     await runJob(job.id, deps as never);
-    const prompt = (deps.runSession as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+    const prompt = (deps.runSession as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
     expect(prompt).toContain("DO ISSUE 1 ON ");
   });
 

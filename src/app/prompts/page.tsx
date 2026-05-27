@@ -24,7 +24,7 @@ export default function PromptsPage() {
         <PromptEditor
           repos={repos}
           initialContent={active?.content ?? DEFAULT_PROMPT}
-          versions={versions}
+          initialVersions={versions}
         />
       )}
     </div>
