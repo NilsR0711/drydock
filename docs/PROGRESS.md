@@ -12,16 +12,16 @@ Phase tracking. Continuously maintained; survives context compaction.
 - [x] Phase 5 – CI babysitter + auto-merge
 - [x] Phase 6 – Prompt editor
 - [x] Phase 7 – ADR review queue
-- [ ] Phase 8 – Polish + robustness
+- [x] Phase 8 – Polish + robustness
 
 ## Current focus
 
-Phase 7 complete. Next: Phase 8 (graceful shutdown, crash recovery wiring, DB backup, global pause, daily-cost limit, README).
+All phases P0-P8 complete. Project done: 70 tests, biome clean, build green, dev serves on 127.0.0.1:3737.
 
 ## Last 5 actions
 
-- ADR service (parseAdrTitle, idempotent registerAdr, approve/reject, pendingCount).
-- chokidar v4 watcher (dir watch + .md filter, no globs) with real temp-dir test.
-- /adrs review UI (react-markdown) + approve/reject actions + header pending badge.
-- Switched lang/metadata to English.
-- ADR 011; 61 tests green; biome + build green. Tag phase-7.
+- Settings service (global pause + daily-cost gate) + settings UI/action.
+- DB backup with 7-day retention (runBackup) + `pnpm backup` script.
+- Graceful shutdown (SIGINT/SIGTERM -> interrupted + subprocess SIGTERM) + abort registry.
+- README quickstart; abort wired into spawnClaudeSession.
+- ADR 012; 70 tests green; biome + build green. Tag phase-8.

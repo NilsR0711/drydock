@@ -7,6 +7,7 @@ import { StreamJsonParser } from "@/lib/stream/parser";
 import { eq } from "drizzle-orm";
 import { transitionJob } from "./jobs";
 import { estimateCost } from "./pricing";
+import { clearAbort, registerAbort } from "./singleton";
 
 export interface ClaudeSessionDeps {
   runner?: StreamRunner;
@@ -90,7 +91,10 @@ export async function spawnClaudeSession(
     onStderr: (chunk) => broker.publish(job.id, { type: "error", payload: { stderr: chunk } }),
   });
 
+  // Allow graceful shutdown / manual abort to SIGTERM this subprocess.
+  registerAbort(job.id, handle.abort);
   const exitCode = await handle.done;
+  clearAbort(job.id);
   for (const event of parser.flush()) {
     broker.publish(job.id, { type: event.type, payload: serializeEvent(event) });
   }
