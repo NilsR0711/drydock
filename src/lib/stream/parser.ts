@@ -78,7 +78,8 @@ export interface ParsedEvent {
   outputTokens: number;
   costUsd?: number;
   isError: boolean;
-  raw: StreamEvent;
+  /** The original event as emitted by the agent CLI (shape varies per agent). */
+  raw: unknown;
 }
 
 /** Parse one NDJSON line. Returns null for blank lines; throws on malformed JSON. */

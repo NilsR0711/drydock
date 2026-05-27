@@ -1,0 +1,9 @@
+{"type":"thread.started","thread_id":"th_codex_abc"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"i1","item_type":"reasoning"}}
+{"type":"item.completed","item":{"id":"i1","item_type":"reasoning","text":"Looking at the failing test first."}}
+{"type":"item.completed","item":{"id":"i2","item_type":"command_execution","command":"npm test","exit_code":1,"aggregated_output":"1 failing"}}
+{"type":"item.completed","item":{"id":"i3","item_type":"file_change","changes":[{"path":"src/a.ts","kind":"modified"}]}}
+{"type":"item.completed","item":{"id":"i4","item_type":"mcp_tool_call","server":"fs","tool":"write"}}
+{"type":"item.completed","item":{"id":"i5","item_type":"assistant_message","text":"Fixed the off-by-one error."}}
+{"type":"turn.completed","usage":{"input_tokens":12000,"cached_input_tokens":2000,"output_tokens":1500,"reasoning_output_tokens":500}}

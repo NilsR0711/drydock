@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { AgentSelect } from "@/components/agent-select";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import type { AgentId } from "@/lib/agents/types";
 import { saveSettingsAction } from "@/lib/settings/actions";
 import type { Settings } from "@/lib/settings/service";
 
@@ -65,6 +67,9 @@ export function SettingsForm({ initial }: { initial: Settings }) {
           className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         />
       </Field>
+      <Field label="Default agent">
+        <AgentSelect value={s.defaultAgent} onChange={(v: AgentId) => set("defaultAgent", v)} />
+      </Field>
       <Field label="Default model">
         <input
           value={s.defaultModel}
@@ -76,6 +81,13 @@ export function SettingsForm({ initial }: { initial: Settings }) {
         <input
           value={s.claudePath}
           onChange={(e) => set("claudePath", e.target.value)}
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        />
+      </Field>
+      <Field label="codex CLI path">
+        <input
+          value={s.codexPath}
+          onChange={(e) => set("codexPath", e.target.value)}
           className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         />
       </Field>
