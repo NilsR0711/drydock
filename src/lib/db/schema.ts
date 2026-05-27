@@ -12,6 +12,7 @@ export const repos = sqliteTable("repos", {
   defaultModel: text("default_model").notNull().default("claude-sonnet-4-5"),
   dailyCostLimitUsd: real("daily_cost_limit_usd").notNull().default(10),
   adrGating: integer("adr_gating", { mode: "boolean" }).notNull().default(false),
+  sequential: integer("sequential", { mode: "boolean" }).notNull().default(true),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 

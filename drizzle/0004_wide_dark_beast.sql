@@ -1,0 +1,1 @@
+ALTER TABLE `repos` ADD `sequential` integer DEFAULT true NOT NULL;
