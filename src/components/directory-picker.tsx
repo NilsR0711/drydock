@@ -1,11 +1,11 @@
 "use client";
 
+import { Check, Folder, FolderGit2, X } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { browseDirectoryAction } from "@/lib/fs/actions";
 import type { BrowseResult } from "@/lib/fs/browse";
-import { Check, Folder, FolderGit2, X } from "lucide-react";
-import { useEffect, useState, useTransition } from "react";
 
 /**
  * Server-backed directory picker. Browsers cannot expose a real filesystem path

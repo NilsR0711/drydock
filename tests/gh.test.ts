@@ -1,6 +1,6 @@
+import { describe, expect, it, vi } from "vitest";
 import type { CommandResult } from "@/lib/exec/runner";
 import { GhClient, GhError } from "@/lib/github/gh";
-import { describe, expect, it, vi } from "vitest";
 
 function fakeRunner(result: Partial<CommandResult>) {
   return vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, ...result }));

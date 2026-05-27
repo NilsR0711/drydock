@@ -1,11 +1,11 @@
+import { eq } from "drizzle-orm";
+import { notFound } from "next/navigation";
 import { JobMetrics } from "@/components/job-metrics";
 import { LogViewer } from "@/components/log-viewer";
 import { Badge } from "@/components/ui/badge";
 import { getDb } from "@/lib/db/client";
 import { jobEvents } from "@/lib/db/schema";
 import { getJob } from "@/lib/orchestrator/jobs";
-import { eq } from "drizzle-orm";
-import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 

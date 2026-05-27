@@ -1,7 +1,7 @@
-import { type DB, getDb } from "@/lib/db/client";
-import { type Repo, repos } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { type DB, getDb } from "@/lib/db/client";
+import { type Repo, repos } from "@/lib/db/schema";
 
 export const repoInputSchema = z.object({
   path: z.string().min(1, "path is required"),

@@ -1,8 +1,8 @@
+import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { type DB, getDb } from "@/lib/db/client";
 import { todayCost } from "@/lib/db/cost-queries";
 import { repos, settings } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import { z } from "zod";
 
 export const settingsSchema = z.object({
   paused: z.boolean().default(false),

@@ -1,6 +1,6 @@
 import { asc, desc, eq } from "drizzle-orm";
 import { type DB, getDb } from "./client";
-import { type Issue, type Job, type Repo, issues, jobs, repos } from "./schema";
+import { type Issue, issues, type Job, jobs, type Repo, repos } from "./schema";
 
 export interface RepoWithStats extends Repo {
   activeJobs: number;

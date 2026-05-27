@@ -1,5 +1,7 @@
+import { eq } from "drizzle-orm";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { registerAdr } from "@/lib/adr/service";
-import { type DB, createDb } from "@/lib/db/client";
+import { createDb, type DB } from "@/lib/db/client";
 import { type Job, jobs } from "@/lib/db/schema";
 import type { Worktree } from "@/lib/git/worktree";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
@@ -7,8 +9,6 @@ import { runJob } from "@/lib/orchestrator/run-job";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { saveTemplate } from "@/lib/prompts/templates";
 import { addRepo } from "@/lib/repos/service";
-import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let db: DB;
 let repoId: number;

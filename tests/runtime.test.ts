@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   acquireInstanceLock,
   isDraining,
@@ -9,7 +10,6 @@ import {
   unregisterActiveJob,
   waitForIdle,
 } from "@/lib/orchestrator/runtime";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 let home: string;
 beforeEach(() => {
@@ -18,7 +18,6 @@ beforeEach(() => {
   setDrainMode(false);
 });
 afterEach(() => {
-  // biome-ignore lint/performance/noDelete: cleaning up test env
   delete process.env.DRYDOCK_HOME;
 });
 

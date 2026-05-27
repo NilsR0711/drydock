@@ -1,3 +1,6 @@
+import { eq } from "drizzle-orm";
+import Link from "next/link";
+import { notFound } from "next/navigation";
 import { IssueBoard } from "@/components/issue-board";
 import { RepoActivity } from "@/components/repo-activity";
 import { RepoAdrPanel } from "@/components/repo-adr-panel";
@@ -9,17 +12,10 @@ import { dailyCosts, todayCost } from "@/lib/db/cost-queries";
 import { getRepoWorkspace } from "@/lib/db/queries";
 import { jobEvents } from "@/lib/db/schema";
 import { getSettings } from "@/lib/settings/service";
-import { eq } from "drizzle-orm";
-import Link from "next/link";
-import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
-export default async function RepoWorkspacePage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function RepoWorkspacePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ws = getRepoWorkspace(Number(id));
   if (!ws) notFound();

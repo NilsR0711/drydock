@@ -1,10 +1,10 @@
 "use client";
 
+import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { saveSettingsAction } from "@/lib/settings/actions";
 import type { Settings } from "@/lib/settings/service";
-import { useState, useTransition } from "react";
 
 export function SettingsForm({ initial }: { initial: Settings }) {
   const [s, setS] = useState(initial);

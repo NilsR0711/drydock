@@ -1,6 +1,6 @@
+import { eq } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { type JobEvent, jobEvents } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 
 export interface BrokerEvent {
   type: string;

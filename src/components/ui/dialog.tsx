@@ -22,11 +22,11 @@ export function Dialog({
 
   if (!open) return null;
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop, click outside closes the dialog
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8"
       onMouseDown={onClose}
     >
-      {/* biome-ignore lint/a11y/useSemanticElements: custom backdrop/focus behavior, native <dialog> would alter it */}
       <div
         role="dialog"
         aria-modal="true"

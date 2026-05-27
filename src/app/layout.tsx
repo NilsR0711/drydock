@@ -1,10 +1,10 @@
+import type { Metadata } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { AppShell } from "@/components/app-shell";
 import { Providers } from "@/components/providers";
 import { pendingCount } from "@/lib/adr/service";
 import { needsHumanJobs } from "@/lib/db/queries";
 import { getSettings } from "@/lib/settings/service";
-import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";

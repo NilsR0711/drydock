@@ -1,10 +1,10 @@
 "use client";
 
+import { useState, useTransition } from "react";
 import { ModelSelect } from "@/components/model-select";
 import { useToast } from "@/components/ui/toast";
 import type { Repo } from "@/lib/db/schema";
 import { updateRepoAction } from "@/lib/repos/actions";
-import { useState, useTransition } from "react";
 
 export function RepoSettingsBar({ repo }: { repo: Repo }) {
   const [model, setModel] = useState(repo.defaultModel);

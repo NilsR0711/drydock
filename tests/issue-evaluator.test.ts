@@ -1,5 +1,5 @@
-import { evaluateIssue } from "@/lib/issues/evaluator";
 import { describe, expect, it } from "vitest";
+import { evaluateIssue } from "@/lib/issues/evaluator";
 
 const issue = (over: Partial<{ title: string; body: string; labels: string[] }> = {}) => ({
   number: 1,

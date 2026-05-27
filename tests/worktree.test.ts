@@ -1,7 +1,7 @@
+import { describe, expect, it } from "vitest";
 import type { Repo } from "@/lib/db/schema";
 import type { CommandResult, CommandRunner } from "@/lib/exec/runner";
 import { WorktreeManager, worktreeHome } from "@/lib/git/worktree";
-import { describe, expect, it } from "vitest";
 
 const repo = { id: 7, path: "/repos/acme", name: "acme", defaultBranch: "main" } as Repo;
 
@@ -95,7 +95,6 @@ describe("WorktreeManager", () => {
     const prev = process.env.DRYDOCK_HOME;
     process.env.DRYDOCK_HOME = "/custom/home";
     expect(worktreeHome()).toBe("/custom/home");
-    // biome-ignore lint/performance/noDelete: restoring original test env
     if (prev === undefined) delete process.env.DRYDOCK_HOME;
     else process.env.DRYDOCK_HOME = prev;
   });

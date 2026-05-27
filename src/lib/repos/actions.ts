@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { type RepoInput, addRepo, removeRepo, updateRepo } from "./service";
+import { addRepo, type RepoInput, removeRepo, updateRepo } from "./service";
 
 export async function addRepoAction(input: RepoInput) {
   const repo = addRepo(input);

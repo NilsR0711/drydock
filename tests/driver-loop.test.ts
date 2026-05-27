@@ -1,4 +1,6 @@
-import { type DB, createDb } from "@/lib/db/client";
+import { eq } from "drizzle-orm";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createDb, type DB } from "@/lib/db/client";
 import { type Job, jobs } from "@/lib/db/schema";
 import { reorderIssues, syncIssuesFromGh } from "@/lib/issues/service";
 import { driveTick } from "@/lib/orchestrator/driver-loop";
@@ -6,8 +8,6 @@ import { createJob, getJob, listJobsByStatus } from "@/lib/orchestrator/jobs";
 import { setDrainMode } from "@/lib/orchestrator/runtime";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
-import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let db: DB;
 let repoId: number;

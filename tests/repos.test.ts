@@ -1,8 +1,8 @@
-import { type DB, createDb } from "@/lib/db/client";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createDb, type DB } from "@/lib/db/client";
 import { listRepos, listReposWithStats } from "@/lib/db/queries";
 import { jobs } from "@/lib/db/schema";
 import { addRepo, removeRepo, updateRepo } from "@/lib/repos/service";
-import { beforeEach, describe, expect, it } from "vitest";
 
 let db: DB;
 beforeEach(() => {

@@ -1,8 +1,8 @@
-import { type DB, createDb } from "@/lib/db/client";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createDb, type DB } from "@/lib/db/client";
 import { createJob } from "@/lib/orchestrator/jobs";
 import { addRepo } from "@/lib/repos/service";
 import { LogBroker, type Subscriber } from "@/lib/stream/broker";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let db: DB;
 let jobId: number;

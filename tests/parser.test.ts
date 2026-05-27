@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { StreamJsonParser, parseLine } from "@/lib/stream/parser";
 import { describe, expect, it } from "vitest";
+import { parseLine, StreamJsonParser } from "@/lib/stream/parser";
 
 function fixture(name: string): string {
   return readFileSync(

@@ -1,6 +1,6 @@
+import { describe, expect, it } from "vitest";
 import { DEFAULT_MODEL, MODELS } from "@/lib/models";
 import { PRICING } from "@/lib/orchestrator/pricing";
-import { describe, expect, it } from "vitest";
 
 describe("models", () => {
   it("defaults to Claude Opus 4.7", () => {

@@ -1,11 +1,11 @@
-import { type DB, getDb } from "@/lib/db/client";
-import { type PromptTemplate, promptTemplates } from "@/lib/db/schema";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
+import { type DB, getDb } from "@/lib/db/client";
+import { type PromptTemplate, promptTemplates } from "@/lib/db/schema";
 import { DEFAULT_TEMPLATES, type TemplateName } from "./defaults";
 
-export { renderTemplate, SUPPORTED_VARIABLES } from "./render";
 export type { TemplateVar, TemplateVars } from "./render";
+export { renderTemplate, SUPPORTED_VARIABLES } from "./render";
 
 export const MAX_VERSIONS = 20;
 

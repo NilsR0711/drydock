@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { getRepo } from "@/lib/db/queries";
 import { getGh } from "@/lib/issues/gh-factory";
 import {
@@ -9,7 +10,6 @@ import {
   syncIssuesFromGh,
 } from "@/lib/issues/service";
 import { createJob } from "@/lib/orchestrator/jobs";
-import { revalidatePath } from "next/cache";
 
 /** Fetch all open issues from GitHub and cache them (backlog + queue). */
 export async function syncRepoIssuesAction(repoId: number) {

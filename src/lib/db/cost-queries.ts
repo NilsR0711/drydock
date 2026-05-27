@@ -1,4 +1,4 @@
-import { type SQL, and, desc, sql } from "drizzle-orm";
+import { and, desc, type SQL, sql } from "drizzle-orm";
 import { type DB, getDb } from "./client";
 import { type Job, jobs } from "./schema";
 

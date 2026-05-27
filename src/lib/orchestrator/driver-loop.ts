@@ -1,11 +1,11 @@
+import { and, eq } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
-import { type Job, issues } from "@/lib/db/schema";
+import { issues, type Job } from "@/lib/db/schema";
 import { GhClient, type GhIssue } from "@/lib/github/gh";
 import { evaluateIssue } from "@/lib/issues/evaluator";
 import { syncIssuesFromGh } from "@/lib/issues/service";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
-import { and, eq } from "drizzle-orm";
 import { createJob, listJobsByStatus, nextQueuedJob, transitionJob } from "./jobs";
 import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";

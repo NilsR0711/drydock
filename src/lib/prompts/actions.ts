@@ -2,11 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import {
-  type TemplateInput,
   getActiveTemplate,
   listVersions,
   resolveTemplateContent,
   saveTemplate,
+  type TemplateInput,
 } from "./templates";
 
 export async function saveTemplateAction(input: TemplateInput) {
