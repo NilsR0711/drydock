@@ -2,7 +2,7 @@ import { type DB, getDb } from "@/lib/db/client";
 import type { Job } from "@/lib/db/schema";
 import { followupIssues } from "@/lib/db/schema";
 import type { GhClient, PrCheck } from "@/lib/github/gh";
-import { getJob, transitionJob } from "./jobs";
+import { getJob, recordEvent, transitionJob } from "./jobs";
 
 export type CiOutcome = "pending" | "passed" | "failed";
 
@@ -90,9 +90,22 @@ export async function ciBabysitter(
       );
     }
 
+    // Without a recorded session id we cannot resume; resuming with an empty id
+    // would start a fresh, context-less session. Hand over to a human instead.
+    if (!job.sessionId) {
+      recordEvent(job.id, "status", { reason: "missing session id, cannot resume for CI fix" }, db);
+      return transitionJob(
+        job.id,
+        "needs_human",
+        { errorMessage: "CI failed but no session id to resume" },
+        db,
+      );
+    }
+
+    const sessionId = job.sessionId;
     job = transitionJob(job.id, "retrying", { ciRetryCount: job.ciRetryCount + 1 }, db);
     const failedLog = await deps.gh.failedRunLog(prNumber);
-    await deps.resumeSession(job, job.sessionId ?? "", failedLog);
+    await deps.resumeSession(job, sessionId, failedLog);
     job = transitionJob(job.id, "ci_running", {}, db);
     // loop again to re-poll the now-updated PR
   }

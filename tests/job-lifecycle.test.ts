@@ -77,4 +77,15 @@ describe("crash recovery", () => {
     expect(getJob(a.id, db)?.status).toBe("interrupted");
     expect(getJob(b.id, db)?.status).toBe("interrupted");
   });
+
+  it("recovers a job stranded in ci_failed", () => {
+    const c = createJob({ repoId, issueNumber: 7 }, db);
+    transitionJob(c.id, "working", {}, db);
+    transitionJob(c.id, "ci_running", {}, db);
+    transitionJob(c.id, "ci_failed", {}, db);
+
+    const count = recoverInterruptedJobs(db);
+    expect(count).toBe(1);
+    expect(getJob(c.id, db)?.status).toBe("interrupted");
+  });
 });

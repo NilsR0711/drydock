@@ -17,7 +17,7 @@ const TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   queued: ["working", "aborted", "interrupted"],
   working: ["ci_running", "needs_human", "aborted", "interrupted"],
   ci_running: ["ci_failed", "merged", "needs_human", "aborted", "interrupted"],
-  ci_failed: ["retrying", "needs_human", "aborted"],
+  ci_failed: ["retrying", "needs_human", "aborted", "interrupted"],
   retrying: ["ci_running", "needs_human", "aborted", "interrupted"],
   merged: [],
   needs_human: ["queued", "aborted"],

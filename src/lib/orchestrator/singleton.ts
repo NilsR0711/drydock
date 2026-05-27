@@ -1,8 +1,9 @@
 import { getDb } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { recoverInterruptedJobs } from "./driver";
 import { startDriverLoop, stopDriverLoop } from "./driver-loop";
+import { transitionJob } from "./jobs";
 import { acquireInstanceLock, setDrainMode, waitForIdle } from "./runtime";
 
 /**
@@ -29,18 +30,35 @@ export function clearAbort(jobId: number): void {
 export async function gracefulShutdown(): Promise<void> {
   setDrainMode(true);
   stopDriverLoop();
+
+  // Signal every running subprocess to terminate first; this unblocks the
+  // in-flight runJob() promises so their `finally` worktree cleanup can run.
+  for (const abort of abortHandles.values()) abort(5000);
+  abortHandles.clear();
+
+  // Wait for active jobs to settle (their cleanup + transitions) before exiting.
   await waitForIdle(5000);
+
+  // Anything still in an in-flight state (e.g. its runner did not exit within
+  // the grace window) is marked interrupted via the state machine + event log,
+  // consistent with crash recovery.
   try {
     const db = getDb();
-    db.update(jobs)
-      .set({ status: "interrupted" })
-      .where(inArray(jobs.status, ["working", "ci_running", "retrying"]))
-      .run();
+    const stuck = db
+      .select()
+      .from(jobs)
+      .where(inArray(jobs.status, ["working", "ci_running", "ci_failed", "retrying"]))
+      .all();
+    for (const job of stuck) {
+      try {
+        transitionJob(job.id, "interrupted", {}, db);
+      } catch (err) {
+        console.error(`[orchestrator] shutdown transition failed for job ${job.id}`, err);
+      }
+    }
   } catch (err) {
     console.error("[orchestrator] shutdown DB update failed", err);
   }
-  for (const abort of abortHandles.values()) abort(5000);
-  abortHandles.clear();
 }
 
 export function startOrchestrator(): void {
@@ -65,14 +83,11 @@ export function startOrchestrator(): void {
 
   const onSignal = async (sig: NodeJS.Signals) => {
     console.log(`[orchestrator] ${sig} received, shutting down gracefully`);
+    // Await full shutdown — including waitForIdle so in-flight jobs finish their
+    // worktree cleanup — before the hard process.exit cuts execution short.
     await gracefulShutdown();
     process.exit(0);
   };
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
-}
-
-// Internal helper retained for symmetry with the recovery path.
-export function _markInterrupted(jobId: number): void {
-  getDb().update(jobs).set({ status: "interrupted" }).where(eq(jobs.id, jobId)).run();
 }

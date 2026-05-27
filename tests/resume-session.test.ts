@@ -1,4 +1,5 @@
 import { type DB, createDb } from "@/lib/db/client";
+import { jobs } from "@/lib/db/schema";
 import type { StreamCallbacks, StreamHandle, StreamRunner } from "@/lib/exec/stream-runner";
 import { resumeClaudeSession } from "@/lib/orchestrator/claude-session";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
@@ -6,6 +7,7 @@ import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { saveTemplate } from "@/lib/prompts/templates";
 import { addRepo } from "@/lib/repos/service";
 import { LogBroker } from "@/lib/stream/broker";
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 let db: DB;
@@ -48,5 +50,32 @@ describe("resumeClaudeSession", () => {
       broker: new LogBroker(db),
     });
     expect(seenPrompt).toContain("FIXLOG: BOOM");
+  });
+
+  it("persists cost and tokens additively onto the existing job totals", async () => {
+    const result =
+      '{"type":"result","subtype":"success","session_id":"sess-r","is_error":false,' +
+      '"total_cost_usd":0.02,"usage":{"input_tokens":500,"output_tokens":100}}\n';
+    const runner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks): StreamHandle => {
+      cb.onStdout(result);
+      return { done: Promise.resolve(0), abort: () => {} };
+    };
+    const job = createJob({ repoId, issueNumber: 3 }, db);
+    // Seed prior usage from the initial session.
+    db.update(jobs)
+      .set({ costUsd: 0.05, totalInputTokens: 1000, totalOutputTokens: 200 })
+      .where(eq(jobs.id, job.id))
+      .run();
+
+    await resumeClaudeSession(getJob(job.id, db) as never, "sess-r", "log", "/work", {
+      runner,
+      db,
+      broker: new LogBroker(db),
+    });
+
+    const after = getJob(job.id, db);
+    expect(after?.costUsd).toBeCloseTo(0.07, 5);
+    expect(after?.totalInputTokens).toBe(1500);
+    expect(after?.totalOutputTokens).toBe(300);
   });
 });

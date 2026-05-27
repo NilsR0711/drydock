@@ -62,4 +62,18 @@ describe("instance lock", () => {
     );
     expect(acquireInstanceLock()).toBe(false);
   });
+
+  it("takes over a corrupt lock file and rewrites it with our pid", () => {
+    writeFileSync(join(home, "instance.lock"), "not json at all");
+    expect(acquireInstanceLock()).toBe(true);
+    const content = readFileSync(join(home, "instance.lock"), "utf8");
+    expect(content).toContain(String(process.pid));
+  });
+
+  it("writes our pid after taking over a stale lock", () => {
+    writeFileSync(join(home, "instance.lock"), JSON.stringify({ pid: 999999999, ts: 1 }));
+    expect(acquireInstanceLock()).toBe(true);
+    const parsed = JSON.parse(readFileSync(join(home, "instance.lock"), "utf8"));
+    expect(parsed.pid).toBe(process.pid);
+  });
 });
