@@ -8,6 +8,37 @@ export const ghIssueSchema = z.object({
 });
 export type GhIssue = z.infer<typeof ghIssueSchema>;
 
+export const ghIssueDetailSchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  body: z.string().default(""),
+  state: z.string().default("open"),
+  labels: z.array(z.object({ name: z.string() })).default([]),
+  comments: z
+    .array(
+      z.object({
+        author: z.object({ login: z.string() }).default({ login: "" }),
+        body: z.string().default(""),
+        createdAt: z.string().default(""),
+      }),
+    )
+    .default([]),
+});
+
+export interface IssueComment {
+  author: string;
+  body: string;
+  createdAt: string;
+}
+export interface IssueDetail {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  labels: string[];
+  comments: IssueComment[];
+}
+
 export const prCheckSchema = z.object({
   name: z.string(),
   state: z.string(),
@@ -34,6 +65,78 @@ export class GhClient {
     const parsed = z.array(ghIssueSchema).safeParse(JSON.parse(res.stdout || "[]"));
     if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
     return parsed.data;
+  }
+
+  async listAllIssues(): Promise<GhIssue[]> {
+    const res = await this.run(
+      "gh",
+      ["issue", "list", "--state", "open", "--json", "number,title,labels,state", "--limit", "200"],
+      this.cwd,
+    );
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue list failed");
+    const parsed = z.array(ghIssueSchema).safeParse(JSON.parse(res.stdout || "[]"));
+    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
+    return parsed.data;
+  }
+
+  async viewIssue(issueNumber: number): Promise<IssueDetail> {
+    const res = await this.run(
+      "gh",
+      ["issue", "view", String(issueNumber), "--json", "number,title,body,state,labels,comments"],
+      this.cwd,
+    );
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue view failed");
+    const parsed = ghIssueDetailSchema.safeParse(JSON.parse(res.stdout || "{}"));
+    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
+    const d = parsed.data;
+    return {
+      number: d.number,
+      title: d.title,
+      body: d.body,
+      state: d.state,
+      labels: d.labels.map((l) => l.name),
+      comments: d.comments.map((c) => ({
+        author: c.author.login,
+        body: c.body,
+        createdAt: c.createdAt,
+      })),
+    };
+  }
+
+  async editIssue(issueNumber: number, patch: { title?: string; body?: string }): Promise<void> {
+    const args = ["issue", "edit", String(issueNumber)];
+    if (patch.title !== undefined) args.push("--title", patch.title);
+    if (patch.body !== undefined) args.push("--body", patch.body);
+    const res = await this.run("gh", args, this.cwd);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue edit failed");
+  }
+
+  async addLabels(issueNumber: number, labels: string[]): Promise<void> {
+    const res = await this.run(
+      "gh",
+      ["issue", "edit", String(issueNumber), "--add-label", labels.join(",")],
+      this.cwd,
+    );
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue edit failed");
+  }
+
+  async removeLabels(issueNumber: number, labels: string[]): Promise<void> {
+    const res = await this.run(
+      "gh",
+      ["issue", "edit", String(issueNumber), "--remove-label", labels.join(",")],
+      this.cwd,
+    );
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue edit failed");
+  }
+
+  async closeIssue(issueNumber: number): Promise<void> {
+    const res = await this.run("gh", ["issue", "close", String(issueNumber)], this.cwd);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue close failed");
+  }
+
+  async reopenIssue(issueNumber: number): Promise<void> {
+    const res = await this.run("gh", ["issue", "reopen", String(issueNumber)], this.cwd);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue reopen failed");
   }
 
   async prChecks(prNumber: number): Promise<PrCheck[]> {

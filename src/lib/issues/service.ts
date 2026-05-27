@@ -62,6 +62,37 @@ export function syncIssuesFromGh(repoId: number, fetched: GhIssue[], db: DB = ge
   }
 }
 
+/** Add or remove the queue label in the locally cached labels JSON for one issue. */
+export function setQueueLabelLocal(
+  repoId: number,
+  number: number,
+  queueLabel: string,
+  inQueue: boolean,
+  db: DB = getDb(),
+): void {
+  const row = db
+    .select()
+    .from(issues)
+    .where(and(eq(issues.repoId, repoId), eq(issues.number, number)))
+    .get();
+  if (!row) return;
+  let labels: string[];
+  try {
+    const v = JSON.parse(row.labels);
+    labels = Array.isArray(v) ? v : [];
+  } catch {
+    labels = [];
+  }
+  const has = labels.includes(queueLabel);
+  let next = labels;
+  if (inQueue && !has) next = [...labels, queueLabel];
+  if (!inQueue && has) next = labels.filter((l) => l !== queueLabel);
+  db.update(issues)
+    .set({ labels: JSON.stringify(next) })
+    .where(eq(issues.id, row.id))
+    .run();
+}
+
 /** Persist a new manual ordering. `orderedNumbers` is the full list, first = highest. */
 export function reorderIssues(repoId: number, orderedNumbers: number[], db: DB = getDb()): void {
   orderedNumbers.forEach((number, index) => {

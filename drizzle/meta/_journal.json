@@ -29,6 +29,13 @@
       "when": 1779893475331,
       "tag": "0003_aromatic_shen",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1779895716130,
+      "tag": "0004_wide_dark_beast",
+      "breakpoints": true
     }
   ]
 }

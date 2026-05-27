@@ -9,6 +9,7 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
   const [model, setModel] = useState(repo.defaultModel);
   const [limit, setLimit] = useState(repo.dailyCostLimitUsd);
   const [adrGating, setAdrGating] = useState(repo.adrGating);
+  const [sequential, setSequential] = useState(repo.sequential);
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
 
@@ -41,6 +42,14 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
     });
   }
 
+  function changeSequential(value: boolean) {
+    setSequential(value);
+    setSaved(false);
+    start(() => {
+      updateRepoAction(repo.id, { sequential: value }).then(flagSaved);
+    });
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-card-border bg-card p-3 text-sm">
       <span className="text-muted-foreground">Queue label:</span>
@@ -61,6 +70,14 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
           onChange={(e) => changeGating(e.target.checked)}
         />
         ADR gate
+      </label>
+      <label className="flex items-center gap-1.5 text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={sequential}
+          onChange={(e) => changeSequential(e.target.checked)}
+        />
+        Sequential (wait for merge)
       </label>
       <span className="text-muted-foreground">Model:</span>
       <ModelSelect value={model} onChange={change} />
