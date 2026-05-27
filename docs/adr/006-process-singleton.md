@@ -11,9 +11,12 @@ server process, started deterministically.
 
 ## Decision
 
-`instrumentation.ts#register` runs once per server process (Node runtime only)
-and calls `startOrchestrator()`, which is guarded by a module-level `started`
-flag. Crash recovery runs here. `better-sqlite3` and `chokidar` are declared in
+`instrumentation.ts` is compiled for both the node and edge runtimes, so it must
+not import node-only modules (better-sqlite3/node:fs) — webpack compiles the
+graph for edge even behind a runtime guard. We therefore bootstrap the
+orchestrator lazily on the first `getDb()` call (node server runtime only):
+`startOrchestrator()` is guarded by a module-level `started` flag and runs crash
+recovery + installs signal handlers. `better-sqlite3` and `chokidar` are declared in
 `serverExternalPackages` so they are not bundled. The driver polling loop is
 wired in once real Claude sessions exist (Phase 4) to avoid an idle spin.
 
