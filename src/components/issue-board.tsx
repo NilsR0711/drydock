@@ -143,6 +143,14 @@ export function IssueBoard({
             #{issue.number} {issue.title}
           </p>
           <div className="mt-1 flex flex-wrap gap-1">
+            {issue.triagedAt && (
+              <Badge
+                tone="primary"
+                title="Labels applied by auto-triage — see the issue comment for reasons"
+              >
+                auto-triaged
+              </Badge>
+            )}
             {parseLabels(issue.labels)
               .filter((l) => l !== queueLabel)
               .map((l) => (
