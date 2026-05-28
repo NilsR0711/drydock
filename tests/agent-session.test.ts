@@ -75,6 +75,37 @@ describe("spawnAgentSession", () => {
     expect(res.sessionId).toBe("th_ok");
   });
 
+  it("bounds a never-resolving runner by the wall-clock timeout and aborts it (issue #47)", async () => {
+    const job = createJob({ repoId, issueNumber: 5, agent: "codex" }, db);
+    let aborted = false;
+    const hangingRunner: StreamRunner = () => ({
+      done: new Promise<number>(() => {}), // never resolves
+      abort: () => {
+        aborted = true;
+      },
+    });
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: hangingRunner,
+      timeoutMs: 20,
+    });
+    expect(res.timedOut).toBe(true);
+    expect(aborted).toBe(true);
+  });
+
+  it("does not flag a normally-exiting session as timed out", async () => {
+    const job = createJob({ repoId, issueNumber: 6, agent: "codex" }, db);
+    const captured: Captured = {};
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner(codexFixture(), captured),
+      timeoutMs: 60_000,
+    });
+    expect(res.timedOut).toBe(false);
+  });
+
   it("honours an explicit CLI path override", async () => {
     const job = createJob({ repoId, issueNumber: 2, agent: "codex" }, db);
     const captured: Captured = {};
@@ -106,5 +137,24 @@ describe("resumeAgentSession fallback", () => {
       runner: captureRunner(codexFixture(), captured),
     });
     expect(captured.args).toEqual(["FRESH-START"]);
+  });
+
+  it("bounds a never-resolving resume runner and aborts it (issue #47)", async () => {
+    const job = createJob({ repoId, issueNumber: 7, agent: "codex" }, db);
+    let aborted = false;
+    const hangingRunner: StreamRunner = () => ({
+      done: new Promise<number>(() => {}),
+      abort: () => {
+        aborted = true;
+      },
+    });
+    const res = await resumeAgentSession(getJob(job.id, db) as never, "th-1", "CI log", "/work", {
+      db,
+      broker: new LogBroker(db),
+      runner: hangingRunner,
+      timeoutMs: 20,
+    });
+    expect(res.timedOut).toBe(true);
+    expect(aborted).toBe(true);
   });
 });

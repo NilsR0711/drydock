@@ -4,7 +4,7 @@ import type { AgentProvider } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import type { Job } from "@/lib/db/schema";
 import { jobs } from "@/lib/db/schema";
-import { type StreamRunner, spawnStreamRunner } from "@/lib/exec/stream-runner";
+import { type StreamHandle, type StreamRunner, spawnStreamRunner } from "@/lib/exec/stream-runner";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
 import { getBroker, type LogBroker } from "@/lib/stream/broker";
@@ -19,6 +19,12 @@ export interface AgentSessionDeps {
   provider?: AgentProvider;
   /** Override the CLI binary/path; defaults to the provider's default command. */
   command?: string;
+  /**
+   * Hard wall-clock timeout for the session in ms (issue #47). On breach the
+   * subprocess is aborted (SIGTERM → SIGKILL) and the result is flagged
+   * `timedOut`. Omitted or non-positive means no bound (used in fast tests).
+   */
+  timeoutMs?: number;
 }
 
 export interface AgentSessionResult {
@@ -27,6 +33,37 @@ export interface AgentSessionResult {
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
+  /** True when the session was aborted by the wall-clock timeout (issue #47). */
+  timedOut: boolean;
+}
+
+/** Sentinel exit code recorded when a session is killed by the wall-clock timeout. */
+const TIMED_OUT_EXIT = -1;
+
+/**
+ * Await a stream handle's exit, bounded by `timeoutMs` (issue #47). If the
+ * process does not close within the budget it is aborted and the outcome is
+ * flagged `timedOut`; we do not keep awaiting the (possibly never-resolving)
+ * `done` promise once we have decided to bail.
+ */
+function awaitBounded(
+  handle: StreamHandle,
+  timeoutMs?: number,
+): Promise<{ exitCode: number; timedOut: boolean }> {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return handle.done.then((exitCode) => ({ exitCode, timedOut: false }));
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      handle.abort();
+      resolve({ exitCode: TIMED_OUT_EXIT, timedOut: true });
+    }, timeoutMs);
+    timer.unref?.();
+    handle.done.then((exitCode) => {
+      clearTimeout(timer);
+      resolve({ exitCode, timedOut: false });
+    });
+  });
 }
 
 function serializeEvent(event: { type: string; chunks: unknown; costUsd?: number }): unknown {
@@ -69,8 +106,14 @@ export async function spawnAgentSession(
   });
 
   registerAbort(job.id, handle.abort);
-  const exitCode = await handle.done;
+  const { exitCode, timedOut } = await awaitBounded(handle, deps.timeoutMs);
   clearAbort(job.id);
+  if (timedOut) {
+    broker.publish(job.id, {
+      type: "error",
+      payload: { stderr: `session timed out after ${deps.timeoutMs}ms` },
+    });
+  }
   for (const event of parser.flush()) {
     broker.publish(job.id, { type: event.type, payload: serializeEvent(event) });
   }
@@ -96,6 +139,7 @@ export async function spawnAgentSession(
     costUsd,
     inputTokens: parser.totalInputTokens,
     outputTokens: parser.totalOutputTokens,
+    timedOut,
   };
 }
 
@@ -149,8 +193,14 @@ export async function resumeAgentSession(
     onStderr: (chunk) => broker.publish(job.id, { type: "error", payload: { stderr: chunk } }),
   });
   registerAbort(job.id, handle.abort);
-  const exitCode = await handle.done;
+  const { exitCode, timedOut } = await awaitBounded(handle, deps.timeoutMs);
   clearAbort(job.id);
+  if (timedOut) {
+    broker.publish(job.id, {
+      type: "error",
+      payload: { stderr: `session timed out after ${deps.timeoutMs}ms` },
+    });
+  }
   for (const event of parser.flush()) {
     broker.publish(job.id, { type: event.type, payload: { chunks: event.chunks } });
   }
@@ -180,5 +230,6 @@ export async function resumeAgentSession(
     costUsd,
     inputTokens: parser.totalInputTokens,
     outputTokens: parser.totalOutputTokens,
+    timedOut,
   };
 }

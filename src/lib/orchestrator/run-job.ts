@@ -91,9 +91,13 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   const forge = getForge(repo);
   const provider = getAgentProvider(job.agent);
   const command = commandForAgent(provider, db);
+  // Wall-clock session bound (issue #47): a per-repo override wins, else the
+  // global default. Guarantees a hung agent is aborted and the slot freed.
+  const maxJobMinutes = repo.maxJobMinutes ?? getSettings(db).maxJobMinutes;
+  const timeoutMs = maxJobMinutes * 60_000;
   const runSession =
     deps.runSession ??
-    ((j, prompt, cwd) => spawnAgentSession(j, prompt, cwd, { db, provider, command }));
+    ((j, prompt, cwd) => spawnAgentSession(j, prompt, cwd, { db, provider, command, timeoutMs }));
   const createPr = deps.createPr ?? ((input) => forge.createPr(input));
   const runBabysitter =
     deps.runBabysitter ??
@@ -102,9 +106,12 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         gh: forge,
         db,
         resumeSession: (rj, sessionId, failedLog) =>
-          resumeAgentSession(rj, sessionId, failedLog, repo.path, { db, provider, command }).then(
-            () => undefined,
-          ),
+          resumeAgentSession(rj, sessionId, failedLog, repo.path, {
+            db,
+            provider,
+            command,
+            timeoutMs,
+          }).then(() => undefined),
         // Opt-in structured CI auto-healing (issue #16, ADR 017).
         autoHeal: repo.autoHealCi
           ? { headSha: (pr) => forge.prHeadSha(pr), provider: repo.platform }
@@ -137,6 +144,14 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     }
 
     const session = await runSession(getJob(job.id, db) as Job, prompt, wt.path);
+    if (session.timedOut) {
+      return transitionJob(
+        job.id,
+        "needs_human",
+        { errorMessage: `${provider.label} timed out after ${maxJobMinutes} minutes` },
+        db,
+      );
+    }
     if (session.exitCode !== 0) {
       return transitionJob(
         job.id,
