@@ -73,6 +73,19 @@ export class WorktreeManager {
     return { path, branch };
   }
 
+  /**
+   * Add a worktree on a *new* branch cut from the repo's default branch (issue
+   * #20). Used to open a follow-up fix PR for a failed post-merge deployment,
+   * which must start from the merged mainline rather than a job branch.
+   */
+  async prepareForNewBranch(repo: Repo, branch: string, key: string): Promise<Worktree> {
+    const path = join(worktreeHome(), "worktrees", sanitize(repo.name), `dh-${sanitize(key)}`);
+    await this.withRepoLock(repo.path, () =>
+      this.git(["-C", repo.path, "worktree", "add", "-b", branch, path, repo.defaultBranch]),
+    );
+    return { path, branch };
+  }
+
   async commitAndPush(wt: Worktree, message: string): Promise<void> {
     await this.git(["add", "-A"], wt.path);
     await this.git(["commit", "-m", message], wt.path);

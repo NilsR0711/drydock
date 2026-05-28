@@ -12,6 +12,7 @@ import { syncIssuesFromGh } from "@/lib/issues/service";
 import { type TriageResult, triageRepo } from "@/lib/issues/triage";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
+import { driveDeploymentHealing } from "./deployment-healing-driver";
 import { createJob, listJobsByStatus, nextQueuedJob, transitionJob } from "./jobs";
 import { driveReviewFeedback } from "./review-feedback-driver";
 import { runJob as defaultRunJob } from "./run-job";
@@ -30,6 +31,8 @@ export interface DriveTickDeps {
   decompose?: (repo: Repo, forge: ForgeClient, candidates: GhIssue[], db: DB) => Promise<void>;
   /** Review-feedback sweep entry point (injectable for tests). */
   reviewFeedback?: (db: DB) => Promise<void>;
+  /** Post-merge deployment-healing sweep entry point (injectable for tests). */
+  deploymentHealing?: (db: DB) => Promise<void>;
 }
 
 /**
@@ -263,6 +266,17 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
     await withPriority("low", () => reviewFeedback(db));
   } catch (err) {
     console.error("[driver] review-feedback sweep failed", err);
+  }
+
+  // Drive opt-in post-merge deployment healing (issue #20) as another
+  // low-priority background sweep. Repos that have not opted in (or that deploy
+  // on no detectable platform) are skipped cheaply inside the sweep.
+  const deploymentHealing =
+    deps.deploymentHealing ?? ((d: DB) => driveDeploymentHealing({ db: d }));
+  try {
+    await withPriority("low", () => deploymentHealing(db));
+  } catch (err) {
+    console.error("[driver] deployment-healing sweep failed", err);
   }
 }
 
