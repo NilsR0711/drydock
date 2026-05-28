@@ -88,6 +88,8 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 ⏯️ **Global pause & per-repo controls** — pause everything from the navbar, pick an agent and model per repo, toggle serial vs. parallel processing, and customize the queue label.
 
+🔔 **External notifications** — get pinged on Telegram, Slack (incoming webhook) and email (SMTP) for the lifecycle events you care about (job needs human, job failed, PR opened, PR merged, daily cost limit reached, automation paused/draining). Each channel is configured independently, every event has a per-event opt-in, and a one-click test button verifies setup. Delivery is best-effort and never blocks the loop; secrets are redacted from logs. See [ADR 024](docs/adr/024-external-notifications.md).
+
 📐 **ADR review queue** — a file watcher surfaces new `docs/adr/*.md` decisions for approve/reject.
 
 🧱 **Crash-safe lease queue** — jobs are claimed from a SQLite-backed queue with a lease token kept alive by heartbeats. A crashed worker's `working` jobs are requeued (with attempt-scaled backoff) on the next startup instead of getting stuck, CI-babysitting states park as `interrupted`, finalizing with a stale lease is rejected, a dedupe key prevents double-enqueuing the same issue, and a PID lockfile stops a second instance racing the queue. Graceful shutdown drains then SIGKILLs after 5s. See [ADR 022](docs/adr/022-lease-based-job-queue.md).
@@ -193,7 +195,7 @@ Drydock is configured at runtime from the **Settings** page and per-repo control
 | --- | --- | --- |
 | `DRYDOCK_DB` | `data/drydock.db` | SQLite file path (use `:memory:` for ephemeral runs) |
 
-**Settings (global):** pause switch · daily cost limit · log retention (days) · `claude`/`gh` CLI paths.
+**Settings (global):** pause switch · daily cost limit · log retention (days) · `claude`/`gh` CLI paths · notification channels (Telegram / Slack / email) and per-event opt-in.
 **Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · default model · serial vs. parallel processing · queue label (default `drydock:queue`).
 
 ## Screens

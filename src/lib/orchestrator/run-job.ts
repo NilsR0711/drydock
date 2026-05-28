@@ -8,7 +8,8 @@ import { getForge } from "@/lib/forge/registry";
 import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { listIssues } from "@/lib/issues/service";
 import { listSubtasks } from "@/lib/issues/subtasks";
-import { notify } from "@/lib/notify/service";
+import type { NotificationEvent } from "@/lib/notify/events";
+import { dispatch } from "@/lib/notify/notifier";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
 import { getSettings } from "@/lib/settings/service";
@@ -41,29 +42,41 @@ export interface RunJobDeps {
     body: string;
   }) => Promise<number>;
   runBabysitter?: (job: Job, prNumber: number) => Promise<Job>;
-  notify?: (text: string) => Promise<void>;
+  notify?: NotifyEvent;
 }
 
+/** Event-aware notification sink: routes a lifecycle event + message downstream. */
+type NotifyEvent = (event: NotificationEvent, text: string) => Promise<void>;
+
 /**
- * Run one job end-to-end and notify on its terminal outcome. Worktree cleanup
- * and state transitions live in runJobCore; this wrapper adds the side-channel
- * notification once the final status is known.
+ * Run one job end-to-end and notify on its lifecycle. Worktree cleanup and
+ * state transitions live in runJobCore; this wrapper plus the PR-opened hook
+ * inside core fan each event out to the configured channels (issue #22).
  */
 export async function runJob(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
   const db = deps.db ?? getDb();
-  const result = await runJobCore(jobId, deps);
-  const send = deps.notify ?? ((text: string) => notify(text, db));
+  const send: NotifyEvent = deps.notify ?? ((event, text) => dispatch(event, text, db));
+  const result = await runJobCore(jobId, deps, send);
   if (result.status === "merged") {
-    await send(`✅ Merged: ${result.repoId}#${result.issueNumber} (PR #${result.prNumber}).`);
+    await send(
+      "pr_merged",
+      `✅ Merged: ${result.repoId}#${result.issueNumber} (PR #${result.prNumber}).`,
+    );
   } else if (result.status === "needs_human") {
     await send(
+      "needs_human",
       `⚠️ Needs human: ${result.repoId}#${result.issueNumber} — ${result.errorMessage ?? "review required"}.`,
+    );
+  } else if (result.status === "aborted") {
+    await send(
+      "job_failed",
+      `🛑 Aborted: ${result.repoId}#${result.issueNumber} — ${result.errorMessage ?? "job aborted"}.`,
     );
   }
   return result;
 }
 
-async function runJobCore(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
+async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): Promise<Job> {
   const db = deps.db ?? getDb();
   const job = getJob(jobId, db);
   if (!job) throw new Error(`job ${jobId} not found`);
@@ -157,6 +170,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
       body: `Closes #${job.issueNumber}`,
     });
     transitionJob(job.id, "ci_running", { branch: wt.branch, prNumber }, db);
+    await send("pr_opened", `🔀 PR opened: ${repo.id}#${job.issueNumber} (PR #${prNumber}).`);
 
     const final = await runBabysitter(getJob(job.id, db) as Job, prNumber);
     // A merged job lands the whole decomposed issue: mark every subtask done.

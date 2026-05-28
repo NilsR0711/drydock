@@ -3,6 +3,7 @@ import { z } from "zod";
 import { type DB, getDb } from "@/lib/db/client";
 import { todayCost } from "@/lib/db/cost-queries";
 import { repos, settings } from "@/lib/db/schema";
+import { NOTIFICATION_EVENTS } from "@/lib/notify/events";
 
 export const settingsSchema = z.object({
   paused: z.boolean().default(false),
@@ -17,6 +18,17 @@ export const settingsSchema = z.object({
   maxParallelJobs: z.number().int().positive().default(3),
   telegramBotToken: z.string().default(""),
   telegramChatId: z.string().default(""),
+  // External notification channels (issue #22). Each is optional and
+  // configured independently; an empty value disables that channel.
+  slackWebhookUrl: z.string().default(""),
+  smtpHost: z.string().default(""),
+  smtpPort: z.number().int().positive().default(587),
+  smtpUser: z.string().default(""),
+  smtpPass: z.string().default(""),
+  emailFrom: z.string().default(""),
+  emailTo: z.string().default(""),
+  // Lifecycle events that trigger a notification on every configured channel.
+  notifyEvents: z.array(z.enum(NOTIFICATION_EVENTS)).default([...NOTIFICATION_EVENTS]),
   // Finished jobs older than this many days have their verbose job_events
   // pruned (their cost summary rows are kept). See issue #24.
   retentionDays: z.number().int().positive().default(30),

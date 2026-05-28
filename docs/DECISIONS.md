@@ -24,3 +24,4 @@
 - [021](adr/021-post-merge-deployment-healing.md) — Opt-in post-merge deployment healing
 - [022](adr/022-lease-based-job-queue.md) — Lease-based persistent job queue with crash recovery
 - [023](adr/023-log-retention-and-pruning.md) — Log retention, SQLite pruning & secret redaction
+- [024](adr/024-external-notifications.md) — External notifications (Telegram, Slack & email) with per-event opt-in
