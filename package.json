@@ -1,15 +1,45 @@
 {
   "name": "drydock",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
+  "description": "Local-first tool that autonomously turns GitHub issues into pull requests via the Claude CLI, startable from the terminal with `npx drydock`.",
+  "keywords": [
+    "github",
+    "issues",
+    "pull-requests",
+    "automation",
+    "ai",
+    "claude",
+    "agent",
+    "cli",
+    "nextjs"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/NilsR0711/drydock#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NilsR0711/drydock.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NilsR0711/drydock/issues"
+  },
   "packageManager": "pnpm@10.33.2",
   "engines": {
     "node": ">=20.9.0"
   },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "files": [
+    "bin",
+    ".next/standalone",
+    ".next/static",
+    "drizzle"
+  ],
   "scripts": {
     "dev": "next dev -H 127.0.0.1 -p 3737",
-    "build": "next build",
+    "build": "next build && node scripts/package-standalone.mjs",
     "start": "next start -H 127.0.0.1 -p 3737",
     "lint": "biome ci .",
     "format": "biome check --write .",
@@ -20,10 +50,11 @@
     "db:migrate": "tsx src/lib/db/migrate.ts",
     "backup": "tsx scripts/backup.ts",
     "db:prune": "tsx scripts/prune.ts",
-    "mcp": "tsx scripts/drydock.ts mcp"
+    "mcp": "tsx scripts/drydock.ts mcp",
+    "prepublishOnly": "pnpm test && pnpm build"
   },
   "bin": {
-    "drydock": "scripts/drydock.ts"
+    "drydock": "bin/drydock.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

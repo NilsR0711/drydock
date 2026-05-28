@@ -6,7 +6,15 @@ import * as schema from "./schema";
 
 export type DB = ReturnType<typeof drizzle<typeof schema>>;
 
-const MIGRATIONS_FOLDER = resolve(process.cwd(), "drizzle");
+/**
+ * Locate the generated drizzle SQL migrations. In a source checkout they live
+ * in `./drizzle` relative to the working directory; a packaged install ships
+ * them outside the cwd-agnostic install location and points here via
+ * DRYDOCK_MIGRATIONS so migrations resolve regardless of cwd (issue #12).
+ */
+export function resolveMigrationsDir(): string {
+  return process.env.DRYDOCK_MIGRATIONS ?? resolve(process.cwd(), "drizzle");
+}
 
 /**
  * Apply generated drizzle SQL migrations directly via better-sqlite3. We avoid
@@ -15,9 +23,10 @@ const MIGRATIONS_FOLDER = resolve(process.cwd(), "drizzle");
  * the SQL ourselves keeps that module out of the bundle graph (ADR 003).
  */
 function applyMigrations(sqlite: Database.Database): void {
+  const migrationsFolder = resolveMigrationsDir();
   let files: string[];
   try {
-    files = readdirSync(MIGRATIONS_FOLDER)
+    files = readdirSync(migrationsFolder)
       .filter((f) => f.endsWith(".sql"))
       .sort();
   } catch {
@@ -34,7 +43,7 @@ function applyMigrations(sqlite: Database.Database): void {
 
   for (const file of files) {
     if (applied.has(file)) continue;
-    const sql = readFileSync(join(MIGRATIONS_FOLDER, file), "utf8");
+    const sql = readFileSync(join(migrationsFolder, file), "utf8");
     const run = sqlite.transaction(() => {
       for (const stmt of sql.split("--> statement-breakpoint")) {
         const trimmed = stmt.trim();
