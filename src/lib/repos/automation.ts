@@ -11,6 +11,7 @@ export interface RepoAutomation {
   autoDecompose: boolean;
   verifyPr: boolean;
   autoHealDeployments: boolean;
+  releaseEnabled: boolean;
   deploymentPlatform: string | null;
   readyLabels: string[];
   blockingLabels: string[];
@@ -46,6 +47,7 @@ export function repoAutomation(repo: Repo): RepoAutomation {
     autoDecompose: repo.autoDecompose,
     verifyPr: repo.verifyPr,
     autoHealDeployments: repo.autoHealDeployments,
+    releaseEnabled: repo.releaseEnabled,
     deploymentPlatform: repo.deploymentPlatform,
     readyLabels: parseStringArray(repo.readyLabels),
     blockingLabels: parseStringArray(repo.blockingLabels),

@@ -44,6 +44,24 @@ export function compareSemver(a: string, b: string): number {
   return comparePrerelease(pa.prerelease, pb.prerelease);
 }
 
+/** The kind of semver increment a release applies. */
+export type SemverBump = "patch" | "minor" | "major";
+
+/**
+ * Increment `current` by `bump`, returning the bare `x.y.z` string (no `v`
+ * prefix, no prerelease label). A minor bump zeroes patch; a major bump zeroes
+ * both minor and patch. Throws for unparseable input — release callers validate
+ * their starting tag up front, so a malformed version here is a programmer error.
+ */
+export function bumpSemver(current: string, bump: SemverBump): string {
+  const parsed = parseSemver(current);
+  if (!parsed) throw new Error(`cannot bump unparseable version: "${current}"`);
+  const { major, minor, patch } = parsed;
+  if (bump === "major") return `${major + 1}.0.0`;
+  if (bump === "minor") return `${major}.${minor + 1}.0`;
+  return `${major}.${minor}.${patch + 1}`;
+}
+
 function comparePrerelease(a: string | null, b: string | null): number {
   if (a === b) return 0;
   // A release (no prerelease) is always greater than a prerelease.

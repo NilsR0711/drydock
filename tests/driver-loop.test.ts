@@ -159,6 +159,19 @@ describe("driveTick", () => {
     });
     await expect(driveTick(d as never)).resolves.toBeUndefined();
   });
+
+  it("drives the release-management sweep each tick (issue #59)", async () => {
+    const releaseManagement = vi.fn(async () => {});
+    await driveTick(deps([], { releaseManagement }) as never);
+    expect(releaseManagement).toHaveBeenCalledWith(db);
+  });
+
+  it("survives a release-management sweep failure", async () => {
+    const releaseManagement = vi.fn(async () => {
+      throw new Error("release boom");
+    });
+    await expect(driveTick(deps([], { releaseManagement }) as never)).resolves.toBeUndefined();
+  });
 });
 
 describe("driveTick auto-processing", () => {

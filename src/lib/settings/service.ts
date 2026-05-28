@@ -26,6 +26,11 @@ export const settingsSchema = z.object({
   // off (no ceiling) — the default when unset. A per-repo override may tighten
   // or relax it.
   maxJobCostUsd: z.number().nonnegative().default(0),
+  // Global kill-switch for opt-in release management (issue #59, ADR 028). Off by
+  // default; both this and a repo's own `releaseEnabled` must be on for the
+  // release pipeline to run for that repo. Cutting a public release is hard to
+  // reverse, so the feature ships gated and previewable.
+  releaseManagementEnabled: z.boolean().default(false),
   defaultModel: z.string().default("claude-opus-4-7"),
   defaultAgent: z.enum(["claude", "codex"]).default("claude"),
   claudePath: z.string().default("claude"),

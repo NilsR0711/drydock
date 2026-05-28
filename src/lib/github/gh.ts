@@ -501,6 +501,88 @@ export class GhClient {
   }
 
   /**
+   * List the repo's published releases (issue #59), newest first. Used to find
+   * the latest release tag (and its date, to scope unreleased PRs) and to detect
+   * an already-existing release for idempotency.
+   */
+  async listReleases(): Promise<{ tagName: string; createdAt: string }[]> {
+    const res = await this.exec([
+      "release",
+      "list",
+      "--json",
+      "tagName,createdAt",
+      "--limit",
+      "100",
+    ]);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh release list failed");
+    const parsed = z
+      .array(z.object({ tagName: z.string(), createdAt: z.string().default("") }))
+      .safeParse(JSON.parse(res.stdout || "[]"));
+    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
+    return parsed.data;
+  }
+
+  /**
+   * List recently merged pull requests (issue #59), newest first, flattening the
+   * GitHub label objects to plain names. The release manager filters these down
+   * to the ones merged since the last release.
+   */
+  async listMergedPrs(
+    limit = 100,
+  ): Promise<{ number: number; title: string; mergedAt: string; labels: string[] }[]> {
+    const res = await this.exec([
+      "pr",
+      "list",
+      "--state",
+      "merged",
+      "--json",
+      "number,title,mergedAt,labels",
+      "--limit",
+      String(limit),
+    ]);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr list failed");
+    const parsed = z
+      .array(
+        z.object({
+          number: z.number(),
+          title: z.string().default(""),
+          mergedAt: z.string().default(""),
+          labels: z.array(z.object({ name: z.string() })).default([]),
+        }),
+      )
+      .safeParse(JSON.parse(res.stdout || "[]"));
+    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
+    return parsed.data.map((p) => ({
+      number: p.number,
+      title: p.title,
+      mergedAt: p.mergedAt,
+      labels: p.labels.map((l) => l.name),
+    }));
+  }
+
+  /**
+   * Publish a release at `target` (issue #59). Title, notes, and target are
+   * passed in the `--flag=value` form so a value beginning with `-` can never be
+   * read as another flag.
+   */
+  async createRelease(input: {
+    tag: string;
+    title: string;
+    notes: string;
+    target: string;
+  }): Promise<void> {
+    const res = await this.exec([
+      "release",
+      "create",
+      input.tag,
+      flagEq("--title", input.title),
+      flagEq("--notes", input.notes),
+      flagEq("--target", input.target),
+    ]);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh release create failed");
+  }
+
+  /**
    * Resolve the repo's `owner` and `name`, cached for the client's lifetime.
    * GraphQL queries (review threads) need these explicitly — unlike REST, `gh
    * api graphql` does not substitute the `{owner}/{repo}` placeholders.

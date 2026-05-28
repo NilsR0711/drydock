@@ -8,6 +8,7 @@ import { RepoAutomationBar } from "@/components/repo-automation-bar";
 import { RepoCostPanel } from "@/components/repo-cost-panel";
 import { RepoDeploymentHealingPanel } from "@/components/repo-deployment-healing-panel";
 import { RepoHealingPanel } from "@/components/repo-healing-panel";
+import { RepoReleasePanel } from "@/components/repo-release-panel";
 import { RepoSettingsBar } from "@/components/repo-settings-bar";
 import { listAdrs } from "@/lib/adr/service";
 import { getDb } from "@/lib/db/client";
@@ -16,6 +17,7 @@ import { getRepoWorkspace } from "@/lib/db/queries";
 import { jobEvents } from "@/lib/db/schema";
 import { recentHealingSessions } from "@/lib/orchestrator/ci-healing";
 import { recentDeploymentHealingSessions } from "@/lib/orchestrator/deployment-healing";
+import { recentReleaseRuns } from "@/lib/release/release-service";
 import { getSettings } from "@/lib/settings/service";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +36,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
   const deploymentSessions = ws.repo.autoHealDeployments
     ? recentDeploymentHealingSessions(ws.repo.id, db)
     : [];
+  const releaseRuns = ws.repo.releaseEnabled ? recentReleaseRuns(ws.repo.id, db) : [];
 
   const initialLog = ws.activeJob
     ? db
@@ -71,6 +74,9 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
         {ws.repo.autoHealCi && <RepoHealingPanel sessions={healingSessions} />}
         {ws.repo.autoHealDeployments && (
           <RepoDeploymentHealingPanel sessions={deploymentSessions} />
+        )}
+        {ws.repo.releaseEnabled && (
+          <RepoReleasePanel repoId={ws.repo.id} initialRuns={releaseRuns} />
         )}
       </div>
     </div>
