@@ -97,9 +97,20 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   // global default. Bounds the babysitter so a never-settling PR escalates to a
   // human instead of looping forever.
   const ciWaitMs = (repo.maxCiWaitMinutes ?? settings.maxCiWaitMinutes) * 60_000;
+  // Per-job cost ceiling (issue #57): a per-repo override wins, else the global
+  // default. 0 disables it. Bounds the blast radius of one runaway session so a
+  // single long loop cannot drain the whole daily budget by itself.
+  const maxJobCostUsd = repo.maxJobCostUsd ?? settings.maxJobCostUsd;
   const runSession =
     deps.runSession ??
-    ((j, prompt, cwd) => spawnAgentSession(j, prompt, cwd, { db, provider, command, timeoutMs }));
+    ((j, prompt, cwd) =>
+      spawnAgentSession(j, prompt, cwd, {
+        db,
+        provider,
+        command,
+        timeoutMs,
+        costCapUsd: maxJobCostUsd,
+      }));
   const createPr = deps.createPr ?? ((input) => forge.createPr(input));
   const runBabysitter =
     deps.runBabysitter ??
@@ -114,6 +125,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
             provider,
             command,
             timeoutMs,
+            costCapUsd: maxJobCostUsd,
           }).then(() => undefined),
         // Opt-in structured CI auto-healing (issue #16, ADR 017).
         autoHeal: repo.autoHealCi
@@ -173,6 +185,18 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         job.id,
         "needs_human",
         { errorMessage: `${provider.label} timed out after ${maxJobMinutes} minutes` },
+        db,
+      );
+    }
+    // Per-job cost ceiling reached (issue #57): the session was aborted
+    // mid-stream. Its partial cost is already persisted (and counts toward the
+    // day's spend); escalate to a human with a clear reason. Checked before the
+    // exit-code branch since the abort yields a non-zero sentinel exit.
+    if (session.costExceeded) {
+      return transitionJob(
+        job.id,
+        "needs_human",
+        { errorMessage: `per-job cost limit of $${maxJobCostUsd} reached` },
         db,
       );
     }

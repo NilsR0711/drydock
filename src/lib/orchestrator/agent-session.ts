@@ -25,6 +25,14 @@ export interface AgentSessionDeps {
    * `timedOut`. Omitted or non-positive means no bound (used in fast tests).
    */
   timeoutMs?: number;
+  /**
+   * Per-job USD cost ceiling (issue #57). As the stream accumulates cost, the
+   * session is priced live (the agent's reported cost if any, else the token
+   * estimate); the first time it reaches this cap the subprocess is aborted
+   * (SIGTERM → SIGKILL) and the result is flagged `costExceeded`. Omitted or
+   * non-positive disables the ceiling.
+   */
+  costCapUsd?: number;
 }
 
 export interface AgentSessionResult {
@@ -35,33 +43,84 @@ export interface AgentSessionResult {
   outputTokens: number;
   /** True when the session was aborted by the wall-clock timeout (issue #47). */
   timedOut: boolean;
+  /** True when the session was aborted by the per-job cost ceiling (issue #57). */
+  costExceeded: boolean;
 }
 
 /** Sentinel exit code recorded when a session is killed by the wall-clock timeout. */
 const TIMED_OUT_EXIT = -1;
+/** Sentinel exit code recorded when a session is killed by the per-job cost cap. */
+const COST_EXCEEDED_EXIT = -2;
+
+interface CostGuard {
+  /** Re-price the accumulated usage; resolves `tripped` once the cap is crossed. */
+  observe(): void;
+  /** Resolves the first time the live cost reaches the cap. */
+  readonly tripped: Promise<void>;
+}
 
 /**
- * Await a stream handle's exit, bounded by `timeoutMs` (issue #47). If the
- * process does not close within the budget it is aborted and the outcome is
- * flagged `timedOut`; we do not keep awaiting the (possibly never-resolving)
- * `done` promise once we have decided to bail.
+ * Live per-job cost ceiling (issue #57). After each parsed chunk the session
+ * calls {@link CostGuard.observe}, which prices the accumulated usage via
+ * `liveCost` and resolves `tripped` the first time it reaches `capUsd`. The
+ * caller is expected to construct the guard only when the cap is active
+ * (positive), so `tripped` resolving always means a genuine breach.
+ */
+function makeCostGuard(capUsd: number, liveCost: () => number): CostGuard {
+  let fire: () => void = () => {};
+  let fired = false;
+  const tripped = new Promise<void>((resolve) => {
+    fire = resolve;
+  });
+  return {
+    tripped,
+    observe() {
+      if (fired) return;
+      if (liveCost() >= capUsd) {
+        fired = true;
+        fire();
+      }
+    },
+  };
+}
+
+/**
+ * Await a stream handle's exit, bounded by a wall-clock timeout (issue #47) and
+ * a per-job cost ceiling (issue #57). On either breach the subprocess is
+ * aborted and the outcome flagged accordingly; we do not keep awaiting the
+ * (possibly never-resolving) `done` promise once we have decided to bail.
  */
 function awaitBounded(
   handle: StreamHandle,
-  timeoutMs?: number,
-): Promise<{ exitCode: number; timedOut: boolean }> {
-  if (!timeoutMs || timeoutMs <= 0) {
-    return handle.done.then((exitCode) => ({ exitCode, timedOut: false }));
+  opts: { timeoutMs?: number; costTripped?: Promise<void> } = {},
+): Promise<{ exitCode: number; timedOut: boolean; costExceeded: boolean }> {
+  const { timeoutMs, costTripped } = opts;
+  const hasTimeout = !!timeoutMs && timeoutMs > 0;
+  if (!hasTimeout && !costTripped) {
+    return handle.done.then((exitCode) => ({ exitCode, timedOut: false, costExceeded: false }));
   }
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
+    let settled = false;
+    const finish = (r: { exitCode: number; timedOut: boolean; costExceeded: boolean }) => {
+      if (settled) return;
+      settled = true;
+      resolve(r);
+    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (hasTimeout) {
+      timer = setTimeout(() => {
+        handle.abort();
+        finish({ exitCode: TIMED_OUT_EXIT, timedOut: true, costExceeded: false });
+      }, timeoutMs);
+      timer.unref?.();
+    }
+    costTripped?.then(() => {
       handle.abort();
-      resolve({ exitCode: TIMED_OUT_EXIT, timedOut: true });
-    }, timeoutMs);
-    timer.unref?.();
+      finish({ exitCode: COST_EXCEEDED_EXIT, timedOut: false, costExceeded: true });
+    });
     handle.done.then((exitCode) => {
-      clearTimeout(timer);
-      resolve({ exitCode, timedOut: false });
+      if (timer) clearTimeout(timer);
+      finish({ exitCode, timedOut: false, costExceeded: false });
     });
   });
 }
@@ -95,23 +154,44 @@ export async function spawnAgentSession(
   if (job.status !== "working") transitionJob(job.id, "working", { model }, db);
   else db.update(jobs).set({ model }).where(eq(jobs.id, job.id)).run();
 
+  // Per-job cost ceiling (issue #57): price the accumulated usage live and trip
+  // a guard that aborts the subprocess the first time it crosses the cap. Cost
+  // comes from the stream when the agent reports it, otherwise the token
+  // estimate — the same source used for the final persisted cost below.
+  const liveCost = () =>
+    parser.costUsd > 0
+      ? parser.costUsd
+      : provider.estimateCost(model, parser.totalInputTokens, parser.totalOutputTokens);
+  const guard =
+    deps.costCapUsd && deps.costCapUsd > 0 ? makeCostGuard(deps.costCapUsd, liveCost) : undefined;
+
   const args = provider.buildStartArgs({ prompt, model, maxTurns: job.maxTurns });
   const handle = runner(command, args, cwd, {
     onStdout: (chunk) => {
       for (const event of parser.push(chunk)) {
         broker.publish(job.id, { type: event.type, payload: serializeEvent(event) });
       }
+      guard?.observe();
     },
     onStderr: (chunk) => broker.publish(job.id, { type: "error", payload: { stderr: chunk } }),
   });
 
   registerAbort(job.id, handle.abort);
-  const { exitCode, timedOut } = await awaitBounded(handle, deps.timeoutMs);
+  const { exitCode, timedOut, costExceeded } = await awaitBounded(handle, {
+    timeoutMs: deps.timeoutMs,
+    costTripped: guard?.tripped,
+  });
   clearAbort(job.id);
   if (timedOut) {
     broker.publish(job.id, {
       type: "error",
       payload: { stderr: `session timed out after ${deps.timeoutMs}ms` },
+    });
+  }
+  if (costExceeded) {
+    broker.publish(job.id, {
+      type: "error",
+      payload: { stderr: `session aborted: per-job cost limit of $${deps.costCapUsd} reached` },
     });
   }
   for (const event of parser.flush()) {
@@ -140,6 +220,7 @@ export async function spawnAgentSession(
     inputTokens: parser.totalInputTokens,
     outputTokens: parser.totalOutputTokens,
     timedOut,
+    costExceeded,
   };
 }
 
@@ -161,11 +242,21 @@ export async function resumeAgentSession(
   const broker = deps.broker ?? getBroker();
   const provider = deps.provider ?? getAgentProvider(job.agent);
   const command = deps.command ?? provider.defaultCommand;
+  const model = job.model ?? provider.resumeModel;
   const parser = provider.createParser();
   parser.onParseError = (error) => broker.publish(job.id, { type: "parse_error", payload: error });
   const prompt = renderTemplate(resolveTemplateContent(job.repoId, TEMPLATE_NAMES.ciFix, db), {
     CI_LOG: failedLog,
   });
+
+  // Per-job cost ceiling (issue #57): a runaway resume is bounded just like the
+  // initial session. The guard trips on this invocation's own accumulated cost.
+  const liveCost = () =>
+    parser.costUsd > 0
+      ? parser.costUsd
+      : provider.estimateCost(model, parser.totalInputTokens, parser.totalOutputTokens);
+  const guard =
+    deps.costCapUsd && deps.costCapUsd > 0 ? makeCostGuard(deps.costCapUsd, liveCost) : undefined;
 
   const resumeArgs = provider.supportsResume
     ? provider.buildResumeArgs({
@@ -189,11 +280,15 @@ export async function resumeAgentSession(
       for (const event of parser.push(chunk)) {
         broker.publish(job.id, { type: event.type, payload: { chunks: event.chunks } });
       }
+      guard?.observe();
     },
     onStderr: (chunk) => broker.publish(job.id, { type: "error", payload: { stderr: chunk } }),
   });
   registerAbort(job.id, handle.abort);
-  const { exitCode, timedOut } = await awaitBounded(handle, deps.timeoutMs);
+  const { exitCode, timedOut, costExceeded } = await awaitBounded(handle, {
+    timeoutMs: deps.timeoutMs,
+    costTripped: guard?.tripped,
+  });
   clearAbort(job.id);
   if (timedOut) {
     broker.publish(job.id, {
@@ -201,11 +296,16 @@ export async function resumeAgentSession(
       payload: { stderr: `session timed out after ${deps.timeoutMs}ms` },
     });
   }
+  if (costExceeded) {
+    broker.publish(job.id, {
+      type: "error",
+      payload: { stderr: `session aborted: per-job cost limit of $${deps.costCapUsd} reached` },
+    });
+  }
   for (const event of parser.flush()) {
     broker.publish(job.id, { type: event.type, payload: { chunks: event.chunks } });
   }
 
-  const model = job.model ?? provider.resumeModel;
   const costUsd =
     parser.costUsd > 0
       ? parser.costUsd
@@ -231,5 +331,6 @@ export async function resumeAgentSession(
     inputTokens: parser.totalInputTokens,
     outputTokens: parser.totalOutputTokens,
     timedOut,
+    costExceeded,
   };
 }

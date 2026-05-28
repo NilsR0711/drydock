@@ -136,6 +136,30 @@ describe("runJob", () => {
     expect(removed.v).toBe(true);
   });
 
+  it("marks needs_human with a cost-limit reason when the session crosses the per-job cap (issue #57)", async () => {
+    const removed = { v: false };
+    const deps = baseDeps(removed, {
+      runSession: vi.fn(async (job: Job) => {
+        db.update(jobs).set({ status: "working" }).where(eq(jobs.id, job.id)).run();
+        return {
+          exitCode: -2,
+          sessionId: "s1",
+          costUsd: 1.5,
+          inputTokens: 0,
+          outputTokens: 0,
+          timedOut: false,
+          costExceeded: true,
+        };
+      }),
+    });
+    const job = createJob({ repoId, issueNumber: 1 }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("needs_human");
+    expect(result.errorMessage).toMatch(/cost limit/i);
+    expect(deps.createPr).not.toHaveBeenCalled();
+    expect(removed.v).toBe(true);
+  });
+
   it("reports a clear no-changes reason instead of a raw git error when the agent produced no changes (issue #50)", async () => {
     const removed = { v: false };
     const wt = fakeWorktrees(removed);
