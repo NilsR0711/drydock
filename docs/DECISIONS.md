@@ -20,3 +20,7 @@
 - [017](adr/017-ci-auto-heal.md) — Opt-in CI auto-healing (classify → fix → verify, with budgets)
 - [018](adr/018-rate-limit-governor.md) — Priority-aware GitHub API rate-limit budgeting
 - [019](adr/019-pr-review-feedback.md) — Opt-in PR review-feedback lifecycle
+- [020](adr/020-issue-decomposition.md) — Opt-in decomposition of large issues into subtasks
+- [021](adr/021-post-merge-deployment-healing.md) — Opt-in post-merge deployment healing
+- [022](adr/022-lease-based-job-queue.md) — Lease-based persistent job queue with crash recovery
+- [023](adr/023-log-retention-and-pruning.md) — Log retention, SQLite pruning & secret redaction

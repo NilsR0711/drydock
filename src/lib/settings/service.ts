@@ -17,6 +17,9 @@ export const settingsSchema = z.object({
   maxParallelJobs: z.number().int().positive().default(3),
   telegramBotToken: z.string().default(""),
   telegramChatId: z.string().default(""),
+  // Finished jobs older than this many days have their verbose job_events
+  // pruned (their cost summary rows are kept). See issue #24.
+  retentionDays: z.number().int().positive().default(30),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 

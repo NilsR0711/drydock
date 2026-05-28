@@ -193,7 +193,7 @@ Drydock is configured at runtime from the **Settings** page and per-repo control
 | --- | --- | --- |
 | `DRYDOCK_DB` | `data/drydock.db` | SQLite file path (use `:memory:` for ephemeral runs) |
 
-**Settings (global):** pause switch · daily cost limit · `claude`/`gh` CLI paths.
+**Settings (global):** pause switch · daily cost limit · log retention (days) · `claude`/`gh` CLI paths.
 **Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · default model · serial vs. parallel processing · queue label (default `drydock:queue`).
 
 ## Screens
@@ -254,6 +254,13 @@ pnpm db:generate    # regenerate Drizzle migrations after schema changes
 
 - **Backups** — `pnpm backup` writes a consistent SQLite snapshot into `data/backups/` and
   prunes anything older than 7 days. Schedule it daily via cron/launchd.
+- **Retention & pruning** — finished jobs' verbose log events are pruned past the
+  **log retention** window (default 30 days; cost summary rows are kept). A daily in-process
+  sweep runs automatically; for a manual run use `pnpm db:prune [--days <n>] [--no-vacuum]`,
+  which deletes expired events and runs `VACUUM` to reclaim disk. See
+  [ADR 023](docs/adr/023-log-retention-and-pruning.md).
+- **Secret redaction** — GitHub/GitLab tokens and `Bearer` values echoed in agent output are
+  scrubbed before any log event is persisted or streamed.
 - **Pause / cost limit** — flip the global pause or hit the daily cost limit and the driver
   loop stops claiming new work; in-flight jobs finish cleanly.
 

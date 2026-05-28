@@ -17,6 +17,12 @@ describe("settings", () => {
     expect(s.paused).toBe(false);
     expect(s.dailyCostLimitUsd).toBe(10);
     expect(s.maxParallelJobs).toBe(3);
+    expect(s.retentionDays).toBe(30);
+  });
+
+  it("persists a custom retention window", () => {
+    saveSettings({ retentionDays: 14 }, db);
+    expect(getSettings(db).retentionDays).toBe(14);
   });
 
   it("persists and merges patches", () => {
