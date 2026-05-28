@@ -11,6 +11,7 @@ import type { NotificationEvent } from "@/lib/notify/events";
 import { dispatch } from "@/lib/notify/notifier";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
+import { agentInstructionsPromptSection } from "@/lib/repos/agent-instructions";
 import { getSettings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
 import { type AgentSessionResult, resumeAgentSession, spawnAgentSession } from "./agent-session";
@@ -160,6 +161,11 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         markSubtasksWorking(repo.id, job.issueNumber, db);
       }
     }
+
+    // Per-repo custom agent instructions (issue #56, opt-in): append the
+    // operator's free-text guidance as a dedicated, length-capped section.
+    // Empty/unset leaves the prompt untouched.
+    prompt += agentInstructionsPromptSection(repo.agentInstructions);
 
     const session = await runSession(getJob(job.id, db) as Job, prompt, wt.path);
     if (session.timedOut) {

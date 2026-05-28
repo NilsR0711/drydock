@@ -87,6 +87,8 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 💬 **Ask about this PR** — on a job's detail view, ask a free-text question ("why did this change X?", "is the failing test related?", "what's left to do?") and a **read-only** agent answers from a length-capped context bundle Drydock already has: PR metadata, check pass/fail state, a review-feedback summary, the recent activity log, and the PR diff. Each question is persisted with a visible lifecycle (`answering → answered | error`), scoped to the PR it was asked about, and empty or failed responses are recorded as an error rather than crashing.
 
+📝 **Per-repo agent instructions** — give each watched repo free-text guidance (coding conventions, "always run `pnpm test`", "don't touch `legacy/`", preferred PR style) from the automation panel. The text is injected into the issue-work prompt as a dedicated, length-capped section, so you steer agent behavior per project without editing global prompts or code. Empty by default; an unset value leaves the prompt unchanged.
+
 📡 **Live logs over SSE** — the agent's NDJSON output is parsed incrementally, persisted, and streamed to the browser in real time.
 
 💸 **Cost tracking** — per-job and aggregate spend from the agent's reported `total_cost_usd` (or estimated from tokens), with a **daily cost limit** that gates the driver loop.

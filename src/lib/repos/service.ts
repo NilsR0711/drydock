@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { type DB, getDb } from "@/lib/db/client";
 import { type Repo, repos } from "@/lib/db/schema";
+import { AGENT_INSTRUCTIONS_MAX_CHARS } from "@/lib/repos/agent-instructions";
 
 /**
  * A label/author list column: callers pass a `string[]`, but we persist it as a
@@ -50,6 +51,7 @@ export const repoInputSchema = z.object({
   ignoredBots: jsonStringArray('["dependabot[bot]","github-actions[bot]","codecov[bot]"]'),
   minAuthorAssociation: z.enum(["approved", "any"]).default("approved"),
   maxAttempts: z.number().int().positive().default(3),
+  agentInstructions: z.string().max(AGENT_INSTRUCTIONS_MAX_CHARS).nullish(),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 
