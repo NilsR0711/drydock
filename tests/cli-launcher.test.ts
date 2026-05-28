@@ -73,7 +73,7 @@ describe("updateCommand", () => {
   it("installs the latest published version globally", () => {
     expect(updateCommand()).toEqual({
       command: "npm",
-      args: ["install", "--global", "drydock@latest"],
+      args: ["install", "--global", "@nilsr0711/drydock@latest"],
     });
   });
 });

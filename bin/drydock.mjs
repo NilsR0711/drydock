@@ -116,7 +116,7 @@ created and migrated automatically on first start.`;
 
 /** The command that updates a global install to the latest published version. */
 export function updateCommand() {
-  return { command: "npm", args: ["install", "--global", "drydock@latest"] };
+  return { command: "npm", args: ["install", "--global", "@nilsr0711/drydock@latest"] };
 }
 
 /** Run the self-update, inheriting stdio so npm's progress is visible. */

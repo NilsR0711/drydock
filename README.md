@@ -159,14 +159,14 @@ stateDiagram-v2
 Run the published tool straight from the terminal — no checkout required:
 
 ```bash
-npx drydock            # boot the server and print the dashboard URL
-npx drydock --open     # …and open it in your browser
+npx @nilsr0711/drydock            # boot the server and print the dashboard URL
+npx @nilsr0711/drydock --open     # …and open it in your browser
 ```
 
-Or install it globally:
+Or install it globally — the command is `drydock` regardless of the scoped package name:
 
 ```bash
-npm i -g drydock
+npm i -g @nilsr0711/drydock
 drydock --open
 ```
 
@@ -209,7 +209,7 @@ pnpm test           # run the unit suite (167 tests, fully offline)
 | Tool | Version | Notes |
 | --- | --- | --- |
 | Node.js | ≥ 20.9 (22 recommended) | matches the CI matrix |
-| npm | ≥ 10 (ships with Node) | to install/run the published tool — `npm i -g drydock` or `npx drydock` |
+| npm | ≥ 10 (ships with Node) | to install/run the published tool — `npm i -g @nilsr0711/drydock` or `npx @nilsr0711/drydock` |
 | [`claude`](https://docs.claude.com/en/docs/claude-code) **or** [`codex`](https://github.com/openai/codex) CLI | latest | the coding agent — pick one per repo; on `PATH`, authenticated |
 | [`gh`](https://cli.github.com) CLI | latest | on `PATH`, authenticated — for **GitHub** repos |
 | pnpm | 10.x | **only for local development** from a checkout (`corepack enable`) |
