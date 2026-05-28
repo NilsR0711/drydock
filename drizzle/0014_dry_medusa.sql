@@ -1,0 +1,1 @@
+ALTER TABLE `repos` ADD `max_ci_wait_minutes` integer;
