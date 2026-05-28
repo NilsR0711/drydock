@@ -120,6 +120,13 @@
       "when": 1780006775125,
       "tag": "0016_charming_natasha_romanoff",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1780007754894,
+      "tag": "0017_free_warbound",
+      "breakpoints": true
     }
   ]
 }

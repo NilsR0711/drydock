@@ -1,0 +1,1 @@
+ALTER TABLE `repos` ADD `agent_instructions` text;

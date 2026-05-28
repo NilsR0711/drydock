@@ -77,6 +77,10 @@ export const repos = sqliteTable("repos", {
   // Optional per-repo wall-clock CI wait budget in minutes (issue #52). Null
   // falls back to the global settings.maxCiWaitMinutes default.
   maxCiWaitMinutes: integer("max_ci_wait_minutes"),
+  // Free-text per-repo agent instructions (issue #56). Injected into the work
+  // prompt as a dedicated, length-capped section. Null/empty leaves the prompt
+  // unchanged. See src/lib/repos/agent-instructions.ts for the cap and rendering.
+  agentInstructions: text("agent_instructions"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 
