@@ -114,7 +114,8 @@ flowchart LR
 
 A single orchestrator boots with the server process (`src/instrumentation.ts`). On start it
 runs crash recovery (requeue orphaned `working` jobs, park CI-babysitting states as
-`interrupted`) and installs graceful-shutdown handlers. The **driver loop** atomically claims
+`interrupted`, and reap orphaned git worktrees left by a hard crash) and installs
+graceful-shutdown handlers. The **driver loop** atomically claims
 the next eligible queued job with a lease (respecting per-repo priority, the daily cost limit,
 the global pause, and serial-vs-parallel settings), heartbeats it while it runs, then releases
 the lease once it settles.

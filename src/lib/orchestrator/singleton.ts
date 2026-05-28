@@ -7,6 +7,7 @@ import { recoverOnStartup } from "./driver";
 import { startDriverLoop, stopDriverLoop } from "./driver-loop";
 import { transitionJob } from "./jobs";
 import { acquireInstanceLock, setDrainMode, waitForIdle } from "./runtime";
+import { reapOrphanedWorktrees } from "./worktree-reaper";
 
 /**
  * Orchestrator singleton. instrumentation.ts calls this once on server start.
@@ -105,6 +106,13 @@ export function startOrchestrator(): void {
     }
 
     if (acquireInstanceLock()) {
+      // Only the lock-holding instance reaps worktrees, so a second process
+      // never deletes the active instance's in-flight directories (issue #53).
+      reapOrphanedWorktrees()
+        .then((reaped) => {
+          if (reaped > 0) console.log(`[orchestrator] reaped ${reaped} orphaned worktree(s)`);
+        })
+        .catch((err) => console.error("[orchestrator] worktree reap failed", err));
       startDriverLoop();
       startPruneSweep();
     } else {
