@@ -32,39 +32,14 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+  # When a release is cut, reuse the single publish definition (npm-publish.yml)
+  # to push the tag to npm with provenance. Manual/first publishes call the same
+  # workflow via workflow_dispatch.
   publish:
     name: Publish to npm
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      # Mint an OIDC token so `npm publish --provenance` can attest the build
-      # without a long-lived npm token in the repo.
-      id-token: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: pnpm
-          registry-url: "https://registry.npmjs.org"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # `npm publish` runs the `prepublishOnly` gate (tests + standalone build)
-      # before uploading. Provenance links the tarball to this workflow run.
-      - name: Publish
-        run: npm publish --provenance --access public
-        env:
-          NEXT_TELEMETRY_DISABLED: "1"
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    uses: ./.github/workflows/npm-publish.yml
+    with:
+      ref: ${{ needs.release-please.outputs.tag_name }}
+    secrets: inherit

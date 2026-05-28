@@ -70,10 +70,13 @@ Next build, which is out of scope for issue #12.
 `bin` only — no sources or tests), `publishConfig.access: public` with
 provenance, and a `prepublishOnly` gate (`pnpm test && pnpm build`).
 
-Publishing is automated from the release workflow: when release-please cuts a
-release, a `publish` job runs `npm publish` with npm **provenance** via OIDC
-(`id-token: write`), so artifacts are cryptographically linked to the workflow
-and no long-lived npm token is required once trusted publishing is configured.
+Publishing runs from a single reusable workflow, `npm-publish.yml`
+(`npm publish --provenance --access public`), triggered either by
+`workflow_dispatch` (the first/manual publish) or by `release-please.yml` via
+`workflow_call` once it cuts a release. Authentication uses an `NPM_TOKEN` repo
+secret; **provenance** via OIDC (`id-token: write`) cryptographically links each
+tarball to its workflow run. Keeping one publish definition avoids drift between
+the manual and automated paths.
 
 ## Consequences
 
