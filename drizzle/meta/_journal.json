@@ -127,6 +127,13 @@
       "when": 1780007754894,
       "tag": "0017_free_warbound",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1780008739108,
+      "tag": "0018_confused_franklin_storm",
+      "breakpoints": true
     }
   ]
 }

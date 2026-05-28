@@ -51,6 +51,9 @@ export const repoInputSchema = z.object({
   ignoredBots: jsonStringArray('["dependabot[bot]","github-actions[bot]","codecov[bot]"]'),
   minAuthorAssociation: z.enum(["approved", "any"]).default("approved"),
   maxAttempts: z.number().int().positive().default(3),
+  // Optional per-repo per-job USD cost ceiling (issue #57). Null/undefined falls
+  // back to the global settings.maxJobCostUsd default.
+  maxJobCostUsd: z.number().nonnegative().nullish(),
   agentInstructions: z.string().max(AGENT_INSTRUCTIONS_MAX_CHARS).nullish(),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;

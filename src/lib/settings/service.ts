@@ -19,6 +19,13 @@ export const settingsSchema = z.object({
   // stops polling and escalates the job to needs_human instead of looping
   // forever. A per-repo override may shorten/extend it.
   maxCiWaitMinutes: z.number().int().positive().default(60),
+  // Per-job USD cost ceiling (issue #57). When a single session's accumulated
+  // cost crosses this, the agent is aborted mid-stream (SIGTERM → SIGKILL) and
+  // the job escalates to needs_human, bounding the blast radius of one runaway
+  // session that could otherwise drain the whole daily budget by itself. 0 is
+  // off (no ceiling) — the default when unset. A per-repo override may tighten
+  // or relax it.
+  maxJobCostUsd: z.number().nonnegative().default(0),
   defaultModel: z.string().default("claude-opus-4-7"),
   defaultAgent: z.enum(["claude", "codex"]).default("claude"),
   claudePath: z.string().default("claude"),

@@ -31,6 +31,16 @@ describe("settings", () => {
     expect(getSettings(db).maxCiWaitMinutes).toBe(15);
   });
 
+  it("defaults the per-job cost ceiling to off (0) and persists an override (issue #57)", () => {
+    expect(getSettings(db).maxJobCostUsd).toBe(0);
+    saveSettings({ maxJobCostUsd: 2.5 }, db);
+    expect(getSettings(db).maxJobCostUsd).toBe(2.5);
+  });
+
+  it("rejects a negative per-job cost ceiling (issue #57)", () => {
+    expect(() => saveSettings({ maxJobCostUsd: -1 }, db)).toThrow();
+  });
+
   it("defaults notification channels to empty and all events enabled", () => {
     const s = getSettings(db);
     expect(s.slackWebhookUrl).toBe("");
