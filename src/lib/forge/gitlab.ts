@@ -40,6 +40,12 @@ const gitlabJobSchema = z.object({
 
 const gitlabPipelineSchema = z.object({ id: z.number() });
 
+const gitlabDiffSchema = z.object({
+  old_path: z.string().default(""),
+  new_path: z.string().default(""),
+  diff: z.string().default(""),
+});
+
 interface ProjectRef {
   baseUrl: string;
   encodedPath: string;
@@ -263,6 +269,22 @@ export class GitlabForge implements ForgeClient {
       const traceRes = await this.request("GET", `/jobs/${failed.id}/trace`);
       if (!traceRes.ok) return "";
       return traceRes.body.slice(-8000);
+    } catch {
+      return "";
+    }
+  }
+
+  async prDiff(prNumber: number): Promise<string> {
+    try {
+      const res = await this.request("GET", `/merge_requests/${prNumber}/diffs`, {
+        query: { per_page: "100" },
+      });
+      if (!res.ok) return "";
+      const parsed = z.array(gitlabDiffSchema).safeParse(safeJson(res.body, []));
+      if (!parsed.success) return "";
+      return parsed.data
+        .map((d) => `--- a/${d.old_path}\n+++ b/${d.new_path}\n${d.diff}`)
+        .join("\n");
     } catch {
       return "";
     }

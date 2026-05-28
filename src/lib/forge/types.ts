@@ -58,6 +58,8 @@ export interface ForgeClient {
   commentIssue(issueNumber: number, body: string): Promise<void>;
   createIssue(title: string, body: string): Promise<number>;
   failedRunLog(prNumber: number): Promise<string>;
+  /** The PR/MR's unified diff, or an empty string on any failure (best-effort). */
+  prDiff(prNumber: number): Promise<string>;
   mergePr(prNumber: number): Promise<void>;
   createPr(input: { head: string; base: string; title: string; body: string }): Promise<number>;
   /**
