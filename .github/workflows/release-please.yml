@@ -1,13 +1,12 @@
 name: Release Please
 
-# release-please maintains a "release" PR from Conventional Commits: every push
-# to master refreshes it with the next version + CHANGELOG entry. Merging that PR
-# cuts the tag and GitHub release and, via the publish job below, publishes to
-# npm — so the changelog and the release are produced together, automatically.
-# workflow_dispatch is kept for manual runs.
+# Releases are cut manually: trigger this workflow from the Actions tab (or
+# `gh workflow run release-please.yml`) when you want to release. release-please
+# then opens/updates a "release" PR with the next version + CHANGELOG entry;
+# merging that PR cuts the tag and GitHub release and, via the publish job below,
+# publishes to npm — changelog and release produced together, but only when you
+# choose to release.
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
 
 # Only one release run at a time; never cancel an in-flight release.
@@ -43,6 +42,12 @@ jobs:
     name: Publish to npm
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
+    # The called workflow needs id-token: write for provenance; a reusable-
+    # workflow caller must grant it here (capped by this workflow's token),
+    # otherwise the run fails at startup validation.
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/npm-publish.yml
     with:
       ref: ${{ needs.release-please.outputs.tag_name }}
