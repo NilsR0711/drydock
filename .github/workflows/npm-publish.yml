@@ -1,0 +1,67 @@
+name: Publish to npm
+
+# Single source of truth for publishing. Triggered two ways:
+#   • workflow_dispatch — manual publish of the version currently on the chosen
+#     ref (used for the first release and ad-hoc/recovery publishes).
+#   • workflow_call — reused by release-please.yml after it cuts a release.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (tag/branch) to publish — defaults to the run's ref"
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref (tag) to publish"
+        type: string
+        required: true
+    secrets:
+      NPM_TOKEN:
+        required: true
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Mint an OIDC token so `npm publish --provenance` can attest the build to
+      # this workflow run.
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `npm publish` runs the `prepublishOnly` gate (tests + standalone build)
+      # before uploading, so a broken build never ships.
+      - name: Publish
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
