@@ -178,6 +178,7 @@ add a repository, and start queuing issues.
 drydock --help         # all flags
 drydock --version      # installed version
 drydock --port 8080 --host 0.0.0.0   # bind elsewhere (defaults: 127.0.0.1:3737)
+drydock update         # update a global install to the latest version
 ```
 
 You still need the `claude` and (for GitHub) `gh` CLIs on `PATH` — see [Requirements](#requirements).
@@ -208,12 +209,15 @@ pnpm test           # run the unit suite (167 tests, fully offline)
 | Tool | Version | Notes |
 | --- | --- | --- |
 | Node.js | ≥ 20.9 (22 recommended) | matches the CI matrix |
-| pnpm | 10.x | `corepack enable` picks it up from `packageManager` |
-| [`claude`](https://docs.claude.com/en/docs/claude-code) CLI | latest | on `PATH`, authenticated |
+| npm | ≥ 10 (ships with Node) | to install/run the published tool — `npm i -g drydock` or `npx drydock` |
+| [`claude`](https://docs.claude.com/en/docs/claude-code) **or** [`codex`](https://github.com/openai/codex) CLI | latest | the coding agent — pick one per repo; on `PATH`, authenticated |
 | [`gh`](https://cli.github.com) CLI | latest | on `PATH`, authenticated — for **GitHub** repos |
+| pnpm | 10.x | **only for local development** from a checkout (`corepack enable`) |
 
-CLI paths are configurable under **Settings** if they're not on `PATH`. **GitLab** repos
-need no extra CLI — they use the REST API with a per-repo base URL + access token instead.
+You need at least one agent CLI (`claude` or `codex`); a preflight check verifies the one
+selected for a repo is installed. CLI paths are configurable under **Settings** if they're
+not on `PATH`. **GitLab** repos need no extra CLI — they use the REST API with a per-repo
+base URL + access token instead.
 For self-hosted instances behind a corporate CA or proxy, set `NODE_EXTRA_CA_CERTS` and/or
 `HTTPS_PROXY` in Drydock's environment (see [ADR 015](docs/adr/015-gitlab-forge-support.md)).
 
