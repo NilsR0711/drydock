@@ -54,3 +54,29 @@ export function pruneOldData(db: DB = getDb(), opts: PruneOptions = {}): PruneRe
 
   return { jobEventsDeleted, vacuumed: vacuum, cutoff };
 }
+
+/** Parse `drydock prune` CLI flags: `--days <n>` / `--days=<n>` and `--no-vacuum`. */
+export function parsePruneArgs(argv: readonly string[]): { days?: number; vacuum: boolean } {
+  const result: { days?: number; vacuum: boolean } = { vacuum: true };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--no-vacuum") {
+      result.vacuum = false;
+    } else if (arg === "--days") {
+      result.days = parseDays(argv[++i]);
+    } else if (arg?.startsWith("--days=")) {
+      result.days = parseDays(arg.slice("--days=".length));
+    } else {
+      throw new Error(`unknown argument: ${arg}`);
+    }
+  }
+  return result;
+}
+
+function parseDays(raw: string | undefined): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(`--days expects a positive integer, got: ${raw}`);
+  }
+  return n;
+}

@@ -1,5 +1,6 @@
 import { inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
+import { pruneOldData } from "@/lib/db/prune";
 import { jobs } from "@/lib/db/schema";
 import { recoverOnStartup } from "./driver";
 import { startDriverLoop, stopDriverLoop } from "./driver-loop";
@@ -61,6 +62,28 @@ export async function gracefulShutdown(): Promise<void> {
   }
 }
 
+const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Periodically prune verbose job_events past the retention window so the
+ * SQLite DB does not grow without bound (issue #24). Runs once at startup and
+ * then daily; failures are logged but never crash the orchestrator.
+ */
+function startPruneSweep(): void {
+  const sweep = () => {
+    try {
+      const { jobEventsDeleted } = pruneOldData(getDb());
+      if (jobEventsDeleted > 0)
+        console.log(`[orchestrator] pruned ${jobEventsDeleted} job event(s)`);
+    } catch (err) {
+      console.error("[orchestrator] prune sweep failed", err);
+    }
+  };
+  sweep();
+  const timer = setInterval(sweep, PRUNE_INTERVAL_MS);
+  timer.unref?.();
+}
+
 export function startOrchestrator(): void {
   if (started) return;
   started = true;
@@ -80,6 +103,7 @@ export function startOrchestrator(): void {
 
     if (acquireInstanceLock()) {
       startDriverLoop();
+      startPruneSweep();
     } else {
       console.warn("[orchestrator] another instance holds the lock; driver loop not started");
     }

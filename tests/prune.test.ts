@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
-import { pruneOldData } from "@/lib/db/prune";
+import { parsePruneArgs, pruneOldData } from "@/lib/db/prune";
 import { jobEvents, jobs } from "@/lib/db/schema";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
@@ -106,5 +106,32 @@ describe("pruneOldData", () => {
   it("skips VACUUM when disabled", () => {
     const result = pruneOldData(db, { vacuum: false });
     expect(result.vacuumed).toBe(false);
+  });
+});
+
+describe("parsePruneArgs", () => {
+  it("defaults to no day override and vacuum enabled", () => {
+    expect(parsePruneArgs([])).toEqual({ vacuum: true });
+  });
+
+  it("parses --days <n>", () => {
+    expect(parsePruneArgs(["--days", "14"])).toEqual({ days: 14, vacuum: true });
+  });
+
+  it("parses --days=<n>", () => {
+    expect(parsePruneArgs(["--days=7"])).toEqual({ days: 7, vacuum: true });
+  });
+
+  it("disables vacuum with --no-vacuum", () => {
+    expect(parsePruneArgs(["--no-vacuum"])).toEqual({ vacuum: false });
+  });
+
+  it("combines flags", () => {
+    expect(parsePruneArgs(["--days", "5", "--no-vacuum"])).toEqual({ days: 5, vacuum: false });
+  });
+
+  it("rejects a non-positive or non-numeric --days", () => {
+    expect(() => parsePruneArgs(["--days", "0"])).toThrow();
+    expect(() => parsePruneArgs(["--days", "abc"])).toThrow();
   });
 });
