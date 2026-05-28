@@ -87,8 +87,13 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   const command = commandForAgent(provider, db);
   // Wall-clock session bound (issue #47): a per-repo override wins, else the
   // global default. Guarantees a hung agent is aborted and the slot freed.
-  const maxJobMinutes = repo.maxJobMinutes ?? getSettings(db).maxJobMinutes;
+  const settings = getSettings(db);
+  const maxJobMinutes = repo.maxJobMinutes ?? settings.maxJobMinutes;
   const timeoutMs = maxJobMinutes * 60_000;
+  // Wall-clock CI wait budget (issue #52): a per-repo override wins, else the
+  // global default. Bounds the babysitter so a never-settling PR escalates to a
+  // human instead of looping forever.
+  const ciWaitMs = (repo.maxCiWaitMinutes ?? settings.maxCiWaitMinutes) * 60_000;
   const runSession =
     deps.runSession ??
     ((j, prompt, cwd) => spawnAgentSession(j, prompt, cwd, { db, provider, command, timeoutMs }));
@@ -99,6 +104,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       ciBabysitter(j, prNumber, {
         gh: forge,
         db,
+        ciWaitMs,
         resumeSession: (rj, sessionId, failedLog) =>
           resumeAgentSession(rj, sessionId, failedLog, repo.path, {
             db,

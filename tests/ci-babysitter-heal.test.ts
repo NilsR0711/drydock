@@ -109,6 +109,26 @@ describe("ciBabysitter auto-heal", () => {
     expect(db.select().from(followupIssues).all()).toHaveLength(1);
   });
 
+  it("escalates to needs_human when checks stay pending past the wait budget", async () => {
+    const job = ciRunningJob(5);
+    const { gh } = scriptedGh(Array(12).fill([{ name: "test", state: "PENDING" }]));
+    const resume = vi.fn(async () => {});
+    let t = 0;
+    const now = () => (t += 60_000);
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      ...fast,
+      now,
+      ciWaitMs: 2 * 60_000,
+      autoHeal: { headSha: vi.fn().mockResolvedValue("sha-1"), provider: "github", now },
+    });
+    expect(final.status).toBe("needs_human");
+    expect(resume).not.toHaveBeenCalled();
+    expect(getJob(job.id, db)?.errorMessage).toContain("CI did not complete in time");
+  });
+
   it("stays bounded by the heal budget and escalates rather than looping forever", async () => {
     const job = ciRunningJob(4);
     // Always failing; head moves each heal so attempts aren't rejected as empty,

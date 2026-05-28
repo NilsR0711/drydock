@@ -25,6 +25,12 @@ describe("settings", () => {
     expect(getSettings(db).retentionDays).toBe(14);
   });
 
+  it("defaults the CI wait budget and persists an override", () => {
+    expect(getSettings(db).maxCiWaitMinutes).toBe(60);
+    saveSettings({ maxCiWaitMinutes: 15 }, db);
+    expect(getSettings(db).maxCiWaitMinutes).toBe(15);
+  });
+
   it("defaults notification channels to empty and all events enabled", () => {
     const s = getSettings(db);
     expect(s.slackWebhookUrl).toBe("");

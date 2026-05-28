@@ -53,6 +53,14 @@ export interface BabysitterDeps {
   sleep?: (ms: number) => Promise<void>;
   /** Safety bound for the poll loop in tests. */
   maxPolls?: number;
+  /**
+   * Hard wall-clock budget (ms) for CI to start and settle (issue #52). If
+   * checks stay pending past this, the loop escalates to needs_human instead of
+   * polling forever. Defaults to unbounded so callers must opt in to a budget.
+   */
+  ciWaitMs?: number;
+  /** Clock injection for the wait budget (tests). */
+  now?: () => number;
   /** When set, CI failures are routed through the auto-heal engine (issue #16). */
   autoHeal?: AutoHealConfig;
 }
@@ -79,6 +87,25 @@ async function escalateToHuman(
 }
 
 /**
+ * Stop polling and hand a stuck PR to a human when CI never settles (issue #52):
+ * a stuck runner, a workflow that never starts, or a required check that is
+ * never reported would otherwise keep the loop pending forever.
+ */
+async function escalateCiTimeout(
+  job: Job,
+  prNumber: number,
+  ciWaitMs: number,
+  deps: BabysitterDeps,
+  db: DB,
+): Promise<Job> {
+  const minutes = Math.round(ciWaitMs / 60_000);
+  const message = `CI did not complete in time (checks stayed pending for over ${minutes} min on PR #${prNumber}).`;
+  await deps.gh.commentIssue(job.issueNumber, `${message} Handing over to a human.`);
+  recordEvent(job.id, "status", { reason: "ci wait budget exceeded", prNumber }, db);
+  return transitionJob(job.id, "needs_human", { errorMessage: message.slice(0, 500) }, db);
+}
+
+/**
  * Poll `gh pr checks` every pollMs. All green → merge (auto). Any red → if under
  * the retry budget, pull the failed log and resume Claude with Haiku, else mark
  * needs_human, comment on the issue, and file a follow-up issue.
@@ -97,6 +124,9 @@ export async function ciBabysitter(
   const sleep = deps.sleep ?? defaultSleep;
   const pollMs = deps.pollMs ?? 30_000;
   const maxPolls = deps.maxPolls ?? Number.POSITIVE_INFINITY;
+  const ciWaitMs = deps.ciWaitMs ?? Number.POSITIVE_INFINITY;
+  const now = deps.now ?? Date.now;
+  const deadline = now() + ciWaitMs;
 
   let job = jobArg;
   let polls = 0;
@@ -106,6 +136,7 @@ export async function ciBabysitter(
     const outcome = classifyChecks(checks);
 
     if (outcome === "pending") {
+      if (now() >= deadline) return escalateCiTimeout(job, prNumber, ciWaitMs, deps, db);
       await sleep(pollMs);
       continue;
     }
@@ -176,7 +207,9 @@ async function autoHealLoop(
   const pollMs = deps.pollMs ?? 30_000;
   const maxPolls = deps.maxPolls ?? Number.POSITIVE_INFINITY;
   const budgets = heal.budgets ?? DEFAULT_HEAL_BUDGETS;
-  const now = heal.now ?? Date.now;
+  const now = deps.now ?? heal.now ?? Date.now;
+  const ciWaitMs = deps.ciWaitMs ?? Number.POSITIVE_INFINITY;
+  const deadline = now() + ciWaitMs;
 
   let job = jobArg;
   let pending: PendingHeal | undefined;
@@ -187,6 +220,7 @@ async function autoHealLoop(
     const outcome = classifyChecks(checks);
 
     if (outcome === "pending") {
+      if (now() >= deadline) return escalateCiTimeout(job, prNumber, ciWaitMs, deps, db);
       await sleep(pollMs);
       continue;
     }

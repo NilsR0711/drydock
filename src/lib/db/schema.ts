@@ -69,6 +69,9 @@ export const repos = sqliteTable("repos", {
   // Optional per-repo wall-clock session timeout in minutes (issue #47). Null
   // falls back to the global settings.maxJobMinutes default.
   maxJobMinutes: integer("max_job_minutes"),
+  // Optional per-repo wall-clock CI wait budget in minutes (issue #52). Null
+  // falls back to the global settings.maxCiWaitMinutes default.
+  maxCiWaitMinutes: integer("max_ci_wait_minutes"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 

@@ -14,6 +14,11 @@ export const settingsSchema = z.object({
   // agent (network stall, MCP deadlock, stdin prompt) is aborted after this so
   // it never holds a job slot forever. A per-repo override may shorten/extend it.
   maxJobMinutes: z.number().int().positive().default(30),
+  // Hard wall-clock budget for CI to start and settle after a PR is opened
+  // (issue #52). If required checks sit pending/queued past this, the babysitter
+  // stops polling and escalates the job to needs_human instead of looping
+  // forever. A per-repo override may shorten/extend it.
+  maxCiWaitMinutes: z.number().int().positive().default(60),
   defaultModel: z.string().default("claude-opus-4-7"),
   defaultAgent: z.enum(["claude", "codex"]).default("claude"),
   claudePath: z.string().default("claude"),
