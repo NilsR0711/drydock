@@ -65,6 +65,22 @@ describe("repos service", () => {
     expect(updated.dailyCostLimitUsd).toBe(25);
   });
 
+  it("defaults the per-job cost ceiling override to unset (issue #57)", () => {
+    const repo = addRepo({ path: "/jc", name: "jc" }, db);
+    expect(repo.maxJobCostUsd).toBeNull();
+  });
+
+  it("stores and updates a per-job cost ceiling override (issue #57)", () => {
+    const repo = addRepo({ path: "/jc2", name: "jc2", maxJobCostUsd: 3 }, db);
+    expect(repo.maxJobCostUsd).toBe(3);
+    const updated = updateRepo(repo.id, { maxJobCostUsd: 1.5 }, db);
+    expect(updated.maxJobCostUsd).toBe(1.5);
+  });
+
+  it("rejects a negative per-job cost ceiling override (issue #57)", () => {
+    expect(() => addRepo({ path: "/jc3", name: "jc3", maxJobCostUsd: -2 }, db)).toThrow();
+  });
+
   it("updates a repo", () => {
     const repo = addRepo({ path: "/tmp/foo", name: "foo" }, db);
     const updated = updateRepo(repo.id, { name: "bar", defaultModel: "claude-haiku-4-5" }, db);

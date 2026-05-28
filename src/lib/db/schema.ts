@@ -77,6 +77,9 @@ export const repos = sqliteTable("repos", {
   // Optional per-repo wall-clock CI wait budget in minutes (issue #52). Null
   // falls back to the global settings.maxCiWaitMinutes default.
   maxCiWaitMinutes: integer("max_ci_wait_minutes"),
+  // Optional per-repo per-job USD cost ceiling (issue #57). Null falls back to
+  // the global settings.maxJobCostUsd default; 0 disables the ceiling entirely.
+  maxJobCostUsd: real("max_job_cost_usd"),
   // Free-text per-repo agent instructions (issue #56). Injected into the work
   // prompt as a dedicated, length-capped section. Null/empty leaves the prompt
   // unchanged. See src/lib/repos/agent-instructions.ts for the cap and rendering.

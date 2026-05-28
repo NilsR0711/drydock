@@ -91,7 +91,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 📡 **Live logs over SSE** — the agent's NDJSON output is parsed incrementally, persisted, and streamed to the browser in real time.
 
-💸 **Cost tracking** — per-job and aggregate spend from the agent's reported `total_cost_usd` (or estimated from tokens), with a **daily cost limit** that gates the driver loop.
+💸 **Cost tracking** — per-job and aggregate spend from the agent's reported `total_cost_usd` (or estimated from tokens), with a **daily cost limit** that gates the driver loop and an optional **per-job cost ceiling** that aborts a single runaway session mid-stream (global default + per-repo override; off when unset).
 
 ⏯️ **Global pause & per-repo controls** — pause everything from the navbar, pick an agent and model per repo, toggle serial vs. parallel processing, and customize the queue label.
 
@@ -242,7 +242,7 @@ Drydock is configured at runtime from the **Settings** page and per-repo control
 ¹ A source checkout (`pnpm dev`/`pnpm start`) defaults `DRYDOCK_DB` to `data/drydock.db` in the
 project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 
-**Settings (global):** pause switch · daily cost limit · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · `claude`/`gh` CLI paths · notification channels (Telegram / Slack / email) and per-event opt-in.
+**Settings (global):** pause switch · daily cost limit · max job cost (per-job USD ceiling that aborts a runaway session mid-stream; 0 = off) · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · `claude`/`gh` CLI paths · notification channels (Telegram / Slack / email) and per-event opt-in.
 **Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · default model · serial vs. parallel processing · queue label (default `drydock:queue`) · optional job/CI timeout overrides.
 
 ## Screens
