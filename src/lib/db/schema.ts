@@ -66,6 +66,9 @@ export const repos = sqliteTable("repos", {
   // "approved" = only owners/members/collaborators; "any" = anyone (public).
   minAuthorAssociation: text("min_author_association").notNull().default("approved"),
   maxAttempts: integer("max_attempts").notNull().default(3),
+  // Optional per-repo wall-clock session timeout in minutes (issue #47). Null
+  // falls back to the global settings.maxJobMinutes default.
+  maxJobMinutes: integer("max_job_minutes"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 
