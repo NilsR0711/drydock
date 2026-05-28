@@ -1,6 +1,11 @@
 import { z } from "zod";
 import type { ModelPrice } from "@/lib/orchestrator/pricing";
-import type { ContentChunk, ParsedEvent } from "@/lib/stream/parser";
+import {
+  type ContentChunk,
+  errorMessage,
+  type ParsedEvent,
+  type ParseError,
+} from "@/lib/stream/parser";
 import type { AgentProvider } from "./types";
 
 export const CODEX_DEFAULT_MODEL = "gpt-5-codex";
@@ -153,6 +158,8 @@ export class CodexStreamParser {
   totalOutputTokens = 0;
   /** Codex omits USD cost from its stream; always 0 (cost is estimated). */
   costUsd = 0;
+  /** Invoked for every line that fails to parse; the line is then skipped. */
+  onParseError?: (error: ParseError) => void;
 
   push(chunk: string): ParsedEvent[] {
     this.buffer += chunk;
@@ -176,7 +183,15 @@ export class CodexStreamParser {
   }
 
   private consume(line: string): ParsedEvent | null {
-    const parsed = parseCodexLine(line);
+    let parsed: ParsedEvent | null;
+    try {
+      parsed = parseCodexLine(line);
+    } catch (error) {
+      // Codex stdout is not guaranteed pure JSONL (banners, MCP diagnostics,
+      // crash dumps). Skip a bad line rather than letting it crash the process.
+      this.onParseError?.({ line: line.trim(), message: errorMessage(error) });
+      return null;
+    }
     if (!parsed) return null;
     if (parsed.sessionId) this.sessionId = parsed.sessionId;
     this.totalInputTokens += parsed.inputTokens;

@@ -1,4 +1,4 @@
-import type { ParsedEvent } from "@/lib/stream/parser";
+import type { ParsedEvent, ParseError } from "@/lib/stream/parser";
 
 /** Coding agents Drydock can drive. Each maps to a CLI and an AgentProvider. */
 export type AgentId = "claude" | "codex";
@@ -19,6 +19,12 @@ export interface StreamParser {
   readonly totalOutputTokens: number;
   /** Cost in USD reported by the stream, or 0 when the agent omits it. */
   readonly costUsd: number;
+  /**
+   * Invoked for every stdout line the parser could not decode. The line is
+   * skipped, never thrown, so a malformed line can't crash the orchestrator
+   * (issue #46). The orchestrator wires this to a structured log event.
+   */
+  onParseError?: (error: ParseError) => void;
 }
 
 export interface BuildArgsOptions {
