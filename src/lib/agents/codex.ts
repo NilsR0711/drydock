@@ -205,6 +205,15 @@ export class CodexStreamParser {
  * run and `codex exec resume <thread_id> --json` for the CI-fix path. The
  * `workspace-write` sandbox maps to claude's `--permission-mode acceptEdits`
  * (auto-apply edits within the worktree, no network/system writes).
+ *
+ * Turn budget (issue #48): unlike Claude (`--max-turns`), `codex exec` has no
+ * turn-budget flag or config key. It runs a *single* turn (TurnStart →
+ * TurnCompleted) that may contain many tool-call items, so there is no per-turn
+ * count to cap, and injecting a fake flag would be ignored — or rejected under
+ * `--strict-config`. The `maxTurns` / `resumeMaxTurns` budget is therefore
+ * intentionally not passed to the codex args; a runaway run is bounded by the
+ * orchestrator's wall-clock timeout (issue #47) instead. Verified against the
+ * codex-rs `exec` CLI and config schema (no `max_turns`/`max_steps` key exists).
  */
 export const codexProvider: AgentProvider = {
   id: "codex",
@@ -212,9 +221,14 @@ export const codexProvider: AgentProvider = {
   defaultCommand: "codex",
   supportsResume: true,
   resumeModel: CODEX_DEFAULT_MODEL,
+  // Satisfies the AgentProvider contract but is intentionally unused: codex exec
+  // has no turn budget (see the note above). Cost is bounded by the wall-clock
+  // timeout, not by turns.
   resumeMaxTurns: 15,
   defaultModel: CODEX_DEFAULT_MODEL,
 
+  // `maxTurns` is intentionally not destructured: codex exec has no turn-budget
+  // flag (issue #48). See the provider doc comment above.
   buildStartArgs: ({ prompt, model }) => [
     "exec",
     "--json",
@@ -225,6 +239,7 @@ export const codexProvider: AgentProvider = {
     prompt,
   ],
 
+  // `maxTurns` intentionally unused on resume too (no codex turn-budget flag, #48).
   buildResumeArgs: ({ prompt, sessionId, model }) => [
     "exec",
     "resume",

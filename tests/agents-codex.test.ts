@@ -31,6 +31,37 @@ describe("codexProvider", () => {
     expect(args.at(-1)).toBe("fix the bug");
   });
 
+  it("does not inject a turn-budget flag on start (codex exec has no --max-turns, issue #48)", () => {
+    // `codex exec` runs a single turn (TurnStart → TurnCompleted) and exposes no
+    // turn-budget flag or config key, unlike Claude's `--max-turns`. Passing one
+    // would be ignored, or rejected under `--strict-config`. A runaway run is
+    // bounded by the orchestrator's wall-clock timeout (issue #47), not by turns.
+    const args = codexProvider.buildStartArgs({
+      prompt: "fix the bug",
+      model: "gpt-5-codex",
+      maxTurns: 40,
+    });
+    expect(args).not.toContain("--max-turns");
+    expect(args).not.toContain("--max-steps");
+    expect(args).not.toContain("max_turns");
+    // The budget must not leak in as a positional or `-c key=value` value either.
+    expect(args).not.toContain("40");
+    expect(args.some((a) => a.includes("max_turns"))).toBe(false);
+  });
+
+  it("does not inject a turn-budget flag on resume either (issue #48)", () => {
+    const args = codexProvider.buildResumeArgs({
+      prompt: "fix ci",
+      sessionId: "th_codex_abc",
+      model: codexProvider.resumeModel,
+      maxTurns: codexProvider.resumeMaxTurns,
+    });
+    expect(args).not.toBeNull();
+    expect(args).not.toContain("--max-turns");
+    expect(args?.some((a) => a.includes("max_turns"))).toBe(false);
+    expect(args).not.toContain(String(codexProvider.resumeMaxTurns));
+  });
+
   it("builds a resume invocation targeting the recorded thread id", () => {
     const args = codexProvider.buildResumeArgs({
       prompt: "fix ci",
