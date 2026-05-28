@@ -79,6 +79,14 @@ export function SettingsForm({ initial }: { initial: Settings }) {
         />
         Global pause
       </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={s.releaseManagementEnabled}
+          onChange={(e) => set("releaseManagementEnabled", e.target.checked)}
+        />
+        Enable release management (kill-switch)
+      </label>
       <Field label="Daily cost limit (USD)">
         <input
           type="number"

@@ -40,6 +40,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoDecompose, setAutoDecompose] = useState(repo.autoDecompose);
   const [verifyPr, setVerifyPr] = useState(repo.verifyPr);
   const [autoHealDeploy, setAutoHealDeploy] = useState(repo.autoHealDeployments);
+  const [releaseEnabled, setReleaseEnabled] = useState(repo.releaseEnabled);
   const [resolveConflicts, setResolveConflicts] = useState(repo.autoResolveMergeConflicts);
   const [progressReplies, setProgressReplies] = useState(repo.includeProgressReplies);
   const [ready, setReady] = useState(parseList(repo.readyLabels).join(", "));
@@ -176,6 +177,17 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
           />
           Heal failed deployments
         </label>
+        <label className="flex items-center gap-1.5 text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={releaseEnabled}
+            onChange={(e) => {
+              setReleaseEnabled(e.target.checked);
+              persist({ releaseEnabled: e.target.checked });
+            }}
+          />
+          Manage releases
+        </label>
         {pending && <span className="text-xs text-muted-foreground">Saving…</span>}
         {saved && <span className="text-xs text-success">Saved</span>}
       </div>
@@ -190,7 +202,9 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
         runs a read-only pass after it opens that checks whether the diff actually satisfies the
         issue and its subtasks, flags what remains, and never changes state on failure. Deployment
         healing monitors a merged PR's deployment and, on failure, opens a follow-up fix PR with the
-        captured logs. Drydock never auto-merges — a human always reviews the PR.
+        captured logs. Managing releases evaluates merged PRs since the last tag, decides the semver
+        bump, and publishes a release — gated by a global kill-switch and fully previewable. Drydock
+        never auto-merges — a human always reviews the PR.
       </p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
