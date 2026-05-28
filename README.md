@@ -97,6 +97,8 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 🔔 **External notifications** — get pinged on Telegram, Slack (incoming webhook) and email (SMTP) for the lifecycle events you care about (job needs human, job failed, PR opened, PR merged, daily cost limit reached, automation paused/draining). Each channel is configured independently, every event has a per-event opt-in, and a one-click test button verifies setup. Delivery is best-effort and never blocks the loop; secrets are redacted from logs. See [ADR 024](docs/adr/024-external-notifications.md).
 
+🆙 **Update-available notice** — a passive, dismissible navbar banner appears when a newer Drydock release is published. The check queries the latest stable GitHub release (drafts/prereleases skipped), is cached for an hour, and dedupes concurrent checks onto a single upstream call; any network or parse error advertises no update, so a transient hiccup never raises a false alarm. Global installs get a `drydock update` hint.
+
 📐 **ADR review queue** — a file watcher surfaces new `docs/adr/*.md` decisions for approve/reject.
 
 🧱 **Crash-safe lease queue** — jobs are claimed from a SQLite-backed queue with a lease token kept alive by heartbeats. A crashed worker's `working` jobs are requeued (with attempt-scaled backoff) on the next startup instead of getting stuck, CI-babysitting states park as `interrupted`, finalizing with a stale lease is rejected, a dedupe key prevents double-enqueuing the same issue, and a PID lockfile stops a second instance racing the queue. Graceful shutdown drains then SIGKILLs after 5s. See [ADR 022](docs/adr/022-lease-based-job-queue.md).

@@ -5,6 +5,8 @@ import { Providers } from "@/components/providers";
 import { pendingCount } from "@/lib/adr/service";
 import { needsHumanJobs } from "@/lib/db/queries";
 import { getSettings } from "@/lib/settings/service";
+import { getInstallKind } from "@/lib/version/current";
+import { peekUpdateStatus } from "@/lib/version/update-check";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +34,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   } catch {
     // DB may not exist yet on first boot
   }
+  // Non-blocking: returns the cached status and refreshes in the background (#58).
+  const updateStatus = peekUpdateStatus();
+  const installKind = getInstallKind();
   return (
     <html
       lang="en"
@@ -40,7 +45,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body>
         <Providers>
-          <AppShell adrPending={pending} needsHuman={needsHuman} paused={paused}>
+          <AppShell
+            adrPending={pending}
+            needsHuman={needsHuman}
+            paused={paused}
+            updateStatus={updateStatus}
+            installKind={installKind}
+          >
             {children}
           </AppShell>
         </Providers>

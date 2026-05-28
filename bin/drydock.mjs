@@ -114,6 +114,21 @@ Options:
 Data is stored in ~/.drydock (override with DRYDOCK_DATA_DIR); the database is
 created and migrated automatically on first start.`;
 
+/**
+ * Classify how Drydock was installed from its package directory. Drives the
+ * in-dashboard update notice (issue #58): a global install can self-update via
+ * `drydock update`, whereas an npx run or a dev checkout cannot.
+ *
+ * @param {string} packageRoot Absolute path to the installed package directory.
+ * @returns {"global" | "npx" | "local"}
+ */
+export function detectInstallKind(packageRoot) {
+  const normalized = packageRoot.replace(/\\/g, "/");
+  if (normalized.includes("/_npx/")) return "npx";
+  if (normalized.includes("/node_modules/")) return "global";
+  return "local";
+}
+
 /** The command that updates a global install to the latest published version. */
 export function updateCommand() {
   return { command: "npm", args: ["install", "--global", "@nilsr0711/drydock@latest"] };
@@ -185,6 +200,10 @@ async function serve({ host, port, open }) {
     PORT: String(port),
     DRYDOCK_DB: resolveDbPath(),
     DRYDOCK_MIGRATIONS: join(PACKAGE_ROOT, "drizzle"),
+    // Surface the running version and install kind to the dashboard so it can
+    // show an "update available" notice without bundling package.json (#58).
+    DRYDOCK_VERSION: readVersion(),
+    DRYDOCK_INSTALL_KIND: detectInstallKind(PACKAGE_ROOT),
   };
 
   const url = `http://${host}:${port}`;

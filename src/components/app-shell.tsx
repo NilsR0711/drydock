@@ -4,7 +4,10 @@ import { Anchor, PauseCircle } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { UpdateBanner } from "@/components/update-banner";
 import { cn } from "@/lib/utils";
+import type { InstallKind } from "@/lib/version/current";
+import type { UpdateStatus } from "@/lib/version/update-check";
 
 const NAV: { href: string; label: string }[] = [
   { href: "/", label: "Dashboard" },
@@ -24,11 +27,15 @@ export function AppShell({
   adrPending = 0,
   needsHuman = 0,
   paused = false,
+  updateStatus,
+  installKind = "local",
 }: {
   children: React.ReactNode;
   adrPending?: number;
   needsHuman?: number;
   paused?: boolean;
+  updateStatus?: UpdateStatus;
+  installKind?: InstallKind;
 }) {
   const pathname = usePathname();
   return (
@@ -71,6 +78,7 @@ export function AppShell({
             })}
           </nav>
           <div className="ml-auto flex items-center gap-2">
+            {updateStatus && <UpdateBanner status={updateStatus} installKind={installKind} />}
             {paused && (
               <Link
                 href="/settings"
