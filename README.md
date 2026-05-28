@@ -90,7 +90,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 📐 **ADR review queue** — a file watcher surfaces new `docs/adr/*.md` decisions for approve/reject.
 
-🧱 **Crash-safe** — single orchestrator per process with crash recovery (in-flight jobs → `interrupted`) and graceful shutdown (SIGTERM → drain → SIGKILL after 5s).
+🧱 **Crash-safe lease queue** — jobs are claimed from a SQLite-backed queue with a lease token kept alive by heartbeats. A crashed worker's `working` jobs are requeued (with attempt-scaled backoff) on the next startup instead of getting stuck, CI-babysitting states park as `interrupted`, finalizing with a stale lease is rejected, a dedupe key prevents double-enqueuing the same issue, and a PID lockfile stops a second instance racing the queue. Graceful shutdown drains then SIGKILLs after 5s. See [ADR 022](docs/adr/022-lease-based-job-queue.md).
 
 🎨 **Polished UX** — light/dark theme, confirm dialogs on destructive actions, toast feedback, and accessible primitives.
 
@@ -110,9 +110,11 @@ flowchart LR
 ```
 
 A single orchestrator boots with the server process (`src/instrumentation.ts`). On start it
-runs crash recovery and installs graceful-shutdown handlers. The **driver loop** pulls the
-next queued issue (respecting per-repo priority, the daily cost limit, the global pause, and
-serial-vs-parallel settings), then runs it through the pipeline above.
+runs crash recovery (requeue orphaned `working` jobs, park CI-babysitting states as
+`interrupted`) and installs graceful-shutdown handlers. The **driver loop** atomically claims
+the next eligible queued job with a lease (respecting per-repo priority, the daily cost limit,
+the global pause, and serial-vs-parallel settings), heartbeats it while it runs, then releases
+the lease once it settles.
 
 - **Sessions** — the `claude` CLI is spawned as a subprocess; its `stream-json` stdout is
   parsed line-by-line, written to `job_events`, and pushed to the browser over SSE.
