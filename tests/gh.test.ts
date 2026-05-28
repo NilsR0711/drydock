@@ -529,3 +529,78 @@ describe("GhClient.ensureLabel", () => {
     await expect(gh.ensureLabel("drydock:queue")).rejects.toBeInstanceOf(GhError);
   });
 });
+
+describe("GhClient release management (issue #59)", () => {
+  it("lists releases with tag and creation date", async () => {
+    const runner = fakeRunner({
+      stdout: JSON.stringify([
+        { tagName: "v1.2.0", createdAt: "2026-05-20T00:00:00Z" },
+        { tagName: "v1.1.0", createdAt: "2026-05-01T00:00:00Z" },
+      ]),
+    });
+    const gh = new GhClient("/repo", runner);
+    const releases = await gh.listReleases();
+    expect(releases).toEqual([
+      { tagName: "v1.2.0", createdAt: "2026-05-20T00:00:00Z" },
+      { tagName: "v1.1.0", createdAt: "2026-05-01T00:00:00Z" },
+    ]);
+    const [, args] = runner.mock.calls[0] as [string, string[]];
+    expect(args).toContain("release");
+    expect(args).toContain("list");
+  });
+
+  it("returns no releases when the repo has none", async () => {
+    const gh = new GhClient("/repo", fakeRunner({ stdout: "[]" }));
+    expect(await gh.listReleases()).toEqual([]);
+  });
+
+  it("lists merged PRs, flattening label names and honouring the limit", async () => {
+    const runner = fakeRunner({
+      stdout: JSON.stringify([
+        {
+          number: 12,
+          title: "Add export",
+          mergedAt: "2026-05-21T00:00:00Z",
+          labels: [{ name: "enhancement" }, { name: "ready" }],
+        },
+      ]),
+    });
+    const gh = new GhClient("/repo", runner);
+    const prs = await gh.listMergedPrs(50);
+    expect(prs).toEqual([
+      {
+        number: 12,
+        title: "Add export",
+        mergedAt: "2026-05-21T00:00:00Z",
+        labels: ["enhancement", "ready"],
+      },
+    ]);
+    const [, args] = runner.mock.calls[0] as [string, string[]];
+    expect(args).toContain("merged");
+    expect(args).toContain("50");
+  });
+
+  it("creates a release at a target commit with title and notes", async () => {
+    const runner = fakeRunner({ stdout: "https://github.com/o/r/releases/tag/v1.3.0" });
+    const gh = new GhClient("/repo", runner);
+    await gh.createRelease({
+      tag: "v1.3.0",
+      title: "v1.3.0",
+      notes: "- #12 Add export",
+      target: "abc1234",
+    });
+    const [cmd, args] = runner.mock.calls[0] as [string, string[]];
+    expect(cmd).toBe("gh");
+    expect(args.slice(0, 3)).toEqual(["release", "create", "v1.3.0"]);
+    expect(args).toContain("--title=v1.3.0");
+    expect(args).toContain("--notes=- #12 Add export");
+    expect(args).toContain("--target=abc1234");
+  });
+
+  it("throws when release creation fails", async () => {
+    const gh = new GhClient("/repo", fakeRunner({ exitCode: 1, stderr: "tag exists" }));
+    await expect(
+      gh.createRelease({ tag: "v1.3.0", title: "x", notes: "y", target: "main" }),
+    ).rejects.toBeInstanceOf(GhError);
+  });
+});

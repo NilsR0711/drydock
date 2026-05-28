@@ -82,6 +82,41 @@ export interface ForgeClient {
   resolveReviewThread?(threadId: string): Promise<void>;
   /** Acknowledge a review comment with a reaction. */
   reactToReviewComment?(commentId: string, content: ReactionContent): Promise<void>;
+
+  // --- Release management (issue #59) -------------------------------------
+  // Optional: only forges that support releases (currently GitHub) implement
+  // these, and the feature is gated on their presence.
+  /** List the repo's published releases (for the latest tag + idempotency). */
+  listReleases?(): Promise<ReleaseSummary[]>;
+  /** List recently merged pull requests, newest first. */
+  listMergedPrs?(limit?: number): Promise<ForgeMergedPr[]>;
+  /** Publish a release at a specific commit. */
+  createRelease?(input: CreateReleaseInput): Promise<void>;
+}
+
+/** A published release as listed from the forge (issue #59). */
+export interface ReleaseSummary {
+  tagName: string;
+  /** ISO-8601 creation timestamp. */
+  createdAt: string;
+}
+
+/** A merged pull request considered for inclusion in a release (issue #59). */
+export interface ForgeMergedPr {
+  number: number;
+  title: string;
+  /** ISO-8601 merge timestamp. */
+  mergedAt: string;
+  labels: string[];
+}
+
+/** Input to publish a release at a specific commit (issue #59). */
+export interface CreateReleaseInput {
+  tag: string;
+  title: string;
+  notes: string;
+  /** The commit-ish the tag points at (a merge SHA or the default branch). */
+  target: string;
 }
 
 /** Connection settings needed to construct a forge client for a repo. */
