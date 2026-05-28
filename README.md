@@ -40,6 +40,7 @@ dashboard bound to `127.0.0.1`.
 - [Tech stack](#tech-stack)
 - [Development](#development)
 - [Operations](#operations)
+- [MCP server](#mcp-server)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
@@ -225,7 +226,10 @@ src/
    ├─ exec/ · stream/    # subprocess runner + stream-json parser
    ├─ db/                # Drizzle schema, queries, migrations
    ├─ adr/ · prompts/    # ADR watcher/review, prompt templates
+   ├─ mcp/               # stdio MCP server: tool registry + wiring
+   ├─ cli.ts             # `drydock <command>` dispatcher
    └─ repos/ · settings/ # repo & settings services
+scripts/drydock.ts       # CLI entrypoint (drydock bin / pnpm mcp)
 docs/adr/                # architecture decision records (index: docs/DECISIONS.md)
 tests/                   # Vitest suite — fully offline
 ```
@@ -244,6 +248,7 @@ pnpm format         # biome check --write (auto-fix)
 pnpm typecheck      # tsc --noEmit
 pnpm test           # vitest run
 pnpm db:generate    # regenerate Drizzle migrations after schema changes
+pnpm mcp            # start the local stdio MCP server (see "MCP server")
 ```
 
 - **Tests never touch the network** — the `claude`/`gh`/`git` CLIs are injected as fakes.
@@ -265,6 +270,40 @@ pnpm db:generate    # regenerate Drizzle migrations after schema changes
   scrubbed before any log event is persisted or streamed.
 - **Pause / cost limit** — flip the global pause or hit the daily cost limit and the driver
   loop stops claiming new work; in-flight jobs finish cleanly.
+
+## MCP server
+
+Drydock can be driven by any [MCP](https://modelcontextprotocol.io) host (Claude Desktop, a
+higher-level agent, …) over a **local stdio** server — no HTTP. stdio is a process-local
+transport, so the server is reachable only by the host that launches it on the same machine.
+
+Start it with `pnpm mcp` (or `drydock mcp` if the package is linked). For an MCP host, point its
+config at the entrypoint, e.g.:
+
+```json
+{
+  "mcpServers": {
+    "drydock": {
+      "command": "npx",
+      "args": ["tsx", "/absolute/path/to/drydock/scripts/drydock.ts", "mcp"]
+    }
+  }
+}
+```
+
+**Tools** (all route through the same service layer as the dashboard):
+
+| Area   | Tools                                                                 |
+| ------ | --------------------------------------------------------------------- |
+| Repos  | `list_repos`, `add_repo`, `sync_repo_issues`                          |
+| Issues | `list_issues`, `add_to_queue`, `remove_from_queue`, `set_issue_labels`|
+| Jobs   | `list_jobs`, `get_job`, `requeue_job`, `abort_job`                    |
+| System | `get_settings`, `update_settings`, `set_drain_mode`, `get_logs`       |
+
+**Safety** — work-initiating tools (`add_to_queue`, `requeue_job`) honor the same gates as the
+UI: they refuse while draining, globally paused, or over the daily/per-repo cost limit.
+`get_settings` redacts credential fields and `update_settings` cannot set them. See
+[ADR 025](docs/adr/025-mcp-server.md).
 
 ## Roadmap
 
