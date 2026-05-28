@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import type { ParseError } from "@/lib/stream/parser";
 import { parseLine, StreamJsonParser } from "@/lib/stream/parser";
 
 function fixture(name: string): string {
@@ -72,5 +73,56 @@ describe("StreamJsonParser against fixtures", () => {
     const p = new StreamJsonParser();
     const events = [...p.push(raw.slice(0, mid)), ...p.push(raw.slice(mid)), ...p.flush()];
     expect(events.length).toBe(22);
+  });
+});
+
+describe("StreamJsonParser malformed input resilience (issue #46)", () => {
+  it("does not throw when a non-JSON line is pushed", () => {
+    const p = new StreamJsonParser();
+    expect(() => p.push("npm warn deprecated foo@1.0.0\n")).not.toThrow();
+  });
+
+  it("skips a malformed line yet still parses subsequent valid lines", () => {
+    const p = new StreamJsonParser();
+    const valid = '{"type":"system","session_id":"s1","model":"claude-sonnet-4-5"}';
+    const events = [...p.push(`garbage banner line\n${valid}\n`), ...p.flush()];
+    expect(events).toHaveLength(1);
+    expect(events[0]?.sessionId).toBe("s1");
+    expect(p.sessionId).toBe("s1");
+  });
+
+  it("skips a line whose JSON shape fails schema validation", () => {
+    const p = new StreamJsonParser();
+    // Valid JSON, but an unknown discriminator the Zod union rejects.
+    const events = [...p.push('{"type":"telemetry","foo":1}\n'), ...p.flush()];
+    expect(events).toHaveLength(0);
+  });
+
+  it("reports each skipped line through the onParseError callback", () => {
+    const p = new StreamJsonParser();
+    const errors: ParseError[] = [];
+    p.onParseError = (e) => errors.push(e);
+    p.push("not json at all\n");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.line).toBe("not json at all");
+    expect(errors[0]?.message).toBeTruthy();
+  });
+
+  it("does not throw on a malformed trailing line flushed at exit", () => {
+    const p = new StreamJsonParser();
+    p.push("partial banner without newline");
+    expect(() => p.flush()).not.toThrow();
+  });
+
+  it("parses a JSON object split across two chunks once complete", () => {
+    const p = new StreamJsonParser();
+    const line = '{"type":"system","session_id":"split","model":"m"}\n';
+    const cut = 20;
+    // The first half is not valid JSON on its own; it must not be parsed early.
+    const first = p.push(line.slice(0, cut));
+    expect(first).toHaveLength(0);
+    const second = p.push(line.slice(cut));
+    expect(second).toHaveLength(1);
+    expect(second[0]?.sessionId).toBe("split");
   });
 });

@@ -82,6 +82,24 @@ export interface ParsedEvent {
   raw: unknown;
 }
 
+/**
+ * A line that could not be parsed (invalid JSON, or JSON that fails the event
+ * schema). Surfaced via the parser's `onParseError` hook so a bad line becomes
+ * an observable warning instead of an uncaught exception that crashes the
+ * process (issue #46).
+ */
+export interface ParseError {
+  /** The offending raw line (already trimmed of surrounding whitespace). */
+  line: string;
+  /** Human-readable reason the line was rejected. */
+  message: string;
+}
+
+/** Best-effort message extraction from an unknown thrown value. */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** Parse one NDJSON line. Returns null for blank lines; throws on malformed JSON. */
 export function parseLine(line: string): ParsedEvent | null {
   const trimmed = line.trim();
@@ -151,6 +169,8 @@ export class StreamJsonParser {
   totalInputTokens = 0;
   totalOutputTokens = 0;
   costUsd = 0;
+  /** Invoked for every line that fails to parse; the line is then skipped. */
+  onParseError?: (error: ParseError) => void;
 
   /** Feed a chunk of stdout; returns the events completed in this chunk. */
   push(chunk: string): ParsedEvent[] {
@@ -176,7 +196,15 @@ export class StreamJsonParser {
   }
 
   private consume(line: string): ParsedEvent | null {
-    const parsed = parseLine(line);
+    let parsed: ParsedEvent | null;
+    try {
+      parsed = parseLine(line);
+    } catch (error) {
+      // Agent CLIs do not guarantee pure NDJSON (banners, warnings, crash dumps).
+      // A bad line must never escape as an uncaught exception — skip it and warn.
+      this.onParseError?.({ line: line.trim(), message: errorMessage(error) });
+      return null;
+    }
     if (!parsed) return null;
     if (parsed.sessionId) this.sessionId = parsed.sessionId;
     if (parsed.model) this.model = parsed.model;

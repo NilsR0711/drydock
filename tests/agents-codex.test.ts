@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { CodexStreamParser, codexProvider } from "@/lib/agents/codex";
+import type { ParseError } from "@/lib/stream/parser";
 
 function fixture(name: string): string {
   return readFileSync(fileURLToPath(new URL(`./fixtures/codex/${name}`, import.meta.url)), "utf8");
@@ -96,9 +97,27 @@ describe("CodexStreamParser", () => {
     expect(events.at(-1)?.isError).toBe(true);
   });
 
-  it("throws on malformed JSON", () => {
+  it("skips a malformed JSON line without throwing or crashing (issue #46)", () => {
     const p = new CodexStreamParser();
-    expect(() => p.push("{not json\n")).toThrow();
+    expect(() => p.push("{not json\n")).not.toThrow();
+  });
+
+  it("skips a malformed line yet still parses subsequent valid lines", () => {
+    const p = new CodexStreamParser();
+    const valid = JSON.stringify({ type: "thread.started", thread_id: "th_after_garbage" });
+    const events = [...p.push(`codex startup banner\n${valid}\n`), ...p.flush()];
+    expect(events).toHaveLength(1);
+    expect(p.sessionId).toBe("th_after_garbage");
+  });
+
+  it("reports each skipped line through the onParseError callback", () => {
+    const p = new CodexStreamParser();
+    const errors: ParseError[] = [];
+    p.onParseError = (e) => errors.push(e);
+    p.push("not json at all\n");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.line).toBe("not json at all");
+    expect(errors[0]?.message).toBeTruthy();
   });
 
   it("handles chunk boundaries that split a line", () => {

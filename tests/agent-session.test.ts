@@ -56,6 +56,25 @@ describe("spawnAgentSession", () => {
     expect(getJob(job.id, db)?.sessionId).toBe("th_codex_abc");
   });
 
+  it("emits a parse_error event for a malformed stdout line instead of crashing (issue #46)", async () => {
+    const job = createJob({ repoId, issueNumber: 4, agent: "codex" }, db);
+    const broker = new LogBroker(db);
+    const captured: Captured = {};
+    const valid = JSON.stringify({ type: "thread.started", thread_id: "th_ok" });
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker,
+      runner: captureRunner(`codex deprecation warning\n${valid}\n`, captured),
+    });
+
+    const events = broker.replay(job.id);
+    const parseErrors = events.filter((e) => e.type === "parse_error");
+    expect(parseErrors).toHaveLength(1);
+    expect(JSON.parse(parseErrors[0]?.payload ?? "{}").line).toBe("codex deprecation warning");
+    // The valid line after the garbage is still parsed.
+    expect(res.sessionId).toBe("th_ok");
+  });
+
   it("honours an explicit CLI path override", async () => {
     const job = createJob({ repoId, issueNumber: 2, agent: "codex" }, db);
     const captured: Captured = {};

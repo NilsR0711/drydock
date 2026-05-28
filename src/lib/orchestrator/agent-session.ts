@@ -53,6 +53,7 @@ export async function spawnAgentSession(
   const command = deps.command ?? provider.defaultCommand;
   const model = job.model ?? provider.defaultModel;
   const parser = provider.createParser();
+  parser.onParseError = (error) => broker.publish(job.id, { type: "parse_error", payload: error });
 
   if (job.status !== "working") transitionJob(job.id, "working", { model }, db);
   else db.update(jobs).set({ model }).where(eq(jobs.id, job.id)).run();
@@ -117,6 +118,7 @@ export async function resumeAgentSession(
   const provider = deps.provider ?? getAgentProvider(job.agent);
   const command = deps.command ?? provider.defaultCommand;
   const parser = provider.createParser();
+  parser.onParseError = (error) => broker.publish(job.id, { type: "parse_error", payload: error });
   const prompt = renderTemplate(resolveTemplateContent(job.repoId, TEMPLATE_NAMES.ciFix, db), {
     CI_LOG: failedLog,
   });
