@@ -19,9 +19,14 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/db/migrate.ts",
     "backup": "tsx scripts/backup.ts",
-    "db:prune": "tsx scripts/prune.ts"
+    "db:prune": "tsx scripts/prune.ts",
+    "mcp": "tsx scripts/drydock.ts mcp"
+  },
+  "bin": {
+    "drydock": "scripts/drydock.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@monaco-editor/react": "^4.7.0",
     "better-sqlite3": "^12.10.0",
     "chokidar": "^5.0.0",
