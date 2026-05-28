@@ -2,6 +2,7 @@ import { inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
 import { pruneOldData } from "@/lib/db/prune";
 import { jobs } from "@/lib/db/schema";
+import { notifyDraining } from "@/lib/notify/lifecycle";
 import { recoverOnStartup } from "./driver";
 import { startDriverLoop, stopDriverLoop } from "./driver-loop";
 import { transitionJob } from "./jobs";
@@ -31,6 +32,8 @@ export function clearAbort(jobId: number): void {
 export async function gracefulShutdown(): Promise<void> {
   setDrainMode(true);
   stopDriverLoop();
+  // Best-effort drain notification (issue #22); never block shutdown on it.
+  await notifyDraining().catch((err) => console.error("[orchestrator] drain notify failed", err));
 
   // Signal every running subprocess to terminate first; this unblocks the
   // in-flight runJob() promises so their `finally` worktree cleanup can run.

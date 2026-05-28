@@ -75,13 +75,14 @@ describe("runJob", () => {
     expect(prompt).toContain("DO ISSUE 1 ON ");
   });
 
-  it("notifies on a merged outcome", async () => {
+  it("notifies on pr_opened and pr_merged for a merged outcome", async () => {
     const removed = { v: false };
     const notify = vi.fn(async () => {});
     const deps = baseDeps(removed, { notify });
     const job = createJob({ repoId, issueNumber: 1 }, db);
     await runJob(job.id, deps as never);
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Merged"));
+    expect(notify).toHaveBeenCalledWith("pr_opened", expect.stringContaining("PR opened"));
+    expect(notify).toHaveBeenCalledWith("pr_merged", expect.stringContaining("Merged"));
   });
 
   it("blocks the merge and routes to needs_human when ADR gating finds pending ADRs", async () => {

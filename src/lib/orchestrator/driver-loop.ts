@@ -10,6 +10,7 @@ import { RateLimitError } from "@/lib/github/rate-limit";
 import { evaluateIssue } from "@/lib/issues/evaluator";
 import { syncIssuesFromGh } from "@/lib/issues/service";
 import { type TriageResult, triageRepo } from "@/lib/issues/triage";
+import { type EdgeState, notifyCostLimitEdge } from "@/lib/notify/lifecycle";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
 import { driveDeploymentHealing } from "./deployment-healing-driver";
@@ -27,6 +28,9 @@ import { driveReviewFeedback } from "./review-feedback-driver";
 import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
 import { buildSubtaskGenerator, decomposeRepo } from "./subtask-driver";
+
+/** Latch so the daily cost-limit notification fires once per breach, not per tick. */
+const costLimitState: EdgeState = { active: false };
 
 export interface DriveTickDeps {
   db?: DB;
@@ -219,6 +223,10 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
       }
     }
   }
+
+  // Edge-triggered cost-limit notification (issue #22): fire once when the
+  // daily budget gate first closes, not on every poll tick.
+  void notifyCostLimitEdge(jobsAllowed(db).reason === "cost_limit", costLimitState, db);
 
   const max = getSettings(db).maxParallelJobs;
   const worker = workerId();
