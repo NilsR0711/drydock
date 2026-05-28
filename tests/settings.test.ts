@@ -59,6 +59,7 @@ describe("settings", () => {
       "job_failed",
       "pr_opened",
       "pr_merged",
+      "release_published",
       "cost_limit",
       "automation_paused",
     ]);

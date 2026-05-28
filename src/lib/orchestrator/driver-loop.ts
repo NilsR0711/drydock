@@ -27,6 +27,7 @@ import {
   releaseLease,
   workerId,
 } from "./queue";
+import { driveReleaseManagement } from "./release-management-driver";
 import { driveReviewFeedback } from "./review-feedback-driver";
 import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
@@ -49,6 +50,8 @@ export interface DriveTickDeps {
   reviewFeedback?: (db: DB) => Promise<void>;
   /** Post-merge deployment-healing sweep entry point (injectable for tests). */
   deploymentHealing?: (db: DB) => Promise<void>;
+  /** Post-merge release-management sweep entry point (injectable for tests). */
+  releaseManagement?: (db: DB) => Promise<void>;
 }
 
 /**
@@ -299,6 +302,17 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
     await withPriority("low", () => deploymentHealing(db));
   } catch (err) {
     console.error("[driver] deployment-healing sweep failed", err);
+  }
+
+  // Drive opt-in release management (issue #59) as another low-priority
+  // background sweep. The global kill-switch and per-repo opt-in are checked
+  // cheaply inside the sweep, so a disabled feature costs almost nothing.
+  const releaseManagement =
+    deps.releaseManagement ?? ((d: DB) => driveReleaseManagement({ db: d }));
+  try {
+    await withPriority("low", () => releaseManagement(db));
+  } catch (err) {
+    console.error("[driver] release-management sweep failed", err);
   }
 }
 

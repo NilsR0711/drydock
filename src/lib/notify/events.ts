@@ -8,6 +8,7 @@ export const NOTIFICATION_EVENTS = [
   "job_failed",
   "pr_opened",
   "pr_merged",
+  "release_published",
   "cost_limit",
   "automation_paused",
 ] as const;
@@ -20,6 +21,7 @@ export const NOTIFICATION_EVENT_LABELS: Record<NotificationEvent, string> = {
   job_failed: "Job aborted or failed",
   pr_opened: "Pull request opened",
   pr_merged: "Pull request merged",
+  release_published: "Release published",
   cost_limit: "Daily cost limit reached",
   automation_paused: "Automation paused or draining",
 };

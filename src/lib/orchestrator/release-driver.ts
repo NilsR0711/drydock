@@ -214,12 +214,14 @@ export async function publishRelease(runId: number, deps: PublishReleaseDeps): P
     }
 
     transitionReleaseRun(runId, "publishing", {}, db);
-    const target = run.triggerSha ?? deps.repo.defaultBranch;
+    // Release at the default-branch tip: the merged code lives there. The PR head
+    // recorded in `triggerSha` is only a dedupe key — after a squash merge it is
+    // not on the default branch, so it must not be used as the tag target.
     await deps.forge.createRelease({
       tag,
       title: decision.title || tag,
       notes: decision.notes,
-      target,
+      target: deps.repo.defaultBranch,
     });
     return transitionReleaseRun(runId, "published", {}, db);
   } catch (err) {

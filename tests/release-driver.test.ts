@@ -74,8 +74,8 @@ describe("previewRelease", () => {
 });
 
 describe("publishRelease (auto)", () => {
-  it("evaluates and publishes a release at the trigger commit", async () => {
-    const r = addRepo({ path: "/r", name: "r" }, db);
+  it("evaluates and publishes a release at the default-branch tip", async () => {
+    const r = addRepo({ path: "/r", name: "r", defaultBranch: "main" }, db);
     const run = createReleaseRun(
       { repoId: r.id, mode: "auto", triggerPrNumber: 9, triggerSha: "deadbeef" },
       db,
@@ -93,7 +93,7 @@ describe("publishRelease (auto)", () => {
       tag: "v1.3.0",
       title: "v1.3.0",
       notes: "- notes",
-      target: "deadbeef",
+      target: "main",
     });
   });
 
