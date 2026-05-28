@@ -18,18 +18,21 @@ once the repo is public.
 
 ## `release-please.yml` — Releases
 
-Turns Conventional Commits into release PRs. Releases are **manual only**: this
-workflow runs solely on `workflow_dispatch` (Actions tab or
-`gh workflow run release-please.yml`). When triggered, [release-please][rp]
-maintains a release PR that bumps the version in `package.json`, updates
-`CHANGELOG.md`, and — once merged — creates the matching git tag and GitHub
-release.
+Turns Conventional Commits into release PRs. Runs on **every push to `master`**
+(and on `workflow_dispatch`): [release-please][rp] maintains a single "release"
+PR that bumps the version in `package.json`, updates `CHANGELOG.md`, and — once
+merged — creates the matching git tag and GitHub release. No release PR is opened
+until there is a releasable commit (`feat:`/`fix:`) since the last release.
+
+So the release flow is fully automated: land `feat:`/`fix:` commits → review the
+auto-maintained release PR → merge it → the changelog entry, tag, GitHub release,
+**and** the npm publish all happen from that one merge.
 
 Configuration:
 
-- `release-please-config.json` — single Node package at the repo root, releases
-  tagged without a component prefix (`vX.Y.Z`). Pre-1.0 bumps stay in the minor
-  range (`bump-minor-pre-major`).
+- `release-please-config.json` — single Node package at the repo root
+  (`@nilsr0711/drydock`), releases tagged without a component prefix (`vX.Y.Z`).
+  Pre-1.0 bumps stay in the minor range (`bump-minor-pre-major`).
 - `.release-please-manifest.json` — tracks the last released version.
 
 Because we already commit conventionally (`feat:`, `fix:`, `chore:` …), no extra
