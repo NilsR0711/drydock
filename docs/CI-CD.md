@@ -18,15 +18,18 @@ once the repo is public.
 
 ## `release-please.yml` — Releases
 
-Turns Conventional Commits into release PRs. Runs on **every push to `master`**
-(and on `workflow_dispatch`): [release-please][rp] maintains a single "release"
-PR that bumps the version in `package.json`, updates `CHANGELOG.md`, and — once
-merged — creates the matching git tag and GitHub release. No release PR is opened
-until there is a releasable commit (`feat:`/`fix:`) since the last release.
+Turns Conventional Commits into release PRs. Releases are **manual**: this
+workflow runs on `workflow_dispatch` only (Actions tab or
+`gh workflow run release-please.yml`). When you trigger it, [release-please][rp]
+opens/updates a single "release" PR that bumps the version in `package.json` and
+updates `CHANGELOG.md`; merging that PR creates the matching git tag and GitHub
+release.
 
-So the release flow is fully automated: land `feat:`/`fix:` commits → review the
-auto-maintained release PR → merge it → the changelog entry, tag, GitHub release,
-**and** the npm publish all happen from that one merge.
+So releasing stays a deliberate, manual step — no release PR appears just because
+a feature merged. But once you decide to release, the changelog is generated for
+you: trigger release-please → review the release PR → merge it → the changelog
+entry, tag, GitHub release, **and** the npm publish all happen from that one
+merge.
 
 Configuration:
 
