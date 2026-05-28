@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useToast } from "@/components/ui/toast";
 import type { Repo } from "@/lib/db/schema";
 import { updateRepoAction } from "@/lib/repos/actions";
+import { AGENT_INSTRUCTIONS_MAX_CHARS } from "@/lib/repos/agent-instructions";
 
 function parseList(raw: string): string[] {
   try {
@@ -50,6 +51,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [minAssoc, setMinAssoc] = useState(repo.minAuthorAssociation);
   const [deployPlatform, setDeployPlatform] = useState(repo.deploymentPlatform ?? "");
   const [maxAttempts, setMaxAttempts] = useState(repo.maxAttempts);
+  const [agentInstructions, setAgentInstructions] = useState(repo.agentInstructions ?? "");
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
   const { error } = useToast();
@@ -292,6 +294,27 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
           />
         </label>
       </div>
+
+      <label
+        className="flex flex-col gap-1 text-xs text-muted-foreground"
+        htmlFor="agent-instructions"
+      >
+        Agent instructions
+        <textarea
+          id="agent-instructions"
+          value={agentInstructions}
+          maxLength={AGENT_INSTRUCTIONS_MAX_CHARS}
+          rows={4}
+          onChange={(e) => setAgentInstructions(e.target.value)}
+          onBlur={() => persist({ agentInstructions: agentInstructions.trim() || null })}
+          placeholder="Per-repo guidance injected into the work prompt — e.g. coding conventions, &quot;always run pnpm test&quot;, &quot;don't touch legacy/&quot;, preferred PR style."
+          className="rounded border border-card-border bg-background px-2 py-1 font-mono text-sm text-foreground"
+        />
+        <span className="text-[11px] text-muted-foreground">
+          Optional. Appended to the work prompt as a dedicated section. Max{" "}
+          {AGENT_INSTRUCTIONS_MAX_CHARS} characters; empty leaves the prompt unchanged.
+        </span>
+      </label>
     </div>
   );
 }
