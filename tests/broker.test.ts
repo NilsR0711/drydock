@@ -44,6 +44,21 @@ describe("LogBroker", () => {
     expect(broker.replay(jobId, 3)).toHaveLength(3);
   });
 
+  it("redacts secrets from persisted and pushed payloads", () => {
+    const broker = new LogBroker(db);
+    const sub = fakeSub();
+    broker.subscribe(jobId, sub);
+    const token = `ghp_${"a".repeat(36)}`;
+    broker.publish(jobId, { type: "error", payload: { stderr: `auth ${token} fail` } });
+
+    const persisted = JSON.stringify(broker.replay(jobId).at(0)?.payload);
+    expect(persisted).not.toContain(token);
+    expect(persisted).toContain("[REDACTED]");
+    const pushed = JSON.stringify(sub.events.at(0));
+    expect(pushed).not.toContain(token);
+    expect(pushed).toContain("[REDACTED]");
+  });
+
   it("fans out to multiple subscribers", () => {
     const broker = new LogBroker(db);
     const a = fakeSub();

@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { type JobEvent, jobEvents } from "@/lib/db/schema";
+import { redactSecrets } from "@/lib/log/redact";
 
 export interface BrokerEvent {
   type: string;
@@ -42,17 +43,23 @@ export class LogBroker {
     return this.subs.get(jobId)?.size ?? 0;
   }
 
-  /** Persist the event, then push it to all live subscribers. */
+  /**
+   * Persist the event, then push it to all live subscribers. Secrets are
+   * scrubbed from the payload before it touches the database or a subscriber,
+   * so tokens echoed by agent output never persist or stream (issue #24).
+   */
   publish(jobId: number, event: BrokerEvent): JobEvent {
+    const payload = redactSecrets(JSON.stringify(event.payload ?? {}));
+    const safePayload = JSON.parse(payload);
     const row = this.db
       .insert(jobEvents)
-      .values({ jobId, type: event.type, payload: JSON.stringify(event.payload ?? {}) })
+      .values({ jobId, type: event.type, payload })
       .returning()
       .get();
     const set = this.subs.get(jobId);
     if (set) {
       for (const sub of set) {
-        sub.send({ id: row.id, type: row.type, payload: event.payload });
+        sub.send({ id: row.id, type: row.type, payload: safePayload });
       }
     }
     return row;
