@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareSemver, isNewerVersion, parseSemver } from "@/lib/version/semver";
+import { bumpSemver, compareSemver, isNewerVersion, parseSemver } from "@/lib/version/semver";
 
 describe("parseSemver", () => {
   it("parses a plain version", () => {
@@ -50,6 +50,28 @@ describe("compareSemver", () => {
   it("ranks a prerelease below its release", () => {
     expect(compareSemver("1.2.3-rc.1", "1.2.3")).toBeLessThan(0);
     expect(compareSemver("1.2.3", "1.2.3-rc.1")).toBeGreaterThan(0);
+  });
+});
+
+describe("bumpSemver", () => {
+  it("bumps the patch component", () => {
+    expect(bumpSemver("1.2.3", "patch")).toBe("1.2.4");
+  });
+
+  it("bumps the minor component and resets patch", () => {
+    expect(bumpSemver("1.2.3", "minor")).toBe("1.3.0");
+  });
+
+  it("bumps the major component and resets minor and patch", () => {
+    expect(bumpSemver("1.2.3", "major")).toBe("2.0.0");
+  });
+
+  it("ignores a leading v prefix and any prerelease label", () => {
+    expect(bumpSemver("v1.2.3-rc.1", "patch")).toBe("1.2.4");
+  });
+
+  it("throws for an unparseable version", () => {
+    expect(() => bumpSemver("not-a-version", "patch")).toThrow();
   });
 });
 
