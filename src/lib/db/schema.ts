@@ -84,6 +84,11 @@ export const repos = sqliteTable("repos", {
   // prompt as a dedicated, length-capped section. Null/empty leaves the prompt
   // unchanged. See src/lib/repos/agent-instructions.ts for the cap and rendering.
   agentInstructions: text("agent_instructions"),
+  // Opt-in release management (issue #59, default off). See ADR 028. When on (and
+  // the global kill-switch is also on), merged PRs trigger an evaluate → version
+  // → publish release pipeline. Cutting a public release is hard to reverse, so
+  // it is gated globally and per repo and is fully previewable.
+  releaseEnabled: integer("release_enabled", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 
@@ -372,6 +377,52 @@ export const prQuestions = sqliteTable(
   }),
 );
 
+/**
+ * One release run (issue #59), the unit Drydock tracks through the release
+ * pipeline. A run is created when a release is detected — a merged PR (auto mode)
+ * or a manual publish trigger (manual mode) — and walks a ReleaseStatus:
+ * `detected → evaluating → proposed → publishing → published | skipped | error`.
+ * Idempotency: the auto path dedupes on `(repoId, triggerSha)` so one merge
+ * commit yields exactly one run; manual runs carry a null `triggerSha`. `bump`,
+ * `fromTag`, and `tag` capture the computed version, `prNumbers` the included
+ * PRs (JSON array), and `errorMessage` the reason on a failed run.
+ */
+export const releaseRuns = sqliteTable(
+  "release_runs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repos.id, { onDelete: "cascade" }),
+    // "auto" (triggered by a merged PR) or "manual" (operator-forced publish).
+    mode: text("mode").notNull().default("auto"),
+    // The merged PR and its merge commit SHA that triggered an auto run; both
+    // null for a manual run. The SHA dedupes auto runs (one run per merge).
+    triggerPrNumber: integer("trigger_pr_number"),
+    triggerSha: text("trigger_sha"),
+    status: text("status").notNull().default("detected"),
+    // The chosen semver bump and the from/to tags, filled in during evaluation.
+    bump: text("bump"),
+    fromTag: text("from_tag"),
+    tag: text("tag"),
+    title: text("title"),
+    notes: text("notes"),
+    // JSON array of the PR numbers included in this release.
+    prNumbers: text("pr_numbers").notNull().default("[]"),
+    errorMessage: text("error_message"),
+    createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    repoIdx: index("release_runs_repo_idx").on(t.repoId),
+    // One auto run per merge commit: dedupe on (repoId, triggerSha) for runs that
+    // carry a SHA (manual runs have a null SHA and never collide).
+    triggerUnique: uniqueIndex("release_runs_trigger_unique")
+      .on(t.repoId, t.triggerSha)
+      .where(sql`${t.triggerSha} is not null`),
+  }),
+);
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -399,3 +450,5 @@ export type DeploymentHealingSession = typeof deploymentHealingSessions.$inferSe
 export type NewDeploymentHealingSession = typeof deploymentHealingSessions.$inferInsert;
 export type PrQuestion = typeof prQuestions.$inferSelect;
 export type NewPrQuestion = typeof prQuestions.$inferInsert;
+export type ReleaseRun = typeof releaseRuns.$inferSelect;
+export type NewReleaseRun = typeof releaseRuns.$inferInsert;

@@ -41,6 +41,12 @@ describe("settings", () => {
     expect(() => saveSettings({ maxJobCostUsd: -1 }, db)).toThrow();
   });
 
+  it("defaults release management to off and persists an override (issue #59)", () => {
+    expect(getSettings(db).releaseManagementEnabled).toBe(false);
+    saveSettings({ releaseManagementEnabled: true }, db);
+    expect(getSettings(db).releaseManagementEnabled).toBe(true);
+  });
+
   it("defaults notification channels to empty and all events enabled", () => {
     const s = getSettings(db);
     expect(s.slackWebhookUrl).toBe("");

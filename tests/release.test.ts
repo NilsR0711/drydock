@@ -106,7 +106,9 @@ describe("parseReleaseEvaluation", () => {
   });
 
   it("returns null for an invalid bump", () => {
-    expect(parseReleaseEvaluation('{"release": true, "bump": "huge", "title": "x", "notes": "y"}')).toBeNull();
+    expect(
+      parseReleaseEvaluation('{"release": true, "bump": "huge", "title": "x", "notes": "y"}'),
+    ).toBeNull();
   });
 
   it("returns null when there is no JSON object", () => {

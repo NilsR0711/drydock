@@ -103,6 +103,15 @@ describe("repos service", () => {
     expect(cfg.priorityAuthors).toEqual([]);
   });
 
+  it("defaults release management to off and parses it (issue #59)", () => {
+    const repo = addRepo({ path: "/rel", name: "rel" }, db);
+    expect(repo.releaseEnabled).toBe(false);
+    expect(repoAutomation(repo).releaseEnabled).toBe(false);
+    const updated = updateRepo(repo.id, { releaseEnabled: true }, db);
+    expect(updated.releaseEnabled).toBe(true);
+    expect(repoAutomation(updated).releaseEnabled).toBe(true);
+  });
+
   it("updateRepo can enable automation and override label lists", () => {
     const repo = addRepo({ path: "/auto2", name: "auto2" }, db);
     const updated = updateRepo(
