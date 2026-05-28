@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { jobEvents } from "@/lib/db/schema";
 import { spawnRunner } from "@/lib/exec/runner";
-import { recoverInterruptedJobs } from "@/lib/orchestrator/driver";
+import { recoverInterruptedJobs, recoverOnStartup } from "@/lib/orchestrator/driver";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { runMockSession } from "@/lib/orchestrator/session";
 import { addRepo } from "@/lib/repos/service";
@@ -65,7 +65,7 @@ describe("mock-claude.js subprocess", () => {
 });
 
 describe("crash recovery", () => {
-  it("marks in-flight jobs interrupted", () => {
+  it("marks CI-babysitting jobs interrupted but leaves working jobs to the queue", () => {
     const a = createJob({ repoId, issueNumber: 5 }, db);
     transitionJob(a.id, "working", {}, db);
     const b = createJob({ repoId, issueNumber: 6 }, db);
@@ -73,8 +73,8 @@ describe("crash recovery", () => {
     transitionJob(b.id, "ci_running", {}, db);
 
     const count = recoverInterruptedJobs(db);
-    expect(count).toBe(2);
-    expect(getJob(a.id, db)?.status).toBe("interrupted");
+    expect(count).toBe(1); // only the ci_running job
+    expect(getJob(a.id, db)?.status).toBe("working"); // requeued by the lease queue, not here
     expect(getJob(b.id, db)?.status).toBe("interrupted");
   });
 
@@ -87,5 +87,19 @@ describe("crash recovery", () => {
     const count = recoverInterruptedJobs(db);
     expect(count).toBe(1);
     expect(getJob(c.id, db)?.status).toBe("interrupted");
+  });
+
+  it("recoverOnStartup requeues working jobs and interrupts CI-babysitting jobs", () => {
+    const working = createJob({ repoId, issueNumber: 5 }, db);
+    transitionJob(working.id, "working", {}, db);
+    const babysat = createJob({ repoId, issueNumber: 6 }, db);
+    transitionJob(babysat.id, "working", {}, db);
+    transitionJob(babysat.id, "ci_running", {}, db);
+
+    const { requeued, interrupted } = recoverOnStartup(db);
+    expect(requeued).toBe(1);
+    expect(interrupted).toBe(1);
+    expect(getJob(working.id, db)?.status).toBe("queued");
+    expect(getJob(babysat.id, db)?.status).toBe("interrupted");
   });
 });
