@@ -10,6 +10,10 @@ export const settingsSchema = z.object({
   dailyCostLimitUsd: z.number().nonnegative().default(10),
   pollIntervalSec: z.number().int().positive().default(30),
   maxTurns: z.number().int().positive().default(40),
+  // Hard wall-clock timeout per agent session in minutes (issue #47). A hung
+  // agent (network stall, MCP deadlock, stdin prompt) is aborted after this so
+  // it never holds a job slot forever. A per-repo override may shorten/extend it.
+  maxJobMinutes: z.number().int().positive().default(30),
   defaultModel: z.string().default("claude-opus-4-7"),
   defaultAgent: z.enum(["claude", "codex"]).default("claude"),
   claudePath: z.string().default("claude"),

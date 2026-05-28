@@ -113,6 +113,29 @@ describe("runJob", () => {
     expect(removed.v).toBe(true);
   });
 
+  it("marks needs_human with a timed-out reason when the session hits the wall-clock limit (issue #47)", async () => {
+    const removed = { v: false };
+    const deps = baseDeps(removed, {
+      runSession: vi.fn(async (job: Job) => {
+        db.update(jobs).set({ status: "working" }).where(eq(jobs.id, job.id)).run();
+        return {
+          exitCode: -1,
+          sessionId: "s1",
+          costUsd: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          timedOut: true,
+        };
+      }),
+    });
+    const job = createJob({ repoId, issueNumber: 1 }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("needs_human");
+    expect(result.errorMessage).toMatch(/timed out/i);
+    expect(deps.createPr).not.toHaveBeenCalled();
+    expect(removed.v).toBe(true);
+  });
+
   it("marks needs_human and cleans up when git push throws", async () => {
     const removed = { v: false };
     const wt = fakeWorktrees(removed);
