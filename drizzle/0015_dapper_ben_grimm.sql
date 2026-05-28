@@ -1,0 +1,1 @@
+ALTER TABLE `repos` ADD `verify_pr` integer DEFAULT false NOT NULL;

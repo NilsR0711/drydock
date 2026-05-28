@@ -463,6 +463,18 @@ export class GhClient {
     return logRes.stdout.slice(-8000);
   }
 
+  /**
+   * The PR's unified diff via `gh pr diff`. Best-effort and never-throwing: a
+   * gated budget or a non-zero exit yields an empty string, which the caller
+   * (the post-PR verification pass, issue #54) treats as "no diff to verify".
+   */
+  async prDiff(prNumber: number): Promise<string> {
+    if (!this.governor.decide("core", currentPriority()).allowed) return "";
+    const res = await this.run("gh", ["pr", "diff", String(prNumber)], this.cwd);
+    if (res.exitCode !== 0) return "";
+    return res.stdout;
+  }
+
   async mergePr(prNumber: number): Promise<void> {
     const res = await this.exec(["pr", "merge", String(prNumber), "--squash", "--auto"]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr merge failed");

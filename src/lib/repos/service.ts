@@ -37,6 +37,7 @@ export const repoInputSchema = z.object({
   autoResolveMergeConflicts: z.boolean().default(false),
   includeProgressReplies: z.boolean().default(false),
   autoDecompose: z.boolean().default(false),
+  verifyPr: z.boolean().default(false),
   autoHealDeployments: z.boolean().default(false),
   deploymentPlatform: z.enum(["vercel", "railway"]).nullish(),
   readyLabels: jsonStringArray('["ready","ready-for-agent","ready-to-work"]'),

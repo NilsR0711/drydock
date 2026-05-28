@@ -18,6 +18,7 @@ import { ciBabysitter } from "./ci-babysitter";
 import { getJob, recordEvent, transitionJob } from "./jobs";
 import { markSubtasksDone, markSubtasksWorking, subtaskPromptSection } from "./subtask-driver";
 import type { SubtaskStatus } from "./subtask-state";
+import { runVerificationPass } from "./verify-driver";
 
 interface WorktreeApi {
   prepare(repo: Repo, jobId: number, issueNumber?: number): Promise<Worktree>;
@@ -36,6 +37,7 @@ export interface RunJobDeps {
     body: string;
   }) => Promise<number>;
   runBabysitter?: (job: Job, prNumber: number) => Promise<Job>;
+  verify?: (job: Job, prNumber: number) => Promise<void>;
   notify?: NotifyEvent;
 }
 
@@ -117,6 +119,22 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
           ? { headSha: (pr) => forge.prHeadSha(pr), provider: repo.platform }
           : undefined,
       }));
+  // Opt-in post-PR verification (issue #54, ADR 027): a read-only one-shot that
+  // checks whether the diff satisfies the issue/subtasks. Best-effort by
+  // construction — runVerificationPass never throws and never merges.
+  const runVerify =
+    deps.verify ??
+    ((j, prNumber) =>
+      runVerificationPass({
+        job: j,
+        prNumber,
+        repo,
+        forge,
+        db,
+        provider,
+        command,
+        model: j.model ?? repo.defaultModel,
+      }).then(() => undefined));
 
   let wt: Worktree | undefined;
   try {
@@ -201,6 +219,17 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     });
     transitionJob(job.id, "ci_running", { branch: wt.branch, prNumber }, db);
     await send("pr_opened", `🔀 PR opened: ${repo.id}#${job.issueNumber} (PR #${prNumber}).`);
+
+    // Opt-in read-only verification of the opened PR (issue #54). Wrapped so a
+    // failure is logged but never flips the job or blocks the merge path.
+    if (repo.verifyPr) {
+      try {
+        await runVerify(getJob(job.id, db) as Job, prNumber);
+      } catch (verifyErr) {
+        const message = verifyErr instanceof Error ? verifyErr.message : String(verifyErr);
+        recordEvent(job.id, "error", { message: `verification pass failed: ${message}` }, db);
+      }
+    }
 
     const final = await runBabysitter(getJob(job.id, db) as Job, prNumber);
     // A merged job lands the whole decomposed issue: mark every subtask done.

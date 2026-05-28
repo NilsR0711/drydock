@@ -37,6 +37,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoHeal, setAutoHeal] = useState(repo.autoHealCi);
   const [autoFeedback, setAutoFeedback] = useState(repo.autoReviewFeedback);
   const [autoDecompose, setAutoDecompose] = useState(repo.autoDecompose);
+  const [verifyPr, setVerifyPr] = useState(repo.verifyPr);
   const [autoHealDeploy, setAutoHealDeploy] = useState(repo.autoHealDeployments);
   const [resolveConflicts, setResolveConflicts] = useState(repo.autoResolveMergeConflicts);
   const [progressReplies, setProgressReplies] = useState(repo.includeProgressReplies);
@@ -154,6 +155,17 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
         <label className="flex items-center gap-1.5 text-muted-foreground">
           <input
             type="checkbox"
+            checked={verifyPr}
+            onChange={(e) => {
+              setVerifyPr(e.target.checked);
+              persist({ verifyPr: e.target.checked });
+            }}
+          />
+          Verify PR satisfies issue
+        </label>
+        <label className="flex items-center gap-1.5 text-muted-foreground">
+          <input
+            type="checkbox"
             checked={autoHealDeploy}
             onChange={(e) => {
               setAutoHealDeploy(e.target.checked);
@@ -172,7 +184,9 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
         auto-heal attempts bounded, verified fixes for failing CI (never external or AI-review
         checks). PR review feedback is applied only for trusted reviewers (bots ignored) and runs
         the mechanical iteration for you. Decomposing large issues splits them into ordered, tracked
-        subtasks (checklist/heading heuristics, with an agent fallback for prose). Deployment
+        subtasks (checklist/heading heuristics, with an agent fallback for prose). Verifying a PR
+        runs a read-only pass after it opens that checks whether the diff actually satisfies the
+        issue and its subtasks, flags what remains, and never changes state on failure. Deployment
         healing monitors a merged PR's deployment and, on failure, opens a follow-up fix PR with the
         captured logs. Drydock never auto-merges — a human always reviews the PR.
       </p>

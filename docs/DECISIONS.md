@@ -27,3 +27,4 @@
 - [024](adr/024-external-notifications.md) — External notifications (Telegram, Slack & email) with per-event opt-in
 - [025](adr/025-mcp-server.md) — Expose Drydock over a local stdio MCP server
 - [026](adr/026-npm-package-and-cli-launcher.md) — Publish as a scoped npm package (`@nilsr0711/drydock`) with a `drydock` terminal launcher
+- [027](adr/027-post-pr-verification.md) — Opt-in post-PR verification pass (read-only diff-vs-issue check)
