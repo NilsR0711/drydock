@@ -1,6 +1,6 @@
 {
   "name": "@nilsr0711/drydock",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Local-first tool that autonomously turns GitHub issues into pull requests via the Claude CLI, startable from the terminal with `npx @nilsr0711/drydock`.",
   "keywords": [
@@ -39,7 +39,7 @@
   ],
   "scripts": {
     "dev": "next dev -H 127.0.0.1 -p 3737",
-    "build": "next build && node scripts/package-standalone.mjs",
+    "build": "next build --webpack && node scripts/package-standalone.mjs",
     "start": "next start -H 127.0.0.1 -p 3737",
     "lint": "biome ci .",
     "format": "biome check --write .",

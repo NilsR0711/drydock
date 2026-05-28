@@ -31,9 +31,14 @@ const nextConfig: NextConfig = {
       "*.test.*",
     ],
   },
-  // Turbopack (Next 16 default) honours serverExternalPackages, keeping these
-  // native modules out of the bundle so their runtime `require` resolves
-  // normally — replacing the custom webpack externals we needed under Next 15.
+  // Keep these native modules external (not bundled) so their runtime `require`
+  // resolves the real addon. NOTE: the production build runs `next build
+  // --webpack` (see package.json), NOT Turbopack — Turbopack references an
+  // external like better-sqlite3 by a hashed module id (`better-sqlite3-<hash>`)
+  // that is unresolvable in the published standalone bundle, while webpack emits
+  // a plain `require("better-sqlite3")` that resolves from the traced
+  // node_modules. Dev (`next dev`) still uses Turbopack, which loads the module
+  // from the project's own node_modules and is unaffected (issue #12).
   serverExternalPackages: ["better-sqlite3", "chokidar"],
 };
 

@@ -51,4 +51,11 @@ describe("package.json publishability (issue #12)", () => {
   it("packages the standalone static assets as part of the build", () => {
     expect(pkg.scripts.build).toMatch(/package-standalone/);
   });
+
+  it("builds the standalone bundle with webpack so native externals resolve", () => {
+    // Turbopack references serverExternalPackages (better-sqlite3) by a hashed
+    // module name that is unresolvable in the published standalone; webpack
+    // emits a plain `require("better-sqlite3")`. Guard against regressing.
+    expect(pkg.scripts.build).toMatch(/--webpack/);
+  });
 });
