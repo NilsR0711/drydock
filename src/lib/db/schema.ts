@@ -35,6 +35,14 @@ export const repos = sqliteTable("repos", {
   // Opt-in decomposition of large issues into tracked subtasks (default off).
   // See ADR 020.
   autoDecompose: integer("auto_decompose", { mode: "boolean" }).notNull().default(false),
+  // Opt-in post-merge deployment healing (default off). See ADR 021. When a
+  // monitored deployment fails, a follow-up fix PR is opened with the logs.
+  autoHealDeployments: integer("auto_heal_deployments", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  // Explicit deployment-platform override (e.g. "vercel"/"railway"). Null lets
+  // Drydock auto-detect the platform from the repo's config files.
+  deploymentPlatform: text("deployment_platform"),
   // JSON string arrays; parsed via repoAutomation(). Only trusted reviewers'
   // feedback is acted on; ignored bots are never acted on.
   trustedReviewers: text("trusted_reviewers").notNull().default("[]"),
@@ -273,6 +281,35 @@ export const issueSubtasks = sqliteTable(
   }),
 );
 
+/**
+ * One post-merge deployment-healing session (issue #20), bound to a job's
+ * merged PR at a specific commit SHA. `status` is a DeploymentHealingStatus;
+ * `platform` is the deployment platform id. On a failed deployment the captured
+ * `logsExcerpt` seeds the follow-up fix PR recorded in `followupPrNumber`.
+ * `(jobId, commitSha)` is unique so a merge is monitored exactly once.
+ */
+export const deploymentHealingSessions = sqliteTable(
+  "deployment_healing_sessions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    jobId: integer("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    prNumber: integer("pr_number").notNull(),
+    platform: text("platform").notNull(),
+    commitSha: text("commit_sha").notNull(),
+    status: text("status").notNull().default("monitoring"),
+    logsExcerpt: text("logs_excerpt"),
+    followupPrNumber: integer("followup_pr_number"),
+    createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    jobIdx: index("deployment_healing_job_idx").on(t.jobId),
+    jobShaUnique: uniqueIndex("deployment_healing_job_sha_unique").on(t.jobId, t.commitSha),
+  }),
+);
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -296,3 +333,5 @@ export type ReviewFeedbackItem = typeof reviewFeedbackItems.$inferSelect;
 export type NewReviewFeedbackItem = typeof reviewFeedbackItems.$inferInsert;
 export type IssueSubtask = typeof issueSubtasks.$inferSelect;
 export type NewIssueSubtask = typeof issueSubtasks.$inferInsert;
+export type DeploymentHealingSession = typeof deploymentHealingSessions.$inferSelect;
+export type NewDeploymentHealingSession = typeof deploymentHealingSessions.$inferInsert;

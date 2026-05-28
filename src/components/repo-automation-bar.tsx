@@ -37,6 +37,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoHeal, setAutoHeal] = useState(repo.autoHealCi);
   const [autoFeedback, setAutoFeedback] = useState(repo.autoReviewFeedback);
   const [autoDecompose, setAutoDecompose] = useState(repo.autoDecompose);
+  const [autoHealDeploy, setAutoHealDeploy] = useState(repo.autoHealDeployments);
   const [resolveConflicts, setResolveConflicts] = useState(repo.autoResolveMergeConflicts);
   const [progressReplies, setProgressReplies] = useState(repo.includeProgressReplies);
   const [ready, setReady] = useState(parseList(repo.readyLabels).join(", "));
@@ -46,6 +47,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [reviewers, setReviewers] = useState(parseList(repo.trustedReviewers).join(", "));
   const [bots, setBots] = useState(parseList(repo.ignoredBots).join(", "));
   const [minAssoc, setMinAssoc] = useState(repo.minAuthorAssociation);
+  const [deployPlatform, setDeployPlatform] = useState(repo.deploymentPlatform ?? "");
   const [maxAttempts, setMaxAttempts] = useState(repo.maxAttempts);
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -149,6 +151,17 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
           />
           Decompose large issues
         </label>
+        <label className="flex items-center gap-1.5 text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={autoHealDeploy}
+            onChange={(e) => {
+              setAutoHealDeploy(e.target.checked);
+              persist({ autoHealDeployments: e.target.checked });
+            }}
+          />
+          Heal failed deployments
+        </label>
         {pending && <span className="text-xs text-muted-foreground">Saving…</span>}
         {saved && <span className="text-xs text-success">Saved</span>}
       </div>
@@ -159,8 +172,9 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
         auto-heal attempts bounded, verified fixes for failing CI (never external or AI-review
         checks). PR review feedback is applied only for trusted reviewers (bots ignored) and runs
         the mechanical iteration for you. Decomposing large issues splits them into ordered, tracked
-        subtasks (checklist/heading heuristics, with an agent fallback for prose). Drydock never
-        auto-merges — a human always reviews the PR.
+        subtasks (checklist/heading heuristics, with an agent fallback for prose). Deployment
+        healing monitors a merged PR's deployment and, on failure, opens a follow-up fix PR with the
+        captured logs. Drydock never auto-merges — a human always reviews the PR.
       </p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -226,6 +240,29 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
             }}
           />
           Post progress replies
+        </label>
+        <label
+          className="flex flex-col gap-1 text-xs text-muted-foreground"
+          htmlFor="deploy-platform"
+        >
+          Deployment platform (healing)
+          <select
+            id="deploy-platform"
+            value={deployPlatform}
+            onChange={(e) => {
+              setDeployPlatform(e.target.value);
+              persist({
+                deploymentPlatform: e.target.value
+                  ? (e.target.value as "vercel" | "railway")
+                  : null,
+              });
+            }}
+            className="rounded border border-card-border bg-background px-2 py-1 text-sm text-foreground"
+          >
+            <option value="">Auto-detect</option>
+            <option value="vercel">Vercel</option>
+            <option value="railway">Railway</option>
+          </select>
         </label>
         <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="max-attempts">
           Max attempts
