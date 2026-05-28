@@ -6,6 +6,7 @@ import { RepoActivity } from "@/components/repo-activity";
 import { RepoAdrPanel } from "@/components/repo-adr-panel";
 import { RepoAutomationBar } from "@/components/repo-automation-bar";
 import { RepoCostPanel } from "@/components/repo-cost-panel";
+import { RepoDeploymentHealingPanel } from "@/components/repo-deployment-healing-panel";
 import { RepoHealingPanel } from "@/components/repo-healing-panel";
 import { RepoSettingsBar } from "@/components/repo-settings-bar";
 import { listAdrs } from "@/lib/adr/service";
@@ -14,6 +15,7 @@ import { dailyCosts, todayCost } from "@/lib/db/cost-queries";
 import { getRepoWorkspace } from "@/lib/db/queries";
 import { jobEvents } from "@/lib/db/schema";
 import { recentHealingSessions } from "@/lib/orchestrator/ci-healing";
+import { recentDeploymentHealingSessions } from "@/lib/orchestrator/deployment-healing";
 import { getSettings } from "@/lib/settings/service";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +31,9 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
   const daily = dailyCosts(db, ws.repo.id).map((d) => ({ day: d.day, costUsd: d.costUsd }));
   const repoAdrs = listAdrs(undefined, db, ws.repo.id);
   const healingSessions = ws.repo.autoHealCi ? recentHealingSessions(ws.repo.id, db) : [];
+  const deploymentSessions = ws.repo.autoHealDeployments
+    ? recentDeploymentHealingSessions(ws.repo.id, db)
+    : [];
 
   const initialLog = ws.activeJob
     ? db
@@ -64,6 +69,9 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
         <RepoCostPanel todayUsd={todayUsd} limitUsd={ws.repo.dailyCostLimitUsd} daily={daily} />
         <RepoAdrPanel adrs={repoAdrs} />
         {ws.repo.autoHealCi && <RepoHealingPanel sessions={healingSessions} />}
+        {ws.repo.autoHealDeployments && (
+          <RepoDeploymentHealingPanel sessions={deploymentSessions} />
+        )}
       </div>
     </div>
   );
