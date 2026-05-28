@@ -1,7 +1,13 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseArgs, resolveDataDir, resolveDbPath, updateCommand } from "../bin/drydock.mjs";
+import {
+  detectInstallKind,
+  parseArgs,
+  resolveDataDir,
+  resolveDbPath,
+  updateCommand,
+} from "../bin/drydock.mjs";
 
 describe("parseArgs", () => {
   it("defaults to serving on 127.0.0.1:3737 without opening a browser", () => {
@@ -75,6 +81,30 @@ describe("updateCommand", () => {
       command: "npm",
       args: ["install", "--global", "@nilsr0711/drydock@latest"],
     });
+  });
+});
+
+describe("detectInstallKind", () => {
+  it("classifies a global npm install", () => {
+    expect(detectInstallKind("/usr/local/lib/node_modules/@nilsr0711/drydock")).toBe("global");
+  });
+
+  it("classifies an npx cache run", () => {
+    expect(detectInstallKind("/home/jane/.npm/_npx/abc123/node_modules/@nilsr0711/drydock")).toBe(
+      "npx",
+    );
+  });
+
+  it("classifies a local development checkout", () => {
+    expect(detectInstallKind("/home/jane/Programming/drydock")).toBe("local");
+  });
+
+  it("handles Windows-style separators", () => {
+    expect(
+      detectInstallKind(
+        "C:\\Users\\jane\\AppData\\Roaming\\npm\\node_modules\\@nilsr0711\\drydock",
+      ),
+    ).toBe("global");
   });
 });
 
