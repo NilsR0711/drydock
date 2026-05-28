@@ -20,6 +20,17 @@ function sanitize(name: string): string {
 export class WorktreeError extends Error {}
 
 /**
+ * Raised when there is nothing to commit after staging (issue #50): a no-op
+ * agent run that produced no file changes. Callers catch this to report a clear
+ * "no changes" outcome instead of surfacing a raw, confusing git error.
+ */
+export class EmptyCommitError extends WorktreeError {
+  constructor() {
+    super("nothing to commit");
+  }
+}
+
+/**
  * Manages isolated git worktrees, one per job, under the app home directory.
  * Mutations on the same repo path are serialized to avoid git index races.
  */
@@ -88,6 +99,11 @@ export class WorktreeManager {
 
   async commitAndPush(wt: Worktree, message: string): Promise<void> {
     await this.git(["add", "-A"], wt.path);
+    // A no-op run leaves an empty staging area; committing would exit non-zero
+    // with a confusing git error. Detect it up front and signal it distinctly
+    // (issue #50) so callers can report a clear "no changes" outcome.
+    const staged = await this.git(["status", "--porcelain"], wt.path);
+    if (staged.trim() === "") throw new EmptyCommitError();
     await this.git(["commit", "-m", message], wt.path);
     await this.git(["push", "-u", "origin", wt.branch], wt.path);
   }

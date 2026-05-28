@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Repo } from "@/lib/db/schema";
 import type { CommandResult, CommandRunner } from "@/lib/exec/runner";
-import { WorktreeManager, worktreeHome } from "@/lib/git/worktree";
+import { EmptyCommitError, WorktreeManager, worktreeHome } from "@/lib/git/worktree";
 
 const repo = { id: 7, path: "/repos/acme", name: "acme", defaultBranch: "main" } as Repo;
 
@@ -57,17 +57,40 @@ describe("WorktreeManager", () => {
   });
 
   it("commitAndPush stages, commits and pushes the branch", async () => {
-    const { calls, run } = recordingRunner();
+    const calls: { cmd: string; args: string[]; cwd?: string }[] = [];
+    const run: CommandRunner = async (cmd, args, cwd) => {
+      calls.push({ cmd, args, cwd });
+      // A dirty working tree: `git status --porcelain` reports a staged change.
+      const stdout = args[0] === "status" ? " M file.ts\n" : "";
+      return { stdout, stderr: "", exitCode: 0 } satisfies CommandResult;
+    };
     const m = new WorktreeManager(run);
     const wt = await m.prepare(repo, 1, 5);
     calls.length = 0;
     await m.commitAndPush(wt, "fix #5");
     expect(calls.map((c) => c.args.slice(0, 2))).toEqual([
       ["add", "-A"],
+      ["status", "--porcelain"],
       ["commit", "-m"],
       ["push", "-u"],
     ]);
     expect(calls.every((c) => c.cwd === wt.path)).toBe(true);
+  });
+
+  it("commitAndPush throws EmptyCommitError and skips commit/push when nothing is staged (issue #50)", async () => {
+    const calls: { args: string[] }[] = [];
+    const run: CommandRunner = async (_cmd, args) => {
+      calls.push({ args });
+      // A clean working tree: `git status --porcelain` returns no entries.
+      return { stdout: "", stderr: "", exitCode: 0 } satisfies CommandResult;
+    };
+    const m = new WorktreeManager(run);
+    const wt = { path: "/wt", branch: "drydock/issue-1-job-1" };
+    await expect(m.commitAndPush(wt, "fix #5")).rejects.toBeInstanceOf(EmptyCommitError);
+    expect(calls.map((c) => c.args.slice(0, 2))).toEqual([
+      ["add", "-A"],
+      ["status", "--porcelain"],
+    ]);
   });
 
   it("remove force-removes the worktree and prunes", async () => {
