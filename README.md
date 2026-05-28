@@ -154,7 +154,37 @@ stateDiagram-v2
 `aborted` (manual) and `interrupted` (crash recovery) can be reached from any in-flight state;
 `needs_human` and `interrupted` jobs can be re-queued. Terminal states are `merged` and `aborted`.
 
+## Install
+
+Run the published tool straight from the terminal — no checkout required:
+
+```bash
+npx drydock            # boot the server and print the dashboard URL
+npx drydock --open     # …and open it in your browser
+```
+
+Or install it globally:
+
+```bash
+npm i -g drydock
+drydock --open
+```
+
+The SQLite database lives in `~/.drydock/` (override with `DRYDOCK_DATA_DIR`) and is created
+and migrated automatically on first start — there are no setup steps. Then open the dashboard,
+add a repository, and start queuing issues.
+
+```bash
+drydock --help         # all flags
+drydock --version      # installed version
+drydock --port 8080 --host 0.0.0.0   # bind elsewhere (defaults: 127.0.0.1:3737)
+```
+
+You still need the `claude` and (for GitHub) `gh` CLIs on `PATH` — see [Requirements](#requirements).
+
 ## Quickstart
+
+For local development from a checkout:
 
 ```bash
 git clone https://github.com/NilsR0711/drydock.git
@@ -190,11 +220,16 @@ For self-hosted instances behind a corporate CA or proxy, set `NODE_EXTRA_CA_CER
 ## Configuration
 
 Drydock is configured at runtime from the **Settings** page and per-repo controls — no
-`.env` required. The one environment variable:
+`.env` required. The environment variables, all optional:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DRYDOCK_DB` | `data/drydock.db` | SQLite file path (use `:memory:` for ephemeral runs) |
+| `DRYDOCK_DATA_DIR` | `~/.drydock` | Directory for the database and local state (packaged runs) |
+| `DRYDOCK_DB` | `<data dir>/drydock.db`¹ | SQLite file path (use `:memory:` for ephemeral runs); overrides the data dir |
+| `DRYDOCK_MIGRATIONS` | `./drizzle` | Folder of generated SQL migrations (set automatically by the `drydock` launcher) |
+
+¹ A source checkout (`pnpm dev`/`pnpm start`) defaults `DRYDOCK_DB` to `data/drydock.db` in the
+project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 
 **Settings (global):** pause switch · daily cost limit · log retention (days) · `claude`/`gh` CLI paths · notification channels (Telegram / Slack / email) and per-event opt-in.
 **Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · default model · serial vs. parallel processing · queue label (default `drydock:queue`).
@@ -227,9 +262,11 @@ src/
    ├─ db/                # Drizzle schema, queries, migrations
    ├─ adr/ · prompts/    # ADR watcher/review, prompt templates
    ├─ mcp/               # stdio MCP server: tool registry + wiring
-   ├─ cli.ts             # `drydock <command>` dispatcher
+   ├─ cli.ts             # `pnpm mcp` dispatcher (dev MCP entrypoint)
    └─ repos/ · settings/ # repo & settings services
-scripts/drydock.ts       # CLI entrypoint (drydock bin / pnpm mcp)
+bin/drydock.mjs          # published `drydock` launcher (boots the standalone server)
+scripts/drydock.ts       # dev MCP entrypoint (pnpm mcp)
+scripts/package-standalone.mjs  # finishes the standalone bundle for npm
 docs/adr/                # architecture decision records (index: docs/DECISIONS.md)
 tests/                   # Vitest suite — fully offline
 ```

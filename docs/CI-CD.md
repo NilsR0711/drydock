@@ -36,6 +36,15 @@ Because we already commit conventionally (`feat:`, `fix:`, `chore:` …), no ext
 discipline is needed. Commits that should appear in the changelog use `feat:` or
 `fix:`; everything else is grouped under "Miscellaneous".
 
+When release-please reports that a release was created (`release_created`), a
+follow-up **`publish`** job checks out the new tag and runs
+`npm publish --provenance --access public`. `npm publish` first runs the
+`prepublishOnly` gate (`pnpm test && pnpm build`), so a broken build never ships.
+Provenance uses GitHub OIDC (`id-token: write`) to attest the tarball to this
+workflow run; configure npm [trusted publishing][tp] for the package (or supply
+an `NPM_TOKEN` secret) to authorize the upload. See
+[ADR 026](adr/026-npm-package-and-cli-launcher.md).
+
 ## `doc-review.yml` — Documentation reminder
 
 On PRs, compares the changed files against the base. If files under `src/`
@@ -46,3 +55,4 @@ push adds docs, the reminder is replaced with a confirmation. This is a nudge,
 not a merge blocker.
 
 [rp]: https://github.com/googleapis/release-please-action
+[tp]: https://docs.npmjs.com/trusted-publishers
