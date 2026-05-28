@@ -26,6 +26,11 @@ export function parseArgs(argv) {
     if (arg === "--version" || arg === "-v") return { mode: "version" };
   }
 
+  if (argv[0] === "update") {
+    if (argv.length > 1) throw new Error(`unexpected argument: ${argv[1]}`);
+    return { mode: "update" };
+  }
+
   let host = DEFAULT_HOST;
   let port = DEFAULT_PORT;
   let open = false;
@@ -96,7 +101,8 @@ export function resolveDbPath({ env = process.env, home = homedir() } = {}) {
 const HELP = `drydock — autonomously turn GitHub issues into pull requests
 
 Usage:
-  drydock [options]
+  drydock [options]      Start the server and dashboard
+  drydock update         Update to the latest published version
 
 Options:
   -p, --port <number>   Port to listen on (default: ${DEFAULT_PORT})
@@ -107,6 +113,26 @@ Options:
 
 Data is stored in ~/.drydock (override with DRYDOCK_DATA_DIR); the database is
 created and migrated automatically on first start.`;
+
+/** The command that updates a global install to the latest published version. */
+export function updateCommand() {
+  return { command: "npm", args: ["install", "--global", "drydock@latest"] };
+}
+
+/** Run the self-update, inheriting stdio so npm's progress is visible. */
+function runUpdate() {
+  const { command, args } = updateCommand();
+  console.error(`Updating drydock: ${command} ${args.join(" ")}`);
+  const child = spawn(command, args, {
+    shell: process.platform === "win32",
+    stdio: "inherit",
+  });
+  child.on("exit", (code) => process.exit(code ?? 0));
+  child.on("error", (err) => {
+    console.error(`Update failed: ${err.message}`);
+    process.exit(1);
+  });
+}
 
 /** Read the package version without an import assertion (keeps ESM warning-free). */
 function readVersion() {
@@ -197,6 +223,9 @@ async function main(argv) {
       return;
     case "version":
       console.log(readVersion());
+      return;
+    case "update":
+      runUpdate();
       return;
     default:
       await serve(directive);

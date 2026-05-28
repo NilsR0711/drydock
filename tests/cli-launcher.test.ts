@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseArgs, resolveDataDir, resolveDbPath } from "../bin/drydock.mjs";
+import { parseArgs, resolveDataDir, resolveDbPath, updateCommand } from "../bin/drydock.mjs";
 
 describe("parseArgs", () => {
   it("defaults to serving on 127.0.0.1:3737 without opening a browser", () => {
@@ -54,6 +54,27 @@ describe("parseArgs", () => {
 
   it("rejects an unexpected positional argument", () => {
     expect(() => parseArgs(["mcp"])).toThrow(/mcp/);
+  });
+
+  it("recognises the `update` subcommand", () => {
+    expect(parseArgs(["update"])).toEqual({ mode: "update" });
+  });
+
+  it("rejects extra arguments after `update`", () => {
+    expect(() => parseArgs(["update", "now"])).toThrow(/now/);
+  });
+
+  it("lets --help take precedence over `update`", () => {
+    expect(parseArgs(["update", "--help"])).toEqual({ mode: "help" });
+  });
+});
+
+describe("updateCommand", () => {
+  it("installs the latest published version globally", () => {
+    expect(updateCommand()).toEqual({
+      command: "npm",
+      args: ["install", "--global", "drydock@latest"],
+    });
   });
 });
 
