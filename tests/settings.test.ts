@@ -25,6 +25,38 @@ describe("settings", () => {
     expect(getSettings(db).retentionDays).toBe(14);
   });
 
+  it("defaults notification channels to empty and all events enabled", () => {
+    const s = getSettings(db);
+    expect(s.slackWebhookUrl).toBe("");
+    expect(s.smtpHost).toBe("");
+    expect(s.smtpPort).toBe(587);
+    expect(s.emailFrom).toBe("");
+    expect(s.emailTo).toBe("");
+    expect(s.notifyEvents).toEqual([
+      "needs_human",
+      "job_failed",
+      "pr_opened",
+      "pr_merged",
+      "cost_limit",
+      "automation_paused",
+    ]);
+  });
+
+  it("persists notification channel config and a custom event subset", () => {
+    saveSettings(
+      {
+        slackWebhookUrl: "https://hooks.slack.com/services/X",
+        smtpHost: "smtp.example.com",
+        notifyEvents: ["pr_merged", "needs_human"],
+      },
+      db,
+    );
+    const s = getSettings(db);
+    expect(s.slackWebhookUrl).toBe("https://hooks.slack.com/services/X");
+    expect(s.smtpHost).toBe("smtp.example.com");
+    expect(s.notifyEvents).toEqual(["pr_merged", "needs_human"]);
+  });
+
   it("persists and merges patches", () => {
     saveSettings({ paused: true }, db);
     expect(getSettings(db).paused).toBe(true);
