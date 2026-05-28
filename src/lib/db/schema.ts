@@ -337,6 +337,34 @@ export const deploymentHealingSessions = sqliteTable(
   }),
 );
 
+/**
+ * One free-text question asked about a specific PR (issue #55), answered by a
+ * read-only QA agent over an assembled context bundle. `status` is a
+ * PrQuestionStatus (answering → answered | error); `answer` holds the agent's
+ * reply once answered and `errorMessage` the reason on failure (including an
+ * empty agent response). Scoped to the job's PR via `(jobId, prNumber)` so
+ * answers never leak across PRs. Cascades with its job.
+ */
+export const prQuestions = sqliteTable(
+  "pr_questions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    jobId: integer("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    prNumber: integer("pr_number").notNull(),
+    question: text("question").notNull(),
+    answer: text("answer"),
+    status: text("status").notNull().default("answering"),
+    errorMessage: text("error_message"),
+    createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    jobIdx: index("pr_questions_job_idx").on(t.jobId),
+  }),
+);
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -362,3 +390,5 @@ export type IssueSubtask = typeof issueSubtasks.$inferSelect;
 export type NewIssueSubtask = typeof issueSubtasks.$inferInsert;
 export type DeploymentHealingSession = typeof deploymentHealingSessions.$inferSelect;
 export type NewDeploymentHealingSession = typeof deploymentHealingSessions.$inferInsert;
+export type PrQuestion = typeof prQuestions.$inferSelect;
+export type NewPrQuestion = typeof prQuestions.$inferInsert;
