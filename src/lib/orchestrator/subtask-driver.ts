@@ -1,3 +1,4 @@
+import type { AgentProvider } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import type { IssueSubtask, Repo } from "@/lib/db/schema";
 import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
@@ -56,10 +57,14 @@ function subtaskPrompt(input: DecomposeInput): string {
 
 /**
  * A {@link SubtaskGenerator} backed by a one-shot agent run in the repo's
- * checkout. Best-effort: a non-zero exit or unparseable output yields no
- * subtasks (the issue is then worked whole) rather than an error.
+ * checkout. The CLI invocation is built from the repo's {@link AgentProvider}
+ * (issue #49) so a Codex repo decomposes via `codex exec` and a Claude repo via
+ * `claude -p` — never a hardcoded Claude shape. Best-effort: a non-zero exit or
+ * unparseable output yields no subtasks (the issue is then worked whole) rather
+ * than an error.
  */
 export function buildSubtaskGenerator(deps: {
+  provider: AgentProvider;
   command: string;
   model: string;
   cwd: string;
@@ -67,11 +72,11 @@ export function buildSubtaskGenerator(deps: {
 }): SubtaskGenerator {
   const runner = deps.runner ?? spawnRunner;
   return async (input) => {
-    const res = await runner(
-      deps.command,
-      ["-p", subtaskPrompt(input), "--model", deps.model],
-      deps.cwd,
-    );
+    const args = deps.provider.buildOneShotArgs({
+      prompt: subtaskPrompt(input),
+      model: deps.model,
+    });
+    const res = await runner(deps.command, args, deps.cwd);
     if (res.exitCode !== 0) return [];
     return parseSubtaskList(res.stdout);
   };

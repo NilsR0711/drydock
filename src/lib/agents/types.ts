@@ -38,6 +38,16 @@ export interface ResumeArgsOptions extends BuildArgsOptions {
 }
 
 /**
+ * A one-shot, non-streaming text prompt: the agent answers once and exits. Used
+ * by issue decomposition (issue #49), which parses a JSON array out of the
+ * plain final message rather than consuming the event stream.
+ */
+export interface OneShotArgsOptions {
+  prompt: string;
+  model: string;
+}
+
+/**
  * A coding agent the orchestrator can spawn. The interface captures everything
  * agent-specific: how to invoke the CLI, how to parse its stream, and how to
  * price its token usage. The orchestrator itself stays agent-agnostic.
@@ -60,6 +70,11 @@ export interface AgentProvider {
   buildStartArgs(opts: BuildArgsOptions): string[];
   /** Build CLI args to resume a session, or null if the agent has no resume. */
   buildResumeArgs(opts: ResumeArgsOptions): string[] | null;
+  /**
+   * Build CLI args for a one-shot text prompt that prints a plain answer and
+   * exits (no streaming event format). Used by issue decomposition (issue #49).
+   */
+  buildOneShotArgs(opts: OneShotArgsOptions): string[];
   /** Create a fresh incremental parser for this agent's stdout. */
   createParser(): StreamParser;
   /** Estimate cost in USD from token counts (used when the stream omits it). */

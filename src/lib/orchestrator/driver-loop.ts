@@ -1,7 +1,9 @@
 import { and, eq, inArray } from "drizzle-orm";
+import { getAgentProvider } from "@/lib/agents/registry";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
 import { issues, type Job, jobs, type Repo } from "@/lib/db/schema";
+import type { CommandRunner } from "@/lib/exec/runner";
 import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient } from "@/lib/forge/types";
 import type { GhIssue } from "@/lib/github/gh";
@@ -13,6 +15,7 @@ import { type TriageResult, triageRepo } from "@/lib/issues/triage";
 import { type EdgeState, notifyCostLimitEdge } from "@/lib/notify/lifecycle";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
+import { commandForAgent } from "./agent-command";
 import { driveDeploymentHealing } from "./deployment-healing-driver";
 import { listJobsByStatus } from "./jobs";
 import {
@@ -52,17 +55,26 @@ export interface DriveTickDeps {
  * Default decomposition step: split work-candidate issues into subtasks using
  * an agent one-shot fallback for prose, scoped to the repo's checkout. Bounded
  * to issues actually queued/ready for work by the caller.
+ *
+ * Routed through the repo's {@link getAgentProvider agent provider} (issue #49):
+ * a Codex repo decomposes via `codex exec` with the configured `codexPath`, a
+ * Claude repo via `claude -p` with `claudePath`, using the repo's own model —
+ * never the global `claudePath` with Claude-shaped flags regardless of agent.
  */
-function defaultDecompose(
+export function defaultDecompose(
   repo: Repo,
   forge: ForgeClient,
   candidates: GhIssue[],
   db: DB,
+  opts: { runner?: CommandRunner } = {},
 ): Promise<void> {
+  const provider = getAgentProvider(repo.agent);
   const generate = buildSubtaskGenerator({
-    command: getSettings(db).claudePath,
+    provider,
+    command: commandForAgent(provider, db),
     model: repo.defaultModel,
     cwd: repo.path,
+    runner: opts.runner,
   });
   return decomposeRepo(repo, forge, candidates, db, { generate });
 }

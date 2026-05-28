@@ -48,6 +48,10 @@ export const claudeProvider: AgentProvider = {
     "--verbose",
   ],
 
+  // One-shot text prompt (issue #49): print mode without stream-json, so the
+  // caller gets the plain final answer to parse a JSON array out of.
+  buildOneShotArgs: ({ prompt, model }) => ["-p", prompt, "--model", model],
+
   createParser: () => new StreamJsonParser(),
 
   estimateCost,

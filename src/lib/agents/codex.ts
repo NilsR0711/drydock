@@ -252,6 +252,11 @@ export const codexProvider: AgentProvider = {
     prompt,
   ],
 
+  // One-shot text prompt (issue #49): `codex exec` without `--json` prints the
+  // plain final message, which the caller parses for a JSON array. No sandbox
+  // flag — decomposition only reads the issue prose, it never edits the repo.
+  buildOneShotArgs: ({ prompt, model }) => ["exec", "--model", model, prompt],
+
   createParser: () => new CodexStreamParser(),
 
   estimateCost: estimateCodexCost,
