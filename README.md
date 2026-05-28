@@ -235,8 +235,8 @@ Drydock is configured at runtime from the **Settings** page and per-repo control
 ¹ A source checkout (`pnpm dev`/`pnpm start`) defaults `DRYDOCK_DB` to `data/drydock.db` in the
 project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 
-**Settings (global):** pause switch · daily cost limit · log retention (days) · `claude`/`gh` CLI paths · notification channels (Telegram / Slack / email) and per-event opt-in.
-**Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · default model · serial vs. parallel processing · queue label (default `drydock:queue`).
+**Settings (global):** pause switch · daily cost limit · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · `claude`/`gh` CLI paths · notification channels (Telegram / Slack / email) and per-event opt-in.
+**Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · default model · serial vs. parallel processing · queue label (default `drydock:queue`) · optional job/CI timeout overrides.
 
 ## Screens
 
