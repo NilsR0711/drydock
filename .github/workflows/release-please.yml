@@ -1,9 +1,13 @@
 name: Release Please
 
-# Releases are cut manually only: trigger this workflow from the Actions tab
-# (or `gh workflow run release-please.yml`) to create/update the release PR.
-# Merging that PR cuts the tag and GitHub release.
+# release-please maintains a "release" PR from Conventional Commits: every push
+# to master refreshes it with the next version + CHANGELOG entry. Merging that PR
+# cuts the tag and GitHub release and, via the publish job below, publishes to
+# npm — so the changelog and the release are produced together, automatically.
+# workflow_dispatch is kept for manual runs.
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
 
 # Only one release run at a time; never cancel an in-flight release.
