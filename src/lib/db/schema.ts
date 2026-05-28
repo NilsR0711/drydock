@@ -35,6 +35,11 @@ export const repos = sqliteTable("repos", {
   // Opt-in decomposition of large issues into tracked subtasks (default off).
   // See ADR 020.
   autoDecompose: integer("auto_decompose", { mode: "boolean" }).notNull().default(false),
+  // Opt-in post-PR verification pass (default off). See ADR 027. After a PR is
+  // opened, a read-only one-shot agent checks whether the diff satisfies the
+  // issue and its subtasks; the result updates subtask status and surfaces a
+  // summary. Never auto-merges and never corrupts state on failure.
+  verifyPr: integer("verify_pr", { mode: "boolean" }).notNull().default(false),
   // Opt-in post-merge deployment healing (default off). See ADR 021. When a
   // monitored deployment fails, a follow-up fix PR is opened with the logs.
   autoHealDeployments: integer("auto_heal_deployments", { mode: "boolean" })
