@@ -17,6 +17,11 @@ function sanitize(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "-");
 }
 
+/** Directory holding all app-owned worktrees for a single repo. */
+export function repoWorktreesDir(repoName: string): string {
+  return join(worktreeHome(), "worktrees", sanitize(repoName));
+}
+
 export class WorktreeError extends Error {}
 
 /**
@@ -62,7 +67,7 @@ export class WorktreeManager {
 
   async prepare(repo: Repo, jobId: number, issueNumber = 0): Promise<Worktree> {
     const branch = `drydock/issue-${issueNumber}-job-${jobId}`;
-    const path = join(worktreeHome(), "worktrees", sanitize(repo.name), `job-${jobId}`);
+    const path = join(repoWorktreesDir(repo.name), `job-${jobId}`);
     await this.withRepoLock(repo.path, () =>
       this.git(["-C", repo.path, "worktree", "add", "-b", branch, path, repo.defaultBranch]),
     );
@@ -76,7 +81,7 @@ export class WorktreeManager {
    * feedback on a PR's own branch rather than a fresh job branch.
    */
   async prepareForBranch(repo: Repo, branch: string, key: string): Promise<Worktree> {
-    const path = join(worktreeHome(), "worktrees", sanitize(repo.name), `fb-${sanitize(key)}`);
+    const path = join(repoWorktreesDir(repo.name), `fb-${sanitize(key)}`);
     await this.withRepoLock(repo.path, async () => {
       await this.git(["-C", repo.path, "fetch", "origin", branch]);
       await this.git(["-C", repo.path, "worktree", "add", path, branch]);
@@ -90,7 +95,7 @@ export class WorktreeManager {
    * which must start from the merged mainline rather than a job branch.
    */
   async prepareForNewBranch(repo: Repo, branch: string, key: string): Promise<Worktree> {
-    const path = join(worktreeHome(), "worktrees", sanitize(repo.name), `dh-${sanitize(key)}`);
+    const path = join(repoWorktreesDir(repo.name), `dh-${sanitize(key)}`);
     await this.withRepoLock(repo.path, () =>
       this.git(["-C", repo.path, "worktree", "add", "-b", branch, path, repo.defaultBranch]),
     );
