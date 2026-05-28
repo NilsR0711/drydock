@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
-import { addRepo } from "@/lib/repos/service";
 import {
   createReleaseRun,
   getReleaseRun,
@@ -8,6 +7,7 @@ import {
   transitionReleaseRun,
 } from "@/lib/release/release-service";
 import { InvalidReleaseTransitionError } from "@/lib/release/release-state";
+import { addRepo } from "@/lib/repos/service";
 
 let db: DB;
 beforeEach(() => {
@@ -62,7 +62,14 @@ describe("transitionReleaseRun", () => {
     const proposed = transitionReleaseRun(
       run.id,
       "proposed",
-      { bump: "minor", fromTag: "v1.2.3", tag: "v1.3.0", title: "v1.3.0", notes: "- x", prNumbers: [7, 9] },
+      {
+        bump: "minor",
+        fromTag: "v1.2.3",
+        tag: "v1.3.0",
+        title: "v1.3.0",
+        notes: "- x",
+        prNumbers: [7, 9],
+      },
       db,
     );
     expect(proposed.bump).toBe("minor");
