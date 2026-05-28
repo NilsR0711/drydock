@@ -100,11 +100,27 @@ export const jobs = sqliteTable(
     costUsd: real("cost_usd").notNull().default(0),
     ciRetryCount: integer("ci_retry_count").notNull().default(0),
     errorMessage: text("error_message"),
+    // Lease-based queue (issue #23). A claimed job carries a lease token held by
+    // exactly one worker; heartbeats push leaseExpiresAt forward. attempts counts
+    // claims (for backoff/maxAttempts), availableAt gates when a deferred/backed-off
+    // job becomes claimable, and dedupeKey prevents enqueuing the same work twice.
+    attempts: integer("attempts").notNull().default(0),
+    leaseToken: text("lease_token"),
+    leaseExpiresAt: integer("lease_expires_at"),
+    workerId: text("worker_id"),
+    availableAt: integer("available_at"),
+    dedupeKey: text("dedupe_key"),
     createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
   },
   (t) => ({
     repoIdx: index("jobs_repo_idx").on(t.repoId),
     statusIdx: index("jobs_status_idx").on(t.status),
+    leaseIdx: index("jobs_lease_idx").on(t.leaseExpiresAt),
+    // A dedupe key may be reused once its prior job reaches a terminal state, so
+    // uniqueness is scoped to live (non-terminal) jobs via a partial index.
+    dedupeActiveUnique: uniqueIndex("jobs_dedupe_active_unique")
+      .on(t.dedupeKey)
+      .where(sql`${t.dedupeKey} is not null and ${t.status} not in ('merged', 'aborted')`),
   }),
 );
 
