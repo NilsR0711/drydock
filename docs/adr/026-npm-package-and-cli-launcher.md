@@ -7,8 +7,12 @@
 
 Drydock could only be run from a source checkout (`pnpm dev`/`pnpm start`). To
 ship it as a finished tool it must be installable from npm and startable with a
-single command — `npx drydock` — that boots the local server and opens the
-dashboard, without a repo checkout or manual setup. See issue #12.
+single command that boots the local server and opens the dashboard, without a
+repo checkout or manual setup. See issue #12.
+
+The unscoped `drydock` name is already taken on npm, so the package is published
+scoped as **`@nilsr0711/drydock`** (`npx @nilsr0711/drydock`); the launcher's bin
+command stays `drydock` regardless, so the run/`update` UX is unchanged.
 
 Three constraints shape the design:
 
@@ -73,7 +77,7 @@ and no long-lived npm token is required once trusted publishing is configured.
 
 ## Consequences
 
-- `npx drydock` runs the tool from a fresh directory; the DB is created and
+- `npx @nilsr0711/drydock` runs the tool from a fresh directory; the DB is created and
   migrated under `~/.drydock` on first start; `--help`/`--version` work.
 - The tarball ships build artifacts only — no sources, tests, `.git`, or the
   local token DB (enforced by the prune step).
