@@ -25,3 +25,4 @@
 - [022](adr/022-lease-based-job-queue.md) — Lease-based persistent job queue with crash recovery
 - [023](adr/023-log-retention-and-pruning.md) — Log retention, SQLite pruning & secret redaction
 - [024](adr/024-external-notifications.md) — External notifications (Telegram, Slack & email) with per-event opt-in
+- [025](adr/025-mcp-server.md) — Expose Drydock over a local stdio MCP server

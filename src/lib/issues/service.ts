@@ -1,7 +1,20 @@
 import { and, asc, eq, inArray, max } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
+import { getRepo } from "@/lib/db/queries";
 import { type Issue, issues } from "@/lib/db/schema";
+import { getForge } from "@/lib/forge/registry";
 import type { GhIssue } from "@/lib/github/gh";
+
+const QUEUE_LABEL_OPTS = {
+  color: "1f6feb",
+  description: "Queued for processing by Drydock",
+} as const;
+
+function requireRepo(repoId: number, db: DB) {
+  const repo = getRepo(repoId, db);
+  if (!repo) throw new Error(`repo ${repoId} not found`);
+  return repo;
+}
 
 /** Issues for a repo, ordered by manual priority (then number as tiebreak). */
 export function listIssues(repoId: number, db: DB = getDb()): Issue[] {
@@ -91,6 +104,64 @@ export function setQueueLabelLocal(
     .set({ labels: JSON.stringify(next) })
     .where(eq(issues.id, row.id))
     .run();
+}
+
+/**
+ * Fetch all open issues for a repo from its forge and reconcile the local cache.
+ * Returns the refreshed issue list. The forge call is the only side effect
+ * beyond the cache reconciliation, so both the dashboard and the MCP server can
+ * share this single source of truth.
+ */
+export async function syncRepoIssues(repoId: number, db: DB = getDb()): Promise<Issue[]> {
+  const repo = requireRepo(repoId, db);
+  const fetched = await getForge(repo).listAllIssues();
+  syncIssuesFromGh(repoId, fetched, db);
+  return listIssues(repoId, db);
+}
+
+/** Add the repo's queue label to an issue (forge + local cache); returns issues. */
+export async function queueIssue(
+  repoId: number,
+  issueNumber: number,
+  db: DB = getDb(),
+): Promise<Issue[]> {
+  const repo = requireRepo(repoId, db);
+  const gh = getForge(repo);
+  await gh.ensureLabel(repo.queueLabel, QUEUE_LABEL_OPTS);
+  await gh.addLabels(issueNumber, [repo.queueLabel]);
+  setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true, db);
+  return listIssues(repoId, db);
+}
+
+/** Remove the repo's queue label from an issue (forge + local cache); returns issues. */
+export async function dequeueIssue(
+  repoId: number,
+  issueNumber: number,
+  db: DB = getDb(),
+): Promise<Issue[]> {
+  const repo = requireRepo(repoId, db);
+  await getForge(repo).removeLabels(issueNumber, [repo.queueLabel]);
+  setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, false, db);
+  return listIssues(repoId, db);
+}
+
+/** Add and/or remove labels on an issue (forge + local cache for the queue label). */
+export async function applyIssueLabels(
+  repoId: number,
+  issueNumber: number,
+  add: string[],
+  remove: string[],
+  db: DB = getDb(),
+): Promise<void> {
+  const repo = requireRepo(repoId, db);
+  const gh = getForge(repo);
+  if (add.includes(repo.queueLabel)) await gh.ensureLabel(repo.queueLabel, QUEUE_LABEL_OPTS);
+  if (add.length) await gh.addLabels(issueNumber, add);
+  if (remove.length) await gh.removeLabels(issueNumber, remove);
+  if (add.includes(repo.queueLabel))
+    setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true, db);
+  if (remove.includes(repo.queueLabel))
+    setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, false, db);
 }
 
 /** Persist a new manual ordering. `orderedNumbers` is the full list, first = highest. */

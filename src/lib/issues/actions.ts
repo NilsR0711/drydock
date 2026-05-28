@@ -4,23 +4,20 @@ import { revalidatePath } from "next/cache";
 import { getRepo } from "@/lib/db/queries";
 import { getForge } from "@/lib/forge/registry";
 import {
-  listIssues,
+  applyIssueLabels,
+  dequeueIssue,
+  queueIssue,
   reorderIssues,
-  setQueueLabelLocal,
-  syncIssuesFromGh,
+  syncRepoIssues,
 } from "@/lib/issues/service";
 import { listSubtasks } from "@/lib/issues/subtasks";
 import { createJob } from "@/lib/orchestrator/jobs";
 
 /** Fetch all open issues from GitHub and cache them (backlog + queue). */
 export async function syncRepoIssuesAction(repoId: number) {
-  const repo = getRepo(repoId);
-  if (!repo) throw new Error(`repo ${repoId} not found`);
-  const gh = getForge(repo);
-  const fetched = await gh.listAllIssues();
-  syncIssuesFromGh(repoId, fetched);
+  const result = await syncRepoIssues(repoId);
   revalidatePath(`/repos/${repoId}`);
-  return listIssues(repoId);
+  return result;
 }
 
 /** Persist a new manual ordering for the repo's issue queue. */
@@ -40,27 +37,16 @@ export async function startIssueAction(repoId: number, issueNumber: number) {
 
 /** Add the repo's queue label to an issue (GitHub + local cache). */
 export async function addToQueueAction(repoId: number, issueNumber: number) {
-  const repo = getRepo(repoId);
-  if (!repo) throw new Error(`repo ${repoId} not found`);
-  const gh = getForge(repo);
-  await gh.ensureLabel(repo.queueLabel, {
-    color: "1f6feb",
-    description: "Queued for processing by Drydock",
-  });
-  await gh.addLabels(issueNumber, [repo.queueLabel]);
-  setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true);
+  const result = await queueIssue(repoId, issueNumber);
   revalidatePath(`/repos/${repoId}`);
-  return listIssues(repoId);
+  return result;
 }
 
 /** Remove the repo's queue label from an issue (GitHub + local cache). */
 export async function removeFromQueueAction(repoId: number, issueNumber: number) {
-  const repo = getRepo(repoId);
-  if (!repo) throw new Error(`repo ${repoId} not found`);
-  await getForge(repo).removeLabels(issueNumber, [repo.queueLabel]);
-  setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, false);
+  const result = await dequeueIssue(repoId, issueNumber);
   revalidatePath(`/repos/${repoId}`);
-  return listIssues(repoId);
+  return result;
 }
 
 /** Full issue detail incl. body and comments, fetched live from GitHub. */
@@ -101,20 +87,7 @@ export async function setIssueLabelsAction(
   add: string[],
   remove: string[],
 ) {
-  const repo = getRepo(repoId);
-  if (!repo) throw new Error(`repo ${repoId} not found`);
-  const gh = getForge(repo);
-  if (add.includes(repo.queueLabel)) {
-    await gh.ensureLabel(repo.queueLabel, {
-      color: "1f6feb",
-      description: "Queued for processing by Drydock",
-    });
-  }
-  if (add.length) await gh.addLabels(issueNumber, add);
-  if (remove.length) await gh.removeLabels(issueNumber, remove);
-  if (add.includes(repo.queueLabel)) setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true);
-  if (remove.includes(repo.queueLabel))
-    setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, false);
+  await applyIssueLabels(repoId, issueNumber, add, remove);
   revalidatePath(`/repos/${repoId}`);
 }
 
