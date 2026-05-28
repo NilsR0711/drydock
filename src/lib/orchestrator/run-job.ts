@@ -4,7 +4,7 @@ import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
 import { getForge } from "@/lib/forge/registry";
-import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
+import { EmptyCommitError, type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { listIssues } from "@/lib/issues/service";
 import { listSubtasks } from "@/lib/issues/subtasks";
 import type { NotificationEvent } from "@/lib/notify/events";
@@ -168,7 +168,22 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       }
     }
 
-    await worktrees.commitAndPush(wt, `Fix #${job.issueNumber}`);
+    try {
+      await worktrees.commitAndPush(wt, `Fix #${job.issueNumber}`);
+    } catch (err) {
+      // A legitimate no-op run (the issue needed no code change) produces an
+      // empty commit. Report it as a clear outcome rather than a raw git error
+      // (issue #50). Any other failure (e.g. a rejected push) still propagates.
+      if (err instanceof EmptyCommitError) {
+        return transitionJob(
+          job.id,
+          "needs_human",
+          { errorMessage: "Agent produced no changes" },
+          db,
+        );
+      }
+      throw err;
+    }
     const title =
       listIssues(repo.id, db).find((i) => i.number === job.issueNumber)?.title ??
       `Fix #${job.issueNumber}`;

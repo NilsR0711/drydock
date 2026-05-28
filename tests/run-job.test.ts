@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { registerAdr } from "@/lib/adr/service";
 import { createDb, type DB } from "@/lib/db/client";
 import { type Job, jobs } from "@/lib/db/schema";
-import type { Worktree } from "@/lib/git/worktree";
+import { EmptyCommitError, type Worktree } from "@/lib/git/worktree";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
 import { runJob } from "@/lib/orchestrator/run-job";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
@@ -133,6 +133,24 @@ describe("runJob", () => {
     expect(result.status).toBe("needs_human");
     expect(result.errorMessage).toMatch(/timed out/i);
     expect(deps.createPr).not.toHaveBeenCalled();
+    expect(removed.v).toBe(true);
+  });
+
+  it("reports a clear no-changes reason instead of a raw git error when the agent produced no changes (issue #50)", async () => {
+    const removed = { v: false };
+    const wt = fakeWorktrees(removed);
+    wt.commitAndPush = vi.fn(async () => {
+      throw new EmptyCommitError();
+    });
+    const notify = vi.fn(async () => {});
+    const deps = baseDeps(removed, { worktrees: wt, notify });
+    const job = createJob({ repoId, issueNumber: 1 }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("needs_human");
+    expect(result.errorMessage).toMatch(/no changes/i);
+    expect(result.errorMessage).not.toMatch(/nothing to commit/i);
+    expect(deps.createPr).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith("needs_human", expect.stringContaining("no changes"));
     expect(removed.v).toBe(true);
   });
 
