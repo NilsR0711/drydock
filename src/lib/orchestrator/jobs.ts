@@ -10,6 +10,8 @@ export function createJob(
     model?: string;
     agent?: string;
     maxTurns?: number;
+    /** Optional dedupe key; uniqueness is enforced across live jobs (issue #23). */
+    dedupeKey?: string;
   },
   db: DB = getDb(),
 ): Job {
@@ -22,6 +24,7 @@ export function createJob(
       model: input.model,
       agent: input.agent ?? "claude",
       maxTurns: input.maxTurns ?? 40,
+      dedupeKey: input.dedupeKey ?? null,
     })
     .returning()
     .get();

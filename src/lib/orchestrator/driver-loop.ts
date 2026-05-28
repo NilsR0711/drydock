@@ -13,7 +13,16 @@ import { type TriageResult, triageRepo } from "@/lib/issues/triage";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
 import { driveDeploymentHealing } from "./deployment-healing-driver";
-import { createJob, listJobsByStatus, nextQueuedJob, transitionJob } from "./jobs";
+import { listJobsByStatus } from "./jobs";
+import {
+  claimNext,
+  DEFAULT_LEASE_MS,
+  enqueueJob,
+  HEARTBEAT_MS,
+  heartbeat,
+  releaseLease,
+  workerId,
+} from "./queue";
 import { driveReviewFeedback } from "./review-feedback-driver";
 import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
@@ -126,22 +135,6 @@ function repoHasInFlightJob(db: DB, repoId: number): boolean {
   return listJobsByStatus([...IN_FLIGHT_STATES], db).some((j) => j.repoId === repoId);
 }
 
-function issuePriority(db: DB, repoId: number, issueNumber: number): number {
-  const row = db
-    .select({ p: issues.priority })
-    .from(issues)
-    .where(and(eq(issues.repoId, repoId), eq(issues.number, issueNumber)))
-    .get();
-  return row?.p ?? Number.POSITIVE_INFINITY;
-}
-
-function lessUrgent(db: DB, a: Job, b: Job): boolean {
-  const pa = issuePriority(db, a.repoId, a.issueNumber);
-  const pb = issuePriority(db, b.repoId, b.issueNumber);
-  if (pa !== pb) return pa > pb;
-  return a.createdAt > b.createdAt;
-}
-
 /**
  * One scheduler tick: sync labelled issues into approved jobs, then start the
  * globally highest-priority queued jobs until the parallel budget or a gate is
@@ -205,7 +198,9 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
           if (auto && gh.author && cfg.priorityAuthors.includes(gh.author)) {
             boostPriority(db, repo.id, gh.number);
           }
-          createJob(
+          // Dedupe-guarded enqueue (issue #23): the partial unique index makes a
+          // racing duplicate a no-op rather than a second job for the same issue.
+          enqueueJob(
             {
               repoId: repo.id,
               issueNumber: gh.number,
@@ -226,36 +221,43 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   }
 
   const max = getSettings(db).maxParallelJobs;
-  // Sequential repos may start at most one job per tick; track those started here
-  // so a second queued issue for the same repo isn't picked before its job leaves
-  // "queued" within this same loop.
-  const startedSequentialRepos = new Set<number>();
+  const worker = workerId();
   while (!isDraining() && jobsAllowed(db).allowed && activeJobCount() < max) {
-    let picked: Job | undefined;
-    for (const repo of repos) {
-      if (!repoJobsAllowed(repo.id, db).allowed) continue;
-      if (
-        repo.sequential &&
-        (repoHasInFlightJob(db, repo.id) || startedSequentialRepos.has(repo.id))
-      )
-        continue;
-      const candidate = nextQueuedJob(repo.id, db);
-      if (candidate && (!picked || lessUrgent(db, picked, candidate))) picked = candidate;
-    }
-    if (!picked) break;
-    const job = picked;
+    // Repos eligible to start a job this turn: within their per-repo budget, and
+    // — for sequential repos — without an in-flight job. A sequential repo's
+    // just-claimed job is now "working" (in-flight), so it drops out next turn.
+    const eligible = repos
+      .filter((r) => repoJobsAllowed(r.id, db).allowed)
+      .filter((r) => !(r.sequential && repoHasInFlightJob(db, r.id)))
+      .map((r) => r.id);
+    if (eligible.length === 0) break;
 
-    const repoOfPicked = repos.find((r) => r.id === job.repoId);
-    if (repoOfPicked?.sequential) startedSequentialRepos.add(job.repoId);
-
-    const jobId = job.id;
-    // Claim it out of "queued" synchronously so it isn't re-picked next turn.
-    // (The working-state guard in claude-session keeps spawnClaudeSession happy.)
-    transitionJob(jobId, "working", {}, db);
+    // Atomically claim the globally highest-priority eligible job out of the
+    // queue, stamping a lease. claimNext sets it to "working" (the working-state
+    // guard in the agent session keeps spawning happy).
+    const claimed = claimNext({ repoIds: eligible, worker, leaseMs: DEFAULT_LEASE_MS }, db);
+    if (!claimed) break;
+    const jobId = claimed.id;
+    const leaseToken = claimed.leaseToken as string;
     registerActiveJob(jobId);
+
+    // Keep the lease alive while the (long-running) job executes; release it once
+    // the job settles so crash recovery never mistakes a finished job for orphaned.
+    const beat = setInterval(() => {
+      try {
+        heartbeat(jobId, leaseToken, {}, db);
+      } catch (err) {
+        console.error(`[driver] heartbeat failed for job ${jobId}`, err);
+      }
+    }, HEARTBEAT_MS);
+    beat.unref?.();
     void runJob(jobId)
       .catch((err) => console.error(`[driver] job ${jobId} failed`, err))
-      .finally(() => unregisterActiveJob(jobId));
+      .finally(() => {
+        clearInterval(beat);
+        releaseLease(jobId, leaseToken, db);
+        unregisterActiveJob(jobId);
+      });
   }
 
   // Drive the opt-in PR review-feedback lifecycle (issue #18) as a low-priority

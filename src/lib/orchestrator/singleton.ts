@@ -1,7 +1,7 @@
 import { inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
-import { recoverInterruptedJobs } from "./driver";
+import { recoverOnStartup } from "./driver";
 import { startDriverLoop, stopDriverLoop } from "./driver-loop";
 import { transitionJob } from "./jobs";
 import { acquireInstanceLock, setDrainMode, waitForIdle } from "./runtime";
@@ -64,16 +64,20 @@ export async function gracefulShutdown(): Promise<void> {
 export function startOrchestrator(): void {
   if (started) return;
   started = true;
-  try {
-    const recovered = recoverInterruptedJobs();
-    if (recovered > 0) console.log(`[orchestrator] recovered ${recovered} interrupted job(s)`);
-  } catch (err) {
-    console.error("[orchestrator] recovery failed", err);
-  }
 
-  // Start the scheduler loop in the real server only (skip under Vitest so the
-  // test suite doesn't leave a polling timer running).
+  // Crash recovery and the scheduler loop run in the real server only. Skipping
+  // them under Vitest keeps lazy getDb() bootstraps from mutating per-test DBs or
+  // leaving a polling timer running.
   if (!process.env.VITEST) {
+    try {
+      const { requeued, interrupted } = recoverOnStartup();
+      if (requeued > 0) console.log(`[orchestrator] requeued ${requeued} orphaned job(s)`);
+      if (interrupted > 0)
+        console.log(`[orchestrator] recovered ${interrupted} interrupted job(s)`);
+    } catch (err) {
+      console.error("[orchestrator] recovery failed", err);
+    }
+
     if (acquireInstanceLock()) {
       startDriverLoop();
     } else {
