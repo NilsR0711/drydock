@@ -44,4 +44,36 @@ describe("redactSecrets", () => {
   it("does not redact short ghp-like words that are not tokens", () => {
     expect(redactSecrets("ghp_short")).toBe("ghp_short");
   });
+
+  it("redacts tokens embedded in GitHub clone URLs", () => {
+    const url = `https://x-access-token:${"a".repeat(40)}@github.com/owner/repo.git`;
+    expect(redactSecrets(`remote: ${url}`)).toBe(
+      "remote: https://[REDACTED]@github.com/owner/repo.git",
+    );
+  });
+
+  it("redacts tokens embedded in GitLab clone URLs", () => {
+    const url = `https://oauth2:${"z".repeat(20)}@gitlab.com/group/proj.git`;
+    expect(redactSecrets(url)).toBe("https://[REDACTED]@gitlab.com/group/proj.git");
+  });
+
+  it("redacts PRIVATE-TOKEN header values", () => {
+    expect(redactSecrets("PRIVATE-TOKEN: super-secret-value")).toBe("PRIVATE-TOKEN: [REDACTED]");
+  });
+
+  it("redacts Authorization Basic credentials", () => {
+    expect(redactSecrets("Authorization: Basic dXNlcjpwYXNzd29yZA==")).toBe(
+      "Authorization: Basic [REDACTED]",
+    );
+  });
+
+  it("redacts AWS access key IDs", () => {
+    const key = `AKIA${"A".repeat(16)}`;
+    expect(redactSecrets(`AWS_ACCESS_KEY_ID=${key}`)).toBe("AWS_ACCESS_KEY_ID=[REDACTED]");
+  });
+
+  it("leaves ordinary URLs without credentials untouched", () => {
+    const url = "https://github.com/owner/repo.git";
+    expect(redactSecrets(url)).toBe(url);
+  });
 });

@@ -2,7 +2,7 @@
  * Mask secrets before they are persisted to `job_events` or printed to the
  * server log. Agent output and stderr can echo `gh` invocations, environment
  * dumps, or API responses that embed access tokens; this scrubs the common
- * shapes so they never land in the database or on disk (issue #24).
+ * shapes so they never land in the database or on disk (issues #24, #51).
  */
 
 const PLACEHOLDER = "[REDACTED]";
@@ -17,6 +17,16 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /\bglpat-[A-Za-z0-9_-]{20,}\b/g,
   // Bearer authorization headers (the token, not the scheme).
   /(Bearer )[A-Za-z0-9._~+/-]+=*/g,
+  // Credentials embedded in clone/remote URLs, e.g.
+  // `https://x-access-token:<token>@github.com` or `https://oauth2:<token>@gitlab.com`.
+  // Keep the scheme and host; drop the `user:token` userinfo before the `@`.
+  /(https?:\/\/)[^\s/@:]+:[^\s/@]+(?=@)/g,
+  // GitLab's own auth header shape: `PRIVATE-TOKEN: <token>`.
+  /(PRIVATE-TOKEN:\s*)\S+/gi,
+  // HTTP Basic authorization headers (the base64 credentials, not the scheme).
+  /(Basic )[A-Za-z0-9+/]+=*/g,
+  // AWS access key IDs (and the related ASIA/AGPA/AIDA/ANPA/AROA prefixes).
+  /\b(?:AKIA|ASIA|AGPA|AIDA|ANPA|AROA)[0-9A-Z]{16}\b/g,
 ];
 
 /** Replace any recognised secret in `text` with a fixed placeholder. */
