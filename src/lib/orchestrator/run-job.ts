@@ -1,6 +1,5 @@
 import { listAdrs } from "@/lib/adr/service";
 import { getAgentProvider } from "@/lib/agents/registry";
-import type { AgentProvider } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
@@ -13,17 +12,12 @@ import { dispatch } from "@/lib/notify/notifier";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
 import { getSettings } from "@/lib/settings/service";
+import { commandForAgent } from "./agent-command";
 import { type AgentSessionResult, resumeAgentSession, spawnAgentSession } from "./agent-session";
 import { ciBabysitter } from "./ci-babysitter";
 import { getJob, recordEvent, transitionJob } from "./jobs";
 import { markSubtasksDone, markSubtasksWorking, subtaskPromptSection } from "./subtask-driver";
 import type { SubtaskStatus } from "./subtask-state";
-
-/** CLI path override for an agent, from global settings. */
-function commandForAgent(provider: AgentProvider, db: DB): string {
-  const s = getSettings(db);
-  return provider.id === "codex" ? s.codexPath : s.claudePath;
-}
 
 interface WorktreeApi {
   prepare(repo: Repo, jobId: number, issueNumber?: number): Promise<Worktree>;
