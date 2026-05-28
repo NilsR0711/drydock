@@ -62,6 +62,22 @@ describe("codexProvider", () => {
     expect(args).not.toContain(String(codexProvider.resumeMaxTurns));
   });
 
+  it("builds a non-streaming one-shot exec invocation for a text prompt (issue #49)", () => {
+    const args = codexProvider.buildOneShotArgs({
+      prompt: "split this issue",
+      model: "gpt-5-codex",
+    });
+    // codex one-shots run via `exec`, not Claude's `-p`, and take the prompt as
+    // the trailing positional. No `--json`: decomposition wants the plain final
+    // message, parsed for a JSON array, not the JSONL event stream.
+    expect(args[0]).toBe("exec");
+    expect(args).not.toContain("-p");
+    expect(args).not.toContain("--json");
+    expect(args).toContain("--model");
+    expect(args).toContain("gpt-5-codex");
+    expect(args.at(-1)).toBe("split this issue");
+  });
+
   it("builds a resume invocation targeting the recorded thread id", () => {
     const args = codexProvider.buildResumeArgs({
       prompt: "fix ci",

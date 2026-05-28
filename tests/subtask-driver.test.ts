@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { claudeProvider } from "@/lib/agents/claude";
+import { codexProvider } from "@/lib/agents/codex";
 import { createDb, type DB } from "@/lib/db/client";
 import type { Repo } from "@/lib/db/schema";
 import type { IssueDetail } from "@/lib/github/gh";
@@ -70,6 +72,7 @@ describe("buildSubtaskGenerator", () => {
       exitCode: 0,
     }));
     const generate = buildSubtaskGenerator({
+      provider: claudeProvider,
       command: "claude",
       model: "claude-opus-4-7",
       cwd: "/r",
@@ -80,9 +83,36 @@ describe("buildSubtaskGenerator", () => {
     expect(runner).toHaveBeenCalledWith("claude", expect.arrayContaining(["-p"]), "/r");
   });
 
+  it("builds the one-shot args from the repo's agent provider (issue #49)", async () => {
+    // A Codex repo must decompose via the Codex provider's arg shape (`exec`),
+    // not Claude's `-p`, with the configured codex command path.
+    const runner = vi.fn(async () => ({ stdout: "[]", stderr: "", exitCode: 0 }));
+    const generate = buildSubtaskGenerator({
+      provider: codexProvider,
+      command: "/usr/local/bin/codex",
+      model: "gpt-5-codex",
+      cwd: "/r",
+      runner,
+    });
+    await generate({ number: 1, title: "T", body: "prose" });
+    expect(runner).toHaveBeenCalledTimes(1);
+    const [cmd, args, cwd] = runner.mock.calls[0] as unknown as [string, string[], string];
+    expect(cmd).toBe("/usr/local/bin/codex");
+    expect(cwd).toBe("/r");
+    expect(args[0]).toBe("exec");
+    expect(args).not.toContain("-p");
+    expect(args).toContain("gpt-5-codex");
+  });
+
   it("returns nothing when the agent exits non-zero", async () => {
     const runner = vi.fn(async () => ({ stdout: "", stderr: "boom", exitCode: 1 }));
-    const generate = buildSubtaskGenerator({ command: "claude", model: "m", cwd: "/r", runner });
+    const generate = buildSubtaskGenerator({
+      provider: claudeProvider,
+      command: "claude",
+      model: "m",
+      cwd: "/r",
+      runner,
+    });
     expect(await generate({ number: 1, title: "T", body: "x" })).toEqual([]);
   });
 });

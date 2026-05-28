@@ -42,6 +42,17 @@ describe("claudeProvider", () => {
     expect(args).toContain("claude-haiku-4-5");
   });
 
+  it("builds a plain one-shot invocation for a text prompt (issue #49)", () => {
+    const args = claudeProvider.buildOneShotArgs({
+      prompt: "split this issue",
+      model: "claude-opus-4-7",
+    });
+    // A one-shot decomposition wants the plain text answer (parsed for a JSON
+    // array), so no `--output-format stream-json` here — just `-p` and `--model`.
+    expect(args).toEqual(["-p", "split this issue", "--model", "claude-opus-4-7"]);
+    expect(args).not.toContain("--output-format");
+  });
+
   it("creates a fresh stream parser that reads stream-json output", () => {
     const parser = claudeProvider.createParser();
     const events = parser.push(

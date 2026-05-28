@@ -1,5 +1,4 @@
 import { getAgentProvider } from "@/lib/agents/registry";
-import type { AgentProvider } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
@@ -7,7 +6,7 @@ import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient, ReviewThread } from "@/lib/forge/types";
 import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { repoAutomation } from "@/lib/repos/automation";
-import { getSettings } from "@/lib/settings/service";
+import { commandForAgent } from "./agent-command";
 import { spawnAgentSession } from "./agent-session";
 import { listJobs } from "./jobs";
 import { type FeedbackApplyResult, processPrFeedback, type ReviewForge } from "./review-feedback";
@@ -65,12 +64,6 @@ export async function driveReviewFeedback(deps: DriveFeedbackDeps = {}): Promise
       console.error(`[review-feedback] sweep failed for ${repo.name}`, err);
     }
   }
-}
-
-/** CLI path override for an agent, from global settings. */
-function commandForAgent(provider: AgentProvider, db: DB): string {
-  const s = getSettings(db);
-  return provider.id === "codex" ? s.codexPath : s.claudePath;
 }
 
 /** Build the prompt that asks the agent to address a single review comment. */

@@ -1,5 +1,4 @@
 import { getAgentProvider } from "@/lib/agents/registry";
-import type { AgentProvider } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
 import {
@@ -13,7 +12,7 @@ import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient } from "@/lib/forge/types";
 import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { repoAutomation } from "@/lib/repos/automation";
-import { getSettings } from "@/lib/settings/service";
+import { commandForAgent } from "./agent-command";
 import { spawnAgentSession } from "./agent-session";
 import type { DeploymentContext, DeploymentPlatformAdapter } from "./deployment/adapter";
 import { detectDeploymentPlatform } from "./deployment/registry";
@@ -181,12 +180,6 @@ async function advanceSession(
     console.error(`[deploy-heal] fix PR failed for session ${session.id}`, err);
     transitionDeploymentHealingSession(session.id, "escalated", {}, db);
   }
-}
-
-/** CLI path override for an agent, from global settings. */
-function commandForAgent(provider: AgentProvider, db: DB): string {
-  const s = getSettings(db);
-  return provider.id === "codex" ? s.codexPath : s.claudePath;
 }
 
 /** Build the prompt asking the agent to fix a failed deployment from its logs. */
