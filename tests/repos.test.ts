@@ -116,6 +116,27 @@ describe("repos service", () => {
     expect(cfg.priorityAuthors).toEqual(["octocat"]);
   });
 
+  it("defaults agent instructions to empty (no behavior change when unset)", () => {
+    const repo = addRepo({ path: "/ai", name: "ai" }, db);
+    expect(repo.agentInstructions ?? "").toBe("");
+  });
+
+  it("stores and updates custom agent instructions", () => {
+    const repo = addRepo(
+      { path: "/ai2", name: "ai2", agentInstructions: "Always run pnpm test." },
+      db,
+    );
+    expect(repo.agentInstructions).toBe("Always run pnpm test.");
+    const updated = updateRepo(repo.id, { agentInstructions: "Don't touch legacy/." }, db);
+    expect(updated.agentInstructions).toBe("Don't touch legacy/.");
+  });
+
+  it("rejects agent instructions that exceed the length cap", () => {
+    expect(() =>
+      addRepo({ path: "/ai3", name: "ai3", agentInstructions: "x".repeat(4001) }, db),
+    ).toThrow();
+  });
+
   it("rejects an unknown author-association value", () => {
     expect(() =>
       addRepo({ path: "/bad", name: "bad", minAuthorAssociation: "everyone" } as never, db),
