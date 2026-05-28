@@ -130,6 +130,48 @@ describe("ciBabysitter", () => {
     expect(getJob(job.id, db)?.errorMessage).toContain("no session id");
   });
 
+  it("escalates to needs_human when checks stay pending past the wait budget", async () => {
+    const job = ciRunningJob(6);
+    const { gh } = scriptedGh([[{ name: "build", state: "PENDING" }]]);
+    const resume = vi.fn(async () => {});
+    // Clock advances 60s per call; budget is 2 min, so the deadline is breached
+    // after a couple of pending polls rather than looping forever.
+    let t = 0;
+    const now = () => (t += 60_000);
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      sleep: vi.fn(),
+      now,
+      ciWaitMs: 2 * 60_000,
+      maxPolls: 1000,
+    });
+    expect(final.status).toBe("needs_human");
+    expect(resume).not.toHaveBeenCalled();
+    expect(final.errorMessage).toContain("CI did not complete in time");
+  });
+
+  it("merges within the wait budget when a pending check turns green", async () => {
+    const job = ciRunningJob(7);
+    const { gh } = scriptedGh([
+      [{ name: "build", state: "PENDING" }],
+      [{ name: "build", state: "SUCCESS" }],
+    ]);
+    let t = 0;
+    const now = () => (t += 60_000);
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: vi.fn(),
+      sleep: vi.fn(),
+      now,
+      ciWaitMs: 60 * 60_000,
+      maxPolls: 1000,
+    });
+    expect(final.status).toBe("merged");
+  });
+
   it("gives up after MAX retries -> needs_human + follow-up issue", async () => {
     const job = ciRunningJob(3);
     const { gh } = scriptedGh([[{ name: "build", state: "FAILURE" }]]);
