@@ -4,6 +4,7 @@ import { followupIssues } from "@/lib/db/schema";
 import type { PrCheck } from "@/lib/github/gh";
 import { GhClient } from "@/lib/github/gh";
 import { ciBabysitter, classifyChecks } from "@/lib/orchestrator/ci-babysitter";
+import { DEFAULT_EVIDENCE_LINES } from "@/lib/orchestrator/ci-fix-prompt";
 import { buildResumeArgs } from "@/lib/orchestrator/claude-session";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { addRepo } from "@/lib/repos/service";
@@ -170,6 +171,55 @@ describe("ciBabysitter", () => {
       maxPolls: 1000,
     });
     expect(final.status).toBe("merged");
+  });
+
+  it("feeds the resume session a line-capped, focused evidence slice", async () => {
+    const job = ciRunningJob(8);
+    // A large log whose only actionable line is a TS error buried in noise.
+    const big = [
+      ...Array.from({ length: 400 }, (_, i) => `::group::noise ${i}`),
+      "src/a.ts(3,5): error TS2322: Type 'x' is not assignable to type 'number'.",
+    ].join("\n");
+    let i = 0;
+    const runner = vi.fn(async (_cmd: string, args: string[]) => {
+      if (args[0] === "pr" && args[1] === "checks") {
+        const seq: PrCheck[][] = [
+          [{ name: "typecheck", state: "FAILURE" }],
+          [{ name: "typecheck", state: "SUCCESS" }],
+        ];
+        const checks = seq[Math.min(i, seq.length - 1)] ?? [];
+        i++;
+        return { stdout: JSON.stringify(checks), stderr: "", exitCode: 0 };
+      }
+      if (args[0] === "pr" && args[1] === "view")
+        return { stdout: JSON.stringify({ headRefName: "feature" }), stderr: "", exitCode: 0 };
+      if (args[0] === "run" && args[1] === "list")
+        return {
+          stdout: JSON.stringify([{ databaseId: 1, conclusion: "failure" }]),
+          stderr: "",
+          exitCode: 0,
+        };
+      if (args.includes("--log-failed")) return { stdout: big, stderr: "", exitCode: 0 };
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+    const gh = new GhClient("/tmp/r", runner);
+    let captured = "";
+    const resume = vi.fn(async (_j: unknown, _s: string, log: string) => {
+      captured = log;
+    });
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      sleep: vi.fn(),
+      maxPolls: 5,
+    });
+    expect(final.status).toBe("merged");
+    expect(resume).toHaveBeenCalledOnce();
+    // Bounded by lines, not just the raw 8000-char tail.
+    expect(captured.split("\n").length).toBeLessThanOrEqual(DEFAULT_EVIDENCE_LINES);
+    // The focused, actionable line survives the extraction.
+    expect(captured).toContain("error TS2322");
   });
 
   it("gives up after MAX retries -> needs_human + follow-up issue", async () => {

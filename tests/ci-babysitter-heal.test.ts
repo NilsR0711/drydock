@@ -24,6 +24,15 @@ function scriptedGh(checkSequence: PrCheck[][], failedLog = "FAIL tests/foo.test
       i++;
       return { stdout: JSON.stringify(checks), stderr: "", exitCode: 0 };
     }
+    // failedRunLog chain: pr head branch → failed run → failed-step log.
+    if (args[0] === "pr" && args[1] === "view")
+      return { stdout: JSON.stringify({ headRefName: "feature" }), stderr: "", exitCode: 0 };
+    if (args[0] === "run" && args[1] === "list")
+      return {
+        stdout: JSON.stringify([{ databaseId: 1, conclusion: "failure" }]),
+        stderr: "",
+        exitCode: 0,
+      };
     if (args.includes("--log-failed") || args.includes("--log"))
       return { stdout: failedLog, stderr: "", exitCode: 0 };
     if (args[0] === "issue" && args[1] === "create")
@@ -69,6 +78,31 @@ describe("ciBabysitter auto-heal", () => {
     expect(attempts).toHaveLength(1);
     expect(attempts[0]?.status).toBe("healed");
     expect(db.select().from(healingSessions).all()[0]?.status).toBe("healed");
+  });
+
+  it("resumes with a category-specific, focused fix prompt for a test failure", async () => {
+    const job = ciRunningJob(6);
+    const { gh } = scriptedGh(
+      [[{ name: "test", state: "FAILURE" }], [{ name: "test", state: "SUCCESS" }]],
+      ["FAIL tests/foo.test.ts > does a thing", "AssertionError: expected 1 to be 2"].join("\n"),
+    );
+    let captured = "";
+    const resume = vi.fn(async (_j: unknown, _s: string, prompt: string) => {
+      captured = prompt;
+    });
+    const headSha = vi.fn().mockResolvedValueOnce("sha-1").mockResolvedValue("sha-2");
+    await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      ...fast,
+      autoHeal: { headSha, provider: "github" },
+    });
+    expect(resume).toHaveBeenCalledOnce();
+    // Names the failing check and carries test-specific guidance + evidence.
+    expect(captured).toContain('"test"');
+    expect(captured.toLowerCase()).toMatch(/do not (delete|skip)/);
+    expect(captured).toContain("FAIL tests/foo.test.ts");
   });
 
   it("never code-heals a blocked_external failure — hands to a human, no resume", async () => {

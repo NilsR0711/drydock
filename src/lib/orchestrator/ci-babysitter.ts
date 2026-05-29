@@ -3,6 +3,7 @@ import type { Job } from "@/lib/db/schema";
 import { followupIssues } from "@/lib/db/schema";
 import type { ForgeClient, PrCheck } from "@/lib/forge/types";
 import { classifyFailure } from "./ci-failure-classifier";
+import { buildFixPrompt, DEFAULT_EVIDENCE_LINES, extractEvidence } from "./ci-fix-prompt";
 import {
   activeHealingRunCount,
   DEFAULT_HEAL_BUDGETS,
@@ -167,7 +168,10 @@ export async function ciBabysitter(
     const sessionId = job.sessionId;
     job = transitionJob(job.id, "retrying", { ciRetryCount: job.ciRetryCount + 1 }, db);
     const failedLog = await deps.gh.failedRunLog(prNumber);
-    await deps.resumeSession(job, sessionId, failedLog);
+    // Feed a focused, line-capped evidence slice instead of the raw 8000-char
+    // tail (issue #62), so the resume prompt targets the actual failure.
+    const { evidence } = extractEvidence(failedLog, DEFAULT_EVIDENCE_LINES);
+    await deps.resumeSession(job, sessionId, evidence);
     job = transitionJob(job.id, "ci_running", {}, db);
     // loop again to re-poll the now-updated PR
   }
@@ -181,11 +185,6 @@ interface PendingHeal {
   sessionId: number;
   beforeSha: string;
   beforeFailing: number;
-}
-
-/** Cap evidence fed to the agent so a giant log can't blow the prompt budget. */
-function capEvidence(log: string, maxLines: number): string {
-  return log.split("\n").slice(-maxLines).join("\n");
 }
 
 /**
@@ -313,12 +312,13 @@ async function autoHealLoop(
         job = transitionJob(job.id, "retrying", { ciRetryCount: job.ciRetryCount + 1 }, db);
 
         if (plan.action === "repair") {
-          const prompt = [
-            `CI check "${plan.target.checkName}" is failing on this PR.`,
-            "Fix only this failure, then commit and push. Failure evidence:",
-            "",
-            capEvidence(failedLog, budgets.maxEvidenceLines),
-          ].join("\n");
+          // Targeted, category-specific fix prompt with focused, line-capped
+          // evidence (issue #62) — not a generic raw-log dump.
+          const prompt = buildFixPrompt({
+            checkName: plan.target.checkName,
+            log: failedLog,
+            maxLines: budgets.maxEvidenceLines,
+          });
           await deps.resumeSession(job, sessionId, prompt);
         }
 
