@@ -93,7 +93,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 📡 **Live logs over SSE** — the agent's NDJSON output is parsed incrementally, persisted, and streamed to the browser in real time.
 
-💸 **Cost tracking** — per-job and aggregate spend from the agent's reported `total_cost_usd` (or estimated from tokens), with a **daily cost limit** that gates the driver loop and an optional **per-job cost ceiling** that aborts a single runaway session mid-stream (global default + per-repo override; off when unset).
+💸 **Cost tracking** — per-job and aggregate spend from the agent's reported `total_cost_usd` (or estimated from tokens), with a **daily cost limit** that gates the driver loop and an optional **per-job cost ceiling** that aborts a single runaway session mid-stream (global default + per-repo override; off when unset). Spend is **exportable** to CSV or JSON from the cost dashboard — per-job line items or aggregates by repo/model, scoped to a date range and repo, with totals that reconcile with the dashboard.
 
 ⏯️ **Global pause & per-repo controls** — pause everything from the navbar, pick an agent and model per repo, toggle serial vs. parallel processing, and customize the queue label.
 
@@ -260,7 +260,7 @@ project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 | `/jobs/[id]` | Job detail — live streaming log, cost & tokens |
 | `/prompts` | Versioned prompt editor |
 | `/adrs` | ADR review queue |
-| `/costs` | Cost dashboard — daily, by model, top jobs |
+| `/costs` | Cost dashboard — daily, by model, top jobs, CSV/JSON export |
 | `/settings` | Global settings |
 
 ## Project layout
@@ -364,7 +364,7 @@ UI: they refuse while draining, globally paused, or over the daily/per-repo cost
 - [x] Parallel multi-repo dashboards at a glance
 - [x] Webhook-driven issue sync (vs. polling)
 - [x] Richer CI failure classification & targeted fix prompts
-- [ ] Exportable cost reports
+- [x] Exportable cost reports
 
 Have an idea? [Open an issue](https://github.com/NilsR0711/drydock/issues).
 
