@@ -1,12 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CommandResult, CommandRunner } from "@/lib/exec/runner";
 import { EtagCache } from "@/lib/github/etag-cache";
-import { GhClient, GhError } from "@/lib/github/gh";
+import { GhClient, GhError, MAX_ISSUE_PAGES } from "@/lib/github/gh";
 import { withPriority } from "@/lib/github/priority";
 import { RateLimitError, RateLimitGovernor } from "@/lib/github/rate-limit";
 
 function fakeRunner(result: Partial<CommandResult>) {
   const impl: CommandRunner = async () => ({ stdout: "", stderr: "", exitCode: 0, ...result });
+  return vi.fn(impl);
+}
+
+/** A runner that returns a different result per successive call. */
+function sequenceRunner(results: Partial<CommandResult>[]) {
+  let i = 0;
+  const impl: CommandRunner = async () => {
+    const r = results[Math.min(i, results.length - 1)] ?? {};
+    i++;
+    return { stdout: "", stderr: "", exitCode: 0, ...r };
+  };
   return vi.fn(impl);
 }
 
@@ -73,6 +84,77 @@ describe("GhClient.listIssues", () => {
       fakeRunner({ exitCode: 1, stdout: includeResponse({ status: 500, statusText: "Boom" }) }),
     );
     await expect(gh.listIssues("x")).rejects.toBeInstanceOf(GhError);
+  });
+});
+
+describe("GhClient list pagination", () => {
+  it("follows the rel=next Link header until the list is exhausted", async () => {
+    const page1 = includeResponse({
+      status: 200,
+      headers: {
+        etag: '"p1"',
+        link: '<https://api.github.com/repositories/9/issues?page=2>; rel="next", <https://api.github.com/repositories/9/issues?page=2>; rel="last"',
+      },
+      body: JSON.stringify([restIssue({ number: 1 }), restIssue({ number: 2 })]),
+    });
+    const page2 = includeResponse({
+      status: 200,
+      body: JSON.stringify([restIssue({ number: 3 })]),
+    });
+    const runner = sequenceRunner([{ stdout: page1 }, { stdout: page2 }]);
+    const gh = new GhClient("/repo", runner);
+    const issues = await gh.listAllIssues();
+    expect(issues.map((i) => i.number)).toEqual([1, 2, 3]);
+    expect(runner).toHaveBeenCalledTimes(2);
+    const [, secondArgs] = runner.mock.calls[1] as [string, string[]];
+    expect(secondArgs[0]).toBe("api");
+    expect(secondArgs[1]).toBe("https://api.github.com/repositories/9/issues?page=2");
+    expect(secondArgs).toContain("--include");
+  });
+
+  it("does not fetch a second page when there is no next link", async () => {
+    const runner = fakeRunner({
+      stdout: includeResponse({ status: 200, body: JSON.stringify([restIssue({ number: 1 })]) }),
+    });
+    const gh = new GhClient("/repo", runner);
+    await gh.listAllIssues();
+    expect(runner).toHaveBeenCalledOnce();
+  });
+
+  it("caps pagination at MAX_ISSUE_PAGES even when every page advertises a next page", async () => {
+    const everHasNext = includeResponse({
+      status: 200,
+      headers: { link: '<https://api.github.com/repositories/9/issues?page=99>; rel="next"' },
+      body: JSON.stringify([restIssue({ number: 1 })]),
+    });
+    const runner = sequenceRunner([{ stdout: everHasNext }]);
+    const gh = new GhClient("/repo", runner);
+    await gh.listAllIssues();
+    expect(runner).toHaveBeenCalledTimes(MAX_ISSUE_PAGES);
+  });
+
+  it("replays the full multi-page list from cache on a 304", async () => {
+    const cache = new EtagCache();
+    const gov = new RateLimitGovernor();
+    const page1 = includeResponse({
+      status: 200,
+      headers: {
+        etag: '"p1"',
+        link: '<https://api.github.com/repositories/9/issues?page=2>; rel="next"',
+      },
+      body: JSON.stringify([restIssue({ number: 1 })]),
+    });
+    const page2 = includeResponse({
+      status: 200,
+      body: JSON.stringify([restIssue({ number: 2 })]),
+    });
+    const first = sequenceRunner([{ stdout: page1 }, { stdout: page2 }]);
+    await new GhClient("/repo", first, gov, cache).listAllIssues();
+
+    const second = fakeRunner({ stdout: includeResponse({ status: 304, body: "" }) });
+    const issues = await new GhClient("/repo", second, gov, cache).listAllIssues();
+    expect(issues.map((i) => i.number)).toEqual([1, 2]); // both pages served from cache
+    expect(second).toHaveBeenCalledOnce();
   });
 });
 
