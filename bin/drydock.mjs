@@ -188,7 +188,7 @@ export function planUpdate(currentVersion, latestVersion) {
  */
 export async function resolveLatestVersion(pkg, { fetchImpl = fetch } = {}) {
   try {
-    const url = `https://registry.npmjs.org/${pkg.replace("/", "%2f")}/latest`;
+    const url = `https://registry.npmjs.org/${encodeURIComponent(pkg)}/latest`;
     const res = await fetchImpl(url, {
       headers: { Accept: "application/json", "User-Agent": "drydock-update" },
     });

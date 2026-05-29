@@ -195,6 +195,17 @@ describe("resolveLatestVersion", () => {
     });
     expect(await resolveLatestVersion("@nilsr0711/drydock", { fetchImpl })).toBeNull();
   });
+
+  it("fully encodes the scoped package name in the registry URL", async () => {
+    let requested = "";
+    const fetchImpl = ((url: string) => {
+      requested = url;
+      return Promise.resolve({ ok: true, json: async () => ({ version: "0.1.2" }) });
+    }) as unknown as typeof fetch;
+    await resolveLatestVersion("@nilsr0711/drydock", { fetchImpl });
+    expect(requested).toBe("https://registry.npmjs.org/%40nilsr0711%2Fdrydock/latest");
+    expect(requested).not.toContain("@nilsr0711/drydock");
+  });
 });
 
 describe("detectInstallKind", () => {
