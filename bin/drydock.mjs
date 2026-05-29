@@ -129,20 +129,107 @@ export function detectInstallKind(packageRoot) {
   return "local";
 }
 
+/** The npm package name this CLI is published under. */
+const PACKAGE_NAME = "@nilsr0711/drydock";
+
 /** The command that updates a global install to the latest published version. */
 export function updateCommand() {
-  return { command: "npm", args: ["install", "--global", "@nilsr0711/drydock@latest"] };
+  return { command: "npm", args: ["install", "--global", `${PACKAGE_NAME}@latest`] };
+}
+
+/**
+ * Compare two `x.y.z` versions (a leading `v` is tolerated). Returns 1 if `a` is
+ * newer, -1 if older, 0 if equal. Throws if either version is unparseable so
+ * callers can fall back rather than silently mis-ordering.
+ */
+export function compareVersions(a, b) {
+  const parse = (v) => {
+    const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v).trim());
+    if (!m) throw new Error(`unparseable version: ${v}`);
+    return [Number(m[1]), Number(m[2]), Number(m[3])];
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] > pb[i]) return 1;
+    if (pa[i] < pb[i]) return -1;
+  }
+  return 0;
+}
+
+/**
+ * Decide what `drydock update` should do given the installed version and the
+ * latest published version (which may be null/unparseable when the check fails).
+ * Degrades gracefully: when the latest version can't be determined, still
+ * attempts the install rather than blocking the user.
+ *
+ * @returns {{ action: "skip" | "install", reason: string, latestVersion?: string }}
+ */
+export function planUpdate(currentVersion, latestVersion) {
+  if (!latestVersion) return { action: "install", reason: "unknown-latest" };
+  let cmp;
+  try {
+    cmp = compareVersions(latestVersion, currentVersion);
+  } catch {
+    return { action: "install", reason: "unknown-latest" };
+  }
+  if (cmp <= 0) return { action: "skip", reason: "up-to-date" };
+  return { action: "install", reason: "update-available", latestVersion };
+}
+
+/**
+ * Resolve the latest published version from the npm registry's `latest`
+ * dist-tag. Never throws: returns null on any network/HTTP/parse failure so the
+ * caller can fall back to a blind install.
+ *
+ * @param {string} pkg The (possibly scoped) package name.
+ * @param {{ fetchImpl?: typeof fetch }} [opts]
+ * @returns {Promise<string | null>}
+ */
+export async function resolveLatestVersion(pkg, { fetchImpl = fetch } = {}) {
+  try {
+    const url = `https://registry.npmjs.org/${pkg.replace("/", "%2f")}/latest`;
+    const res = await fetchImpl(url, {
+      headers: { Accept: "application/json", "User-Agent": "drydock-update" },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return typeof body?.version === "string" ? body.version : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Run the self-update, inheriting stdio so npm's progress is visible. */
-function runUpdate() {
+async function runUpdate() {
+  const current = readVersion();
+  console.error(`Current version: drydock v${current}`);
+
+  const latest = await resolveLatestVersion(PACKAGE_NAME);
+  const plan = planUpdate(current, latest);
+
+  if (plan.action === "skip") {
+    console.error(`drydock is already up to date (v${current}).`);
+    process.exit(0);
+  }
+
+  if (plan.reason === "unknown-latest") {
+    console.error("Could not determine the latest version; attempting update anyway…");
+  } else {
+    console.error(`Updating drydock ${current} → ${plan.latestVersion} …`);
+  }
+
   const { command, args } = updateCommand();
-  console.error(`Updating drydock: ${command} ${args.join(" ")}`);
   const child = spawn(command, args, {
     shell: process.platform === "win32",
     stdio: "inherit",
   });
-  child.on("exit", (code) => process.exit(code ?? 0));
+  child.on("exit", (code) => {
+    if (code === 0 && plan.reason === "update-available") {
+      console.error(`Updated to drydock v${plan.latestVersion}.`);
+    }
+    process.exit(code ?? 0);
+  });
   child.on("error", (err) => {
     console.error(`Update failed: ${err.message}`);
     process.exit(1);
@@ -244,7 +331,7 @@ async function main(argv) {
       console.log(readVersion());
       return;
     case "update":
-      runUpdate();
+      await runUpdate();
       return;
     default:
       await serve(directive);

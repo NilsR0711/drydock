@@ -191,7 +191,7 @@ add a repository, and start queuing issues.
 drydock --help         # all flags
 drydock --version      # installed version
 drydock --port 8080 --host 0.0.0.0   # bind elsewhere (defaults: 127.0.0.1:3737)
-drydock update         # update a global install to the latest version
+drydock update         # update a global install (reports current → latest, skips if already current)
 ```
 
 You still need the `claude` and (for GitHub) `gh` CLIs on `PATH` — see [Requirements](#requirements).
