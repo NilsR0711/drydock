@@ -51,6 +51,14 @@ interface ProjectRef {
   encodedPath: string;
 }
 
+/**
+ * Hard cap on the number of issue-list pages followed in a single fetch. At 100
+ * issues per page this bounds a sweep at 10k open issues — far above any real
+ * project — so a misbehaving `X-Next-Page` header can never spin the loop
+ * indefinitely.
+ */
+export const MAX_ISSUE_PAGES = 100;
+
 /** Map a GitLab CI job status onto the uppercase state vocabulary the CI
  * babysitter's `classifyChecks` understands (FAILURE/pending/passed buckets). */
 function mapJobStatus(status: string): string {
@@ -153,17 +161,33 @@ export class GitlabForge implements ForgeClient {
   }
 
   async listIssues(label: string): Promise<ForgeIssue[]> {
-    const res = await this.mutate("GET", "/issues", {
-      query: { state: "opened", labels: label, per_page: "100" },
-    });
-    return parseIssues(res.body);
+    return this.listIssuesPaginated({ state: "opened", labels: label });
   }
 
   async listAllIssues(): Promise<ForgeIssue[]> {
-    const res = await this.mutate("GET", "/issues", {
-      query: { state: "opened", per_page: "100" },
-    });
-    return parseIssues(res.body);
+    return this.listIssuesPaginated({ state: "opened" });
+  }
+
+  /**
+   * Fetch every page of an issues list, following GitLab's `X-Next-Page`
+   * response header (empty when no further page exists), bounded by
+   * {@link MAX_ISSUE_PAGES} so a misbehaving header cannot loop forever.
+   */
+  private async listIssuesPaginated(query: Record<string, string>): Promise<ForgeIssue[]> {
+    const all: ForgeIssue[] = [];
+    let page = 1;
+    for (let i = 0; i < MAX_ISSUE_PAGES; i++) {
+      const res = await this.mutate("GET", "/issues", {
+        query: { ...query, per_page: "100", page: String(page) },
+      });
+      all.push(...parseIssues(res.body));
+      const next = res.headers?.["x-next-page"];
+      if (!next) break;
+      const nextPage = Number(next);
+      if (!Number.isInteger(nextPage) || nextPage <= page) break;
+      page = nextPage;
+    }
+    return all;
   }
 
   async viewIssue(issueNumber: number): Promise<IssueDetail> {

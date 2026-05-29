@@ -2,6 +2,11 @@ export interface HttpResponse {
   status: number;
   ok: boolean;
   body: string;
+  /**
+   * Response headers with lower-cased names. Optional so test fakes need only
+   * populate what they assert on; pagination reads `x-next-page` from here.
+   */
+  headers?: Record<string, string>;
 }
 
 export interface HttpRequest {
@@ -28,5 +33,9 @@ export const fetchHttp: HttpClient = async (url, init) => {
     body: init?.body,
   });
   const body = await res.text();
-  return { status: res.status, ok: res.ok, body };
+  const headers: Record<string, string> = {};
+  res.headers.forEach((value, key) => {
+    headers[key.toLowerCase()] = value;
+  });
+  return { status: res.status, ok: res.ok, body, headers };
 };
