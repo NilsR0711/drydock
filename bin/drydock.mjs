@@ -6,7 +6,7 @@
 // step or TypeScript runtime so it works straight from the published tarball.
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -251,8 +251,27 @@ async function main(argv) {
   }
 }
 
+/**
+ * Decide whether this module is the program entry point. A plain string compare
+ * against `process.argv[1]` breaks for global/npx installs, where the bin is a
+ * symlink in a bin directory and argv[1] is that link rather than the real file.
+ * Resolving the entry path through symlinks (realpath) makes the two comparable,
+ * so `drydock`, `drydock --version`, etc. actually run when installed.
+ *
+ * @param {string} modulePath Absolute path to this module (resolved import.meta.url).
+ * @param {string | undefined} entryPath The invoked entry path (process.argv[1]).
+ */
+export function isMainModule(modulePath, entryPath) {
+  if (!entryPath) return false;
+  try {
+    return modulePath === realpathSync(entryPath);
+  } catch {
+    return false;
+  }
+}
+
 // Only run when executed directly, not when imported by tests.
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (isMainModule(fileURLToPath(import.meta.url), process.argv[1])) {
   main(process.argv.slice(2)).catch((err) => {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);

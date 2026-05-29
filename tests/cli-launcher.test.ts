@@ -1,13 +1,18 @@
-import { homedir } from "node:os";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   detectInstallKind,
+  isMainModule,
   parseArgs,
   resolveDataDir,
   resolveDbPath,
   updateCommand,
 } from "../bin/drydock.mjs";
+
+const DRYDOCK_BIN = fileURLToPath(new URL("../bin/drydock.mjs", import.meta.url));
 
 describe("parseArgs", () => {
   it("defaults to serving on 127.0.0.1:3737 without opening a browser", () => {
@@ -72,6 +77,36 @@ describe("parseArgs", () => {
 
   it("lets --help take precedence over `update`", () => {
     expect(parseArgs(["update", "--help"])).toEqual({ mode: "help" });
+  });
+});
+
+describe("isMainModule", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "drydock-main-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("treats the module as main when invoked directly", () => {
+    expect(isMainModule(DRYDOCK_BIN, DRYDOCK_BIN)).toBe(true);
+  });
+
+  it("treats the module as main when invoked through a symlink (global/npx install)", () => {
+    const link = join(dir, "drydock");
+    symlinkSync(DRYDOCK_BIN, link);
+    expect(isMainModule(DRYDOCK_BIN, link)).toBe(true);
+  });
+
+  it("is not main when the entry path points elsewhere", () => {
+    expect(isMainModule(DRYDOCK_BIN, join(dir, "other.mjs"))).toBe(false);
+  });
+
+  it("is not main when there is no entry path", () => {
+    expect(isMainModule(DRYDOCK_BIN, undefined)).toBe(false);
   });
 });
 
