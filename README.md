@@ -97,6 +97,8 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 ⏯️ **Global pause & per-repo controls** — pause everything from the navbar, pick an agent and model per repo, toggle serial vs. parallel processing, and customize the queue label.
 
+🪝 **Webhook-driven issue sync** — opt in per repo to receive issue events instead of waiting for the next poll. Set a secret on a repo and Drydock exposes a signature-verified receiver (`/api/webhooks/<id>`); a validated GitHub/GitLab issue event triggers a targeted, debounced sync so new issues surface near-instantly. Polling stays on as the default fallback and shares the same idempotent reconcile, so a change is never double-processed. Since Drydock binds `127.0.0.1`, expose the URL through a tunnel (e.g. `cloudflared`, `ngrok`). See [ADR 029](docs/adr/029-webhook-issue-sync.md).
+
 🔔 **External notifications** — get pinged on Telegram, Slack (incoming webhook) and email (SMTP) for the lifecycle events you care about (job needs human, job failed, PR opened, PR merged, release published, daily cost limit reached, automation paused/draining). Each channel is configured independently, every event has a per-event opt-in, and a one-click test button verifies setup. Delivery is best-effort and never blocks the loop; secrets are redacted from logs. See [ADR 024](docs/adr/024-external-notifications.md).
 
 🆙 **Update-available notice** — a passive, dismissible navbar banner appears when a newer Drydock release is published. The check queries the latest stable GitHub release (drafts/prereleases skipped), is cached for an hour, and dedupes concurrent checks onto a single upstream call; any network or parse error advertises no update, so a transient hiccup never raises a false alarm. Global installs get a `drydock update` hint.
@@ -360,7 +362,7 @@ UI: they refuse while draining, globally paused, or over the daily/per-repo cost
 ## Roadmap
 
 - [x] Parallel multi-repo dashboards at a glance
-- [ ] Webhook-driven issue sync (vs. polling)
+- [x] Webhook-driven issue sync (vs. polling)
 - [ ] Richer CI failure classification & targeted fix prompts
 - [ ] Exportable cost reports
 

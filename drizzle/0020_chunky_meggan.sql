@@ -1,0 +1,1 @@
+ALTER TABLE `repos` ADD `webhook_secret` text;
