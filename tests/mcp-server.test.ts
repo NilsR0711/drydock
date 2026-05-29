@@ -52,6 +52,24 @@ describe("MCP server", () => {
     expect(parsed[0]?.name).toBe("via-mcp");
   });
 
+  it("rejects an unknown defaultModel via update_settings (issue #93)", async () => {
+    active = await connectClient();
+    const result = (await active.client.callTool({
+      name: "update_settings",
+      arguments: { defaultModel: "gpt-nonexistent-99" },
+    })) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
+    expect(result.isError).toBe(true);
+  });
+
+  it("rejects an unknown defaultModel via add_repo (issue #93)", async () => {
+    active = await connectClient();
+    const result = (await active.client.callTool({
+      name: "add_repo",
+      arguments: { path: "/tmp/r", name: "r", defaultModel: "gpt-nonexistent-99" },
+    })) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
+    expect(result.isError).toBe(true);
+  });
+
   it("surfaces handler errors as MCP tool errors", async () => {
     active = await connectClient();
     const result = (await active.client.callTool({
