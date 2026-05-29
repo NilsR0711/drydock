@@ -71,7 +71,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 🛂 **Opt-in autonomous triage** — per repo, let Drydock label incoming issues (deterministic keyword classifier, whitelist-only output) and auto-process the ones that are *ready* and not blocked. Off by default; gated by author association for public repos, a per-issue attempt limit, and all the usual cost/concurrency limits. Never auto-merges.
 
-🔧 **CI babysitting & auto-merge** — polls `gh pr checks`, merges on green, and on red resumes the session with a CI-fix prompt (up to **3 retries**), then files a follow-up issue and hands off.
+🔧 **CI babysitting & auto-merge** — polls `gh pr checks`, merges on green, and on red resumes the session with a CI-fix prompt (up to **3 retries**), then files a follow-up issue and hands off. The failed log is classified by failure type (test, type error, lint, build, dependency, timeout, flaky) and reduced to a focused, line-capped evidence slice so the fix prompt targets the actual failure.
 
 🩹 **Opt-in CI auto-heal** — per repo, turn the failure path into a structured classify → fix → verify loop: failing checks are bucketed (healable / external / flaky / unknown), only healable ones get a targeted fix, and each attempt is verified for a real, improving change. External and AI-review checks are never code-healed. Hard budgets (per-session and per-fingerprint attempts, a cooldown, and a concurrency cap) keep it bounded. Off by default; never auto-merges.
 
@@ -363,7 +363,7 @@ UI: they refuse while draining, globally paused, or over the daily/per-repo cost
 
 - [x] Parallel multi-repo dashboards at a glance
 - [x] Webhook-driven issue sync (vs. polling)
-- [ ] Richer CI failure classification & targeted fix prompts
+- [x] Richer CI failure classification & targeted fix prompts
 - [ ] Exportable cost reports
 
 Have an idea? [Open an issue](https://github.com/NilsR0711/drydock/issues).
