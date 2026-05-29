@@ -37,3 +37,7 @@ export function modelLabel(id: string | null | undefined): string {
   if (!id) return "—";
   return MODELS.find((m) => m.id === id)?.label ?? id;
 }
+
+export function isKnownModelId(id: string): boolean {
+  return MODELS.some((m) => m.id === id);
+}
