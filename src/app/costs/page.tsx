@@ -1,6 +1,8 @@
 import { CostChart } from "@/components/cost-chart";
+import { CostExportControls } from "@/components/cost-export-controls";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { costByModel, dailyCosts, topJobs } from "@/lib/db/cost-queries";
+import { listRepos } from "@/lib/db/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -9,13 +11,22 @@ export default function CostsPage() {
   const byModel = costByModel();
   const top = topJobs(10);
   const total = daily.reduce((s, d) => s + d.costUsd, 0);
+  const repos = listRepos().map((r) => ({ id: r.id, name: r.name }));
 
   return (
     <div className="space-y-6">
-      <div className="flex items-baseline gap-3">
+      <div className="flex flex-wrap items-baseline gap-3">
         <h1 className="text-2xl font-bold">Costs</h1>
         <span className="text-sm text-muted-foreground">Total: ${total.toFixed(4)}</span>
       </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Export</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <CostExportControls repos={repos} />
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
           <CardTitle>Daily cost</CardTitle>
