@@ -8,6 +8,7 @@ import {
   queueIssue,
   syncRepoIssues,
 } from "@/lib/issues/service";
+import { isKnownModelId } from "@/lib/models";
 import { getJob, listJobs, transitionJob } from "@/lib/orchestrator/jobs";
 import { isDraining, setDrainMode } from "@/lib/orchestrator/runtime";
 import { addRepo } from "@/lib/repos/service";
@@ -76,7 +77,11 @@ const addRepoShape = {
   name: z.string().min(1),
   defaultBranch: z.string().min(1).optional(),
   platform: z.enum(["github", "gitlab"]).optional(),
-  defaultModel: z.string().min(1).optional(),
+  defaultModel: z
+    .string()
+    .min(1)
+    .refine(isKnownModelId, { message: "unknown model id" })
+    .optional(),
   dailyCostLimitUsd: z.number().nonnegative().optional(),
 } satisfies ZodRawShape;
 
@@ -101,7 +106,11 @@ const updateSettingsShape = {
   pollIntervalSec: z.number().int().positive().optional(),
   maxParallelJobs: z.number().int().positive().optional(),
   maxTurns: z.number().int().positive().optional(),
-  defaultModel: z.string().min(1).optional(),
+  defaultModel: z
+    .string()
+    .min(1)
+    .refine(isKnownModelId, { message: "unknown model id" })
+    .optional(),
   defaultAgent: z.enum(["claude", "codex"]).optional(),
   retentionDays: z.number().int().positive().optional(),
 } satisfies ZodRawShape;

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
+import { MODELS } from "@/lib/models";
 import { addRepo } from "@/lib/repos/service";
 import { getSettings, jobsAllowed, repoJobsAllowed, saveSettings } from "@/lib/settings/service";
 
@@ -39,6 +40,17 @@ describe("settings", () => {
 
   it("rejects a negative per-job cost ceiling (issue #57)", () => {
     expect(() => saveSettings({ maxJobCostUsd: -1 }, db)).toThrow();
+  });
+
+  it("rejects an unknown defaultModel id (issue #93)", () => {
+    expect(() => saveSettings({ defaultModel: "claude-nonexistent-99" }, db)).toThrow();
+  });
+
+  it("accepts every known model id in defaultModel (issue #93)", () => {
+    for (const m of MODELS) {
+      saveSettings({ defaultModel: m.id }, db);
+      expect(getSettings(db).defaultModel).toBe(m.id);
+    }
   });
 
   it("defaults release management to off and persists an override (issue #59)", () => {

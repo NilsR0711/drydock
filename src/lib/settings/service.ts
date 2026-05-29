@@ -3,6 +3,7 @@ import { z } from "zod";
 import { type DB, getDb } from "@/lib/db/client";
 import { todayCost } from "@/lib/db/cost-queries";
 import { repos, settings } from "@/lib/db/schema";
+import { isKnownModelId } from "@/lib/models";
 import { NOTIFICATION_EVENTS } from "@/lib/notify/events";
 
 export const settingsSchema = z.object({
@@ -31,7 +32,10 @@ export const settingsSchema = z.object({
   // release pipeline to run for that repo. Cutting a public release is hard to
   // reverse, so the feature ships gated and previewable.
   releaseManagementEnabled: z.boolean().default(false),
-  defaultModel: z.string().default("claude-opus-4-8"),
+  defaultModel: z
+    .string()
+    .refine(isKnownModelId, { message: "unknown model id" })
+    .default("claude-opus-4-8"),
   defaultAgent: z.enum(["claude", "codex"]).default("claude"),
   claudePath: z.string().default("claude"),
   codexPath: z.string().default("codex"),

@@ -19,11 +19,20 @@ export const PRICING: Record<string, ModelPrice> = {
   "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5 },
 };
 
-const DEFAULT_PRICE: ModelPrice = PRICING["claude-sonnet-4-5"] as ModelPrice;
+/** The most expensive entry in PRICING by output rate — used as a fail-safe fallback. */
+export const MAX_PRICE: ModelPrice = Object.values(PRICING).reduce(
+  (max, p) => (p.outputPerMTok > max.outputPerMTok ? p : max),
+  { inputPerMTok: 0, outputPerMTok: 0 },
+);
 
 export function priceForModel(model: string | null | undefined): ModelPrice {
-  if (!model) return DEFAULT_PRICE;
-  return PRICING[model] ?? DEFAULT_PRICE;
+  if (!model) return MAX_PRICE;
+  const known = PRICING[model];
+  if (known) return known;
+  console.warn(
+    `[drydock] Unknown model id "${model}" — using max-priced fallback to avoid under-counting cost`,
+  );
+  return MAX_PRICE;
 }
 
 /** Estimate cost in USD from token counts and the model's price. */

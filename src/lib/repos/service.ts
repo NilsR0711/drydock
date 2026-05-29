@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { type DB, getDb } from "@/lib/db/client";
 import { type Repo, repos } from "@/lib/db/schema";
+import { isKnownModelId } from "@/lib/models";
 import { AGENT_INSTRUCTIONS_MAX_CHARS } from "@/lib/repos/agent-instructions";
 
 /**
@@ -23,7 +24,11 @@ export const repoInputSchema = z.object({
   queueLabel: z.string().min(1).default("drydock:queue"),
   workingLabel: z.string().min(1).default("drydock:working"),
   needsHumanLabel: z.string().min(1).default("drydock:needs-human"),
-  defaultModel: z.string().min(1).default("claude-opus-4-8"),
+  defaultModel: z
+    .string()
+    .min(1)
+    .refine(isKnownModelId, { message: "unknown model id" })
+    .default("claude-opus-4-8"),
   agent: z.enum(["claude", "codex"]).default("claude"),
   platform: z.enum(["github", "gitlab"]).default("github"),
   apiBaseUrl: z.string().nullish(),

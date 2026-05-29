@@ -162,6 +162,17 @@ describe("repos service", () => {
     ).toThrow();
   });
 
+  it("rejects an unknown defaultModel id in addRepo (issue #93)", () => {
+    expect(() =>
+      addRepo({ path: "/bad-model", name: "x", defaultModel: "claude-fake-99" }, db),
+    ).toThrow();
+  });
+
+  it("rejects an unknown defaultModel id in updateRepo (issue #93)", () => {
+    const repo = addRepo({ path: "/upd-model", name: "upd" }, db);
+    expect(() => updateRepo(repo.id, { defaultModel: "claude-fake-99" }, db)).toThrow();
+  });
+
   it("rejects an unknown author-association value", () => {
     expect(() =>
       addRepo({ path: "/bad", name: "bad", minAuthorAssociation: "everyone" } as never, db),

@@ -21,11 +21,20 @@ export const CODEX_PRICING: Record<string, ModelPrice> = {
   "gpt-5-mini": { inputPerMTok: 0.25, outputPerMTok: 2 },
 };
 
-const CODEX_DEFAULT_PRICE: ModelPrice = CODEX_PRICING[CODEX_DEFAULT_MODEL] as ModelPrice;
+/** The most expensive entry in CODEX_PRICING by output rate — used as a fail-safe fallback. */
+export const CODEX_MAX_PRICE: ModelPrice = Object.values(CODEX_PRICING).reduce(
+  (max, p) => (p.outputPerMTok > max.outputPerMTok ? p : max),
+  { inputPerMTok: 0, outputPerMTok: 0 },
+);
 
 export function codexPriceForModel(model: string | null | undefined): ModelPrice {
-  if (!model) return CODEX_DEFAULT_PRICE;
-  return CODEX_PRICING[model] ?? CODEX_DEFAULT_PRICE;
+  if (!model) return CODEX_MAX_PRICE;
+  const known = CODEX_PRICING[model];
+  if (known) return known;
+  console.warn(
+    `[drydock] Unknown codex model id "${model}" — using max-priced fallback to avoid under-counting cost`,
+  );
+  return CODEX_MAX_PRICE;
 }
 
 function estimateCodexCost(

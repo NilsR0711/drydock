@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { AgentSelect } from "@/components/agent-select";
+import { ModelSelect } from "@/components/model-select";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import type { AgentId } from "@/lib/agents/types";
@@ -142,10 +143,10 @@ export function SettingsForm({ initial }: { initial: Settings }) {
         <AgentSelect value={s.defaultAgent} onChange={(v: AgentId) => set("defaultAgent", v)} />
       </Field>
       <Field label="Default model">
-        <input
+        <ModelSelect
           value={s.defaultModel}
-          onChange={(e) => set("defaultModel", e.target.value)}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          onChange={(v) => set("defaultModel", v)}
+          agent={s.defaultAgent as AgentId}
         />
       </Field>
       <Field label="claude CLI path">
