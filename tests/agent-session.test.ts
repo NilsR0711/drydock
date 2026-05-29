@@ -81,10 +81,15 @@ describe("spawnAgentSession", () => {
   it("bounds a never-resolving runner by the wall-clock timeout and aborts it (issue #47)", async () => {
     const job = createJob({ repoId, issueNumber: 5, agent: "codex" }, db);
     let aborted = false;
+    let resolveDone: (code: number) => void;
+    const done = new Promise<number>((res) => {
+      resolveDone = res;
+    });
     const hangingRunner: StreamRunner = () => ({
-      done: new Promise<number>(() => {}), // never resolves
+      done,
       abort: () => {
         aborted = true;
+        resolveDone(0); // resolve done when aborted so drain completes immediately
       },
     });
     const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
@@ -124,10 +129,15 @@ describe("spawnAgentSession", () => {
     let aborted = false;
     const hangingRunner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks) => {
       cb.onStdout(assistantUsage(1000)); // 1000 tok → $1.00, over the $0.50 cap
+      let resolveDone: (code: number) => void;
+      const done = new Promise<number>((res) => {
+        resolveDone = res;
+      });
       return {
-        done: new Promise<number>(() => {}), // never resolves on its own
+        done,
         abort: () => {
           aborted = true;
+          resolveDone(0); // resolve done when aborted so drain completes immediately
         },
       };
     };
@@ -253,10 +263,15 @@ describe("resumeAgentSession fallback", () => {
     })}\n`;
     const hangingRunner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks) => {
       cb.onStdout(assistant);
+      let resolveDone: (code: number) => void;
+      const done = new Promise<number>((res) => {
+        resolveDone = res;
+      });
       return {
-        done: new Promise<number>(() => {}),
+        done,
         abort: () => {
           aborted = true;
+          resolveDone(0); // resolve done when aborted so drain completes immediately
         },
       };
     };
@@ -274,10 +289,15 @@ describe("resumeAgentSession fallback", () => {
   it("bounds a never-resolving resume runner and aborts it (issue #47)", async () => {
     const job = createJob({ repoId, issueNumber: 7, agent: "codex" }, db);
     let aborted = false;
+    let resolveDone: (code: number) => void;
+    const done = new Promise<number>((res) => {
+      resolveDone = res;
+    });
     const hangingRunner: StreamRunner = () => ({
-      done: new Promise<number>(() => {}),
+      done,
       abort: () => {
         aborted = true;
+        resolveDone(0); // resolve done when aborted so drain completes immediately
       },
     });
     const res = await resumeAgentSession(getJob(job.id, db) as never, "th-1", "CI log", "/work", {
@@ -288,6 +308,117 @@ describe("resumeAgentSession fallback", () => {
     });
     expect(res.timedOut).toBe(true);
     expect(aborted).toBe(true);
+  });
+});
+
+describe("grace-window drain after force-abort (issue #97)", () => {
+  // Prices output tokens at a flat $0.001 each so costs are deterministic.
+  const pricedProvider: AgentProvider = {
+    ...codexProvider,
+    createParser: () => new StreamJsonParser(),
+    estimateCost: (_m, _in, out) => out * 0.001,
+  };
+
+  function assistantUsage(outputTokens: number): string {
+    return `${JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "working" }],
+        usage: { output_tokens: outputTokens },
+      },
+    })}\n`;
+  }
+
+  it("includes grace-window tokens in persisted cost after cost-cap abort (spawn)", async () => {
+    // Initial chunk: 600 tok → $0.60, crosses the $0.50 cap → costTripped fires, abort() called.
+    // abort() schedules (via Promise.resolve().then) a late chunk of 400 more tokens and
+    // then resolves done. With the fix the session waits for done before finalising cost,
+    // so the total should be 1000 tok → $1.00. With the current code it is ~$0.60.
+    const job = createJob({ repoId, issueNumber: 30, agent: "codex" }, db);
+
+    let resolvesDone!: (code: number) => void;
+    let capturedOnStdout!: (chunk: string) => void;
+
+    const graceRunner: StreamRunner = (_cmd, _args, _cwd, cb) => {
+      capturedOnStdout = cb.onStdout;
+      // Emit the first chunk synchronously — this crosses the cap.
+      cb.onStdout(assistantUsage(600));
+      return {
+        done: new Promise<number>((res) => {
+          resolvesDone = res;
+        }),
+        abort: () => {
+          // Simulate the grace window: after abort the process emits a bit more
+          // output before exiting. setTimeout(0) ensures this fires in a later
+          // macrotask — after awaitBounded has already resolved and returned to
+          // spawnAgentSession. With the current code spawnAgentSession finalises
+          // cost before this fires; the fix must await done even after abort.
+          setTimeout(() => {
+            capturedOnStdout(assistantUsage(400));
+            resolvesDone(0);
+          }, 0);
+        },
+      };
+    };
+
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      provider: pricedProvider,
+      runner: graceRunner,
+      costCapUsd: 0.5,
+    });
+
+    expect(res.costExceeded).toBe(true);
+    // 1000 tokens × $0.001 = $1.00 — only true once the fix is in place.
+    expect(res.costUsd).toBeCloseTo(1.0, 5);
+    expect(getJob(job.id, db)?.costUsd).toBeCloseTo(1.0, 5);
+  });
+
+  it("includes grace-window tokens in persisted cost after cost-cap abort (resume)", async () => {
+    // Same scenario as above but exercised through resumeAgentSession.
+    const job = createJob({ repoId, issueNumber: 31, agent: "codex" }, db);
+
+    let resolvesDone!: (code: number) => void;
+    let capturedOnStdout!: (chunk: string) => void;
+
+    const graceRunner: StreamRunner = (_cmd, _args, _cwd, cb) => {
+      capturedOnStdout = cb.onStdout;
+      cb.onStdout(assistantUsage(600));
+      return {
+        done: new Promise<number>((res) => {
+          resolvesDone = res;
+        }),
+        abort: () => {
+          // Simulate the grace window: fires in a later macrotask so it lands
+          // after the current awaitBounded promise has already resolved.
+          setTimeout(() => {
+            capturedOnStdout(assistantUsage(400));
+            resolvesDone(0);
+          }, 0);
+        },
+      };
+    };
+
+    const res = await resumeAgentSession(
+      getJob(job.id, db) as never,
+      "th-grace",
+      "CI log",
+      "/tmp/r",
+      {
+        db,
+        broker: new LogBroker(db),
+        provider: pricedProvider,
+        runner: graceRunner,
+        costCapUsd: 0.5,
+      },
+    );
+
+    expect(res.costExceeded).toBe(true);
+    // 1000 tokens × $0.001 = $1.00 — only true once the fix is in place.
+    expect(res.costUsd).toBeCloseTo(1.0, 5);
+    expect(getJob(job.id, db)?.costUsd).toBeCloseTo(1.0, 5);
   });
 });
 
@@ -318,10 +449,15 @@ describe("resumeAgentSession cumulative cost guard (issue #94)", () => {
     let aborted = false;
     const hangingRunner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks) => {
       cb.onStdout(assistantUsage(150));
+      let resolveDone: (code: number) => void;
+      const done = new Promise<number>((res) => {
+        resolveDone = res;
+      });
       return {
-        done: new Promise<number>(() => {}),
+        done,
         abort: () => {
           aborted = true;
+          resolveDone(0); // resolve done when aborted so drain completes immediately
         },
       };
     };
@@ -369,10 +505,15 @@ describe("resumeAgentSession cumulative cost guard (issue #94)", () => {
     let aborted = false;
     const hangingRunner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks) => {
       cb.onStdout(assistantUsage(1));
+      let resolveDone: (code: number) => void;
+      const done = new Promise<number>((res) => {
+        resolveDone = res;
+      });
       return {
-        done: new Promise<number>(() => {}),
+        done,
         abort: () => {
           aborted = true;
+          resolveDone(0); // resolve done when aborted so drain completes immediately
         },
       };
     };
