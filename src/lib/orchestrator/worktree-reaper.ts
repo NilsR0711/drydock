@@ -9,6 +9,10 @@ import { TERMINAL_STATES } from "./state-machine";
 
 /** Worktree directory name for a per-job worktree, e.g. `job-42`. */
 const JOB_DIR = /^job-(\d+)$/;
+/** Worktree directory name for a review-feedback worktree, e.g. `fb-42-thread-1`. */
+const FB_DIR = /^fb-(\d+)-/;
+/** Worktree directory name for a deployment-healing worktree, e.g. `dh-42-abc1234`. */
+const DH_DIR = /^dh-(\d+)-/;
 
 export interface ReapDeps {
   db?: DB;
@@ -36,9 +40,10 @@ function liveJobIds(db: DB): Set<number> {
  *
  * On startup — alongside the DB-level crash recovery — this sweeps every managed
  * repo: it `git worktree prune`s dangling registrations, then deletes any
- * `job-<id>` directory whose job no longer exists or has reached a terminal
- * state. Directories for live (non-terminal) jobs are never touched, so an
- * in-flight or resumable job keeps its worktree. Returns the number reaped.
+ * `job-<id>`, `fb-<id>-*`, and `dh-<id>-*` directories whose job no longer
+ * exists or has reached a terminal state. Directories for live (non-terminal)
+ * jobs are never touched, so an in-flight or resumable job keeps its worktree.
+ * Returns the number reaped.
  *
  * Best-effort throughout: a failing git call or unreadable repo directory is
  * logged and skipped rather than aborting the sweep.
@@ -65,8 +70,8 @@ export async function reapOrphanedWorktrees(deps: ReapDeps = {}): Promise<number
     }
 
     for (const entry of entries) {
-      const match = JOB_DIR.exec(entry);
-      if (!match) continue; // only per-job worktrees are reaped here
+      const match = JOB_DIR.exec(entry) ?? FB_DIR.exec(entry) ?? DH_DIR.exec(entry);
+      if (!match) continue; // only managed worktrees are reaped here
       if (live.has(Number(match[1]))) continue; // guard: live job, never touch
 
       const path = join(dir, entry);
