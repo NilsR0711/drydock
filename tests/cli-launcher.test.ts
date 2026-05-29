@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  assertSafeHost,
   compareVersions,
   detectInstallKind,
+  isLoopbackHost,
   isMainModule,
   parseArgs,
   planUpdate,
@@ -256,6 +258,72 @@ describe("resolveDbPath", () => {
   it("honours an explicit DRYDOCK_DB override regardless of the data dir", () => {
     expect(resolveDbPath({ env: { DRYDOCK_DB: "/tmp/custom.db" }, home: "/home/jane" })).toBe(
       "/tmp/custom.db",
+    );
+  });
+});
+
+describe("isLoopbackHost", () => {
+  it("recognises 127.0.0.1 as loopback", () => {
+    expect(isLoopbackHost("127.0.0.1")).toBe(true);
+  });
+
+  it("recognises ::1 as loopback", () => {
+    expect(isLoopbackHost("::1")).toBe(true);
+  });
+
+  it("recognises localhost as loopback", () => {
+    expect(isLoopbackHost("localhost")).toBe(true);
+  });
+
+  it("recognises 0.0.0.0 as non-loopback", () => {
+    expect(isLoopbackHost("0.0.0.0")).toBe(false);
+  });
+
+  it("recognises a LAN address as non-loopback", () => {
+    expect(isLoopbackHost("192.168.1.100")).toBe(false);
+  });
+
+  it("recognises an externally routable IPv6 address as non-loopback", () => {
+    expect(isLoopbackHost("::")).toBe(false);
+  });
+});
+
+describe("assertSafeHost", () => {
+  it("allows 127.0.0.1 without DRYDOCK_ALLOW_REMOTE", () => {
+    expect(() => assertSafeHost("127.0.0.1", {})).not.toThrow();
+  });
+
+  it("allows ::1 without DRYDOCK_ALLOW_REMOTE", () => {
+    expect(() => assertSafeHost("::1", {})).not.toThrow();
+  });
+
+  it("allows localhost without DRYDOCK_ALLOW_REMOTE", () => {
+    expect(() => assertSafeHost("localhost", {})).not.toThrow();
+  });
+
+  it("refuses 0.0.0.0 without DRYDOCK_ALLOW_REMOTE and names the host in the error", () => {
+    expect(() => assertSafeHost("0.0.0.0", {})).toThrow(/0\.0\.0\.0/);
+  });
+
+  it("refuses 0.0.0.0 and mentions DRYDOCK_ALLOW_REMOTE in the error", () => {
+    expect(() => assertSafeHost("0.0.0.0", {})).toThrow(/DRYDOCK_ALLOW_REMOTE/);
+  });
+
+  it("refuses a LAN address without opt-in and names the host", () => {
+    expect(() => assertSafeHost("192.168.1.1", {})).toThrow(/192\.168\.1\.1/);
+  });
+
+  it("allows 0.0.0.0 when DRYDOCK_ALLOW_REMOTE=1", () => {
+    expect(() => assertSafeHost("0.0.0.0", { DRYDOCK_ALLOW_REMOTE: "1" })).not.toThrow();
+  });
+
+  it("allows a LAN address when DRYDOCK_ALLOW_REMOTE=1", () => {
+    expect(() => assertSafeHost("192.168.1.1", { DRYDOCK_ALLOW_REMOTE: "1" })).not.toThrow();
+  });
+
+  it("still refuses when DRYDOCK_ALLOW_REMOTE is set to an empty string", () => {
+    expect(() => assertSafeHost("0.0.0.0", { DRYDOCK_ALLOW_REMOTE: "" })).toThrow(
+      /DRYDOCK_ALLOW_REMOTE/,
     );
   });
 });

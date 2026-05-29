@@ -190,7 +190,9 @@ add a repository, and start queuing issues.
 ```bash
 drydock --help         # all flags
 drydock --version      # installed version
-drydock --port 8080 --host 0.0.0.0   # bind elsewhere (defaults: 127.0.0.1:3737)
+drydock --port 8080                   # change port (default: 3737)
+# Non-loopback binds require an explicit opt-in because the dashboard has no auth:
+DRYDOCK_ALLOW_REMOTE=1 drydock --host 0.0.0.0 --port 8080
 drydock update         # update a global install (reports current → latest, skips if already current)
 ```
 
