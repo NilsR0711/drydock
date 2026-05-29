@@ -17,7 +17,12 @@ import { commandForAgent } from "./agent-command";
 import { type AgentSessionResult, resumeAgentSession, spawnAgentSession } from "./agent-session";
 import { ciBabysitter } from "./ci-babysitter";
 import { getJob, recordEvent, transitionJob } from "./jobs";
-import { markSubtasksDone, markSubtasksWorking, subtaskPromptSection } from "./subtask-driver";
+import {
+  markSubtasksDone,
+  markSubtasksParked,
+  markSubtasksWorking,
+  subtaskPromptSection,
+} from "./subtask-driver";
 import type { SubtaskStatus } from "./subtask-state";
 import { runVerificationPass } from "./verify-driver";
 
@@ -181,6 +186,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
 
     const session = await runSession(getJob(job.id, db) as Job, prompt, wt.path);
     if (session.timedOut) {
+      if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
       return transitionJob(
         job.id,
         "needs_human",
@@ -193,6 +199,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // day's spend); escalate to a human with a clear reason. Checked before the
     // exit-code branch since the abort yields a non-zero sentinel exit.
     if (session.costExceeded) {
+      if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
       return transitionJob(
         job.id,
         "needs_human",
@@ -201,6 +208,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       );
     }
     if (session.exitCode !== 0) {
+      if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
       return transitionJob(
         job.id,
         "needs_human",
@@ -213,6 +221,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     if (repo.adrGating) {
       const pending = listAdrs("pending_review", db, repo.id);
       if (pending.length > 0) {
+        if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
         return transitionJob(
           job.id,
           "needs_human",
@@ -229,6 +238,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       // empty commit. Report it as a clear outcome rather than a raw git error
       // (issue #50). Any other failure (e.g. a rejected push) still propagates.
       if (err instanceof EmptyCommitError) {
+        if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
         return transitionJob(
           job.id,
           "needs_human",
@@ -262,9 +272,12 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     }
 
     const final = await runBabysitter(getJob(job.id, db) as Job, prNumber);
-    // A merged job lands the whole decomposed issue: mark every subtask done.
-    if (repo.autoDecompose && final.status === "merged") {
-      markSubtasksDone(repo.id, job.issueNumber, db);
+    if (repo.autoDecompose) {
+      if (final.status === "merged") {
+        markSubtasksDone(repo.id, job.issueNumber, db);
+      } else {
+        markSubtasksParked(repo.id, job.issueNumber, db);
+      }
     }
     return final;
   } catch (err) {
@@ -272,6 +285,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     recordEvent(job.id, "error", { message }, db);
     const current = getJob(job.id, db) as Job;
     if (["working", "ci_running", "retrying"].includes(current.status)) {
+      if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
       return transitionJob(job.id, "needs_human", { errorMessage: message.slice(0, 500) }, db);
     }
     return current;

@@ -1,7 +1,7 @@
 import type { AgentProvider } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import type { IssueSubtask, Repo } from "@/lib/db/schema";
-import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
+import type { CommandRunner } from "@/lib/exec/runner";
 import type { IssueDetail } from "@/lib/github/gh";
 import {
   type DecomposeInput,
@@ -173,4 +173,22 @@ function advanceToDone(subtask: IssueSubtask, db: DB): void {
 /** Mark all of an issue's non-terminal subtasks done once its job merges. */
 export function markSubtasksDone(repoId: number, issueNumber: number, db: DB = getDb()): void {
   for (const s of listSubtasks(repoId, issueNumber, db)) advanceToDone(s, db);
+}
+
+/**
+ * Reset in-progress subtasks back to pending so a retry resumes correctly
+ * (issue #96). Called on every non-merge terminal outcome to undo the
+ * markSubtasksWorking call that fired at job start. Terminal subtasks (done,
+ * skipped) and already-pending ones are left untouched.
+ *
+ * The state machine has no direct in_progress → pending edge, so we step
+ * through deferred: in_progress → deferred → pending.
+ */
+export function markSubtasksParked(repoId: number, issueNumber: number, db: DB = getDb()): void {
+  for (const s of listSubtasks(repoId, issueNumber, db)) {
+    if (s.status === "in_progress") {
+      transitionSubtask(s.id, "deferred", db);
+      transitionSubtask(s.id, "pending", db);
+    }
+  }
 }
