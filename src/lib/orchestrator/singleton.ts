@@ -37,7 +37,10 @@ const DEFAULT_ABORT_GRACE_MS = 5000;
  */
 export function abortJob(jobId: number, graceMs = DEFAULT_ABORT_GRACE_MS): boolean {
   const abort = abortHandles.get(jobId);
-  if (!abort) return false;
+  // The job id reaches here from a server action argument; guard that the
+  // looked-up value is a callable we registered before invoking it, so a
+  // caller-supplied id can only ever fire one of our own abort handles.
+  if (typeof abort !== "function") return false;
   abort(graceMs);
   abortHandles.delete(jobId);
   return true;
