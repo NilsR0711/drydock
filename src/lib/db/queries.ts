@@ -1,5 +1,6 @@
 import { asc, desc, eq } from "drizzle-orm";
 import { type DB, getDb } from "./client";
+import { todayCost } from "./cost-queries";
 import { type Issue, issues, type Job, jobs, type Repo, repos } from "./schema";
 
 export interface RepoWithStats extends Repo {
@@ -89,6 +90,7 @@ export interface DashboardSummary {
   running: number;
   merged: number;
   needsHuman: number;
+  spendToday: number;
 }
 
 /** Aggregate job counts across all repos for the dashboard stat cards. */
@@ -101,5 +103,94 @@ export function dashboardSummary(db: DB = getDb()): DashboardSummary {
     running: count(["working", "ci_running", "retrying"]),
     merged: count(["merged"]),
     needsHuman: count(["needs_human"]),
+    spendToday: todayCost(db),
   };
+}
+
+/** A single in-flight run surfaced on a repo's dashboard row. */
+export interface InFlightJob {
+  id: number;
+  issueNumber: number;
+  status: string;
+}
+
+/** One repo's live state for the at-a-glance multi-repo dashboard. */
+export interface RepoDashboardRow {
+  id: number;
+  name: string;
+  path: string;
+  platform: string;
+  queued: number;
+  working: number;
+  ciRunning: number;
+  needsHuman: number;
+  inFlight: InFlightJob[];
+  lastActivityAt: number | null;
+  todaySpend: number;
+  /** True when the repo has parked or failed work that wants a human. */
+  attention: boolean;
+}
+
+export interface DashboardSnapshot {
+  summary: DashboardSummary;
+  repos: RepoDashboardRow[];
+}
+
+const IN_FLIGHT = ["working", "ci_running", "retrying"];
+
+/** Most recent moment a repo did anything: finish, start, or enqueue. */
+function jobActivity(job: Job): number {
+  return job.finishedAt ?? job.startedAt ?? job.createdAt;
+}
+
+/**
+ * Live snapshot of every watched repo for the parallel dashboard (issue #60):
+ * per-status counts, in-flight runs, today's spend, and an attention flag.
+ * Rows are ordered so repos needing a human surface first, then repos with
+ * active work, then by most recent activity.
+ */
+export function dashboardSnapshot(db: DB = getDb()): DashboardSnapshot {
+  const rows: RepoDashboardRow[] = listRepos(db).map((repo) => {
+    const repoJobs = db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.repoId, repo.id))
+      .orderBy(asc(jobs.createdAt))
+      .all();
+    const count = (statuses: string[]) =>
+      repoJobs.filter((j) => statuses.includes(j.status)).length;
+    const inFlight = repoJobs
+      .filter((j) => IN_FLIGHT.includes(j.status))
+      .map((j) => ({ id: j.id, issueNumber: j.issueNumber, status: j.status }));
+    const lastActivityAt = repoJobs.length ? Math.max(...repoJobs.map(jobActivity)) : null;
+    const needsHuman = count(["needs_human"]);
+    const ciFailed = count(["ci_failed"]);
+    return {
+      id: repo.id,
+      name: repo.name,
+      path: repo.path,
+      platform: repo.platform,
+      queued: count(["queued"]),
+      working: count(["working", "retrying"]),
+      ciRunning: count(["ci_running"]),
+      needsHuman,
+      inFlight,
+      lastActivityAt,
+      todaySpend: todayCost(db, repo.id),
+      attention: needsHuman > 0 || ciFailed > 0,
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (a.attention !== b.attention) return a.attention ? -1 : 1;
+    const aActive = a.inFlight.length > 0;
+    const bActive = b.inFlight.length > 0;
+    if (aActive !== bActive) return aActive ? -1 : 1;
+    const aSeen = a.lastActivityAt ?? 0;
+    const bSeen = b.lastActivityAt ?? 0;
+    if (aSeen !== bSeen) return bSeen - aSeen;
+    return a.name.localeCompare(b.name);
+  });
+
+  return { summary: dashboardSummary(db), repos: rows };
 }

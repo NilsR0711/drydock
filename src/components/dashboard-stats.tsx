@@ -13,10 +13,13 @@ const TONE_TEXT: Record<Tone, string> = {
 function StatCard({
   label,
   value,
+  display,
   tone = "neutral",
 }: {
   label: string;
   value: number;
+  /** Pre-formatted value (e.g. a currency string); falls back to `value`. */
+  display?: string;
   tone?: Tone;
 }) {
   // Zero values stay muted; a non-zero count lights up in its tone.
@@ -32,7 +35,7 @@ function StatCard({
           active ? TONE_TEXT[tone] : "text-foreground",
         )}
       >
-        {value}
+        {display ?? value}
       </div>
     </div>
   );
@@ -40,12 +43,18 @@ function StatCard({
 
 export function DashboardStats({ summary }: { summary: DashboardSummary }) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       <StatCard label="Repos" value={summary.repos} />
       <StatCard label="Queued" value={summary.queued} />
       <StatCard label="Running" value={summary.running} tone="primary" />
       <StatCard label="Merged" value={summary.merged} tone="success" />
       <StatCard label="Needs human" value={summary.needsHuman} tone="destructive" />
+      <StatCard
+        label="Spend today"
+        value={summary.spendToday}
+        display={`$${summary.spendToday.toFixed(2)}`}
+        tone="primary"
+      />
     </div>
   );
 }

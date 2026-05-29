@@ -359,7 +359,7 @@ UI: they refuse while draining, globally paused, or over the daily/per-repo cost
 
 ## Roadmap
 
-- [ ] Parallel multi-repo dashboards at a glance
+- [x] Parallel multi-repo dashboards at a glance
 - [ ] Webhook-driven issue sync (vs. polling)
 - [ ] Richer CI failure classification & targeted fix prompts
 - [ ] Exportable cost reports

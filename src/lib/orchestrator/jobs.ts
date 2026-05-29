@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { issues, type Job, jobEvents, jobs } from "@/lib/db/schema";
+import { emitDashboardChange } from "@/lib/stream/dashboard-bus";
 import { assertTransition, type JobStatus } from "./state-machine";
 
 export function createJob(
@@ -15,7 +16,7 @@ export function createJob(
   },
   db: DB = getDb(),
 ): Job {
-  return db
+  const job = db
     .insert(jobs)
     .values({
       repoId: input.repoId,
@@ -28,6 +29,8 @@ export function createJob(
     })
     .returning()
     .get();
+  emitDashboardChange();
+  return job;
 }
 
 export function getJob(id: number, db: DB = getDb()): Job | undefined {
@@ -61,6 +64,7 @@ export function transitionJob(
     .returning()
     .get();
   recordEvent(jobId, "status", { from: job.status, to }, db);
+  emitDashboardChange();
   return updated;
 }
 

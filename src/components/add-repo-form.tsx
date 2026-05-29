@@ -1,127 +1,21 @@
 "use client";
 
-import { Plus } from "lucide-react";
-import Link from "next/link";
 import { useState, useTransition } from "react";
 import { DirectoryPicker } from "@/components/directory-picker";
 import { ForgeSelect } from "@/components/forge-select";
 import { ModelSelect } from "@/components/model-select";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { useToast } from "@/components/ui/toast";
-import type { RepoWithStats } from "@/lib/db/queries";
 import type { ForgeId } from "@/lib/forge/types";
 import { DEFAULT_MODEL } from "@/lib/models";
-import { addRepoAction, removeRepoAction } from "@/lib/repos/actions";
-
-export function RepoList({ repos }: { repos: RepoWithStats[] }) {
-  const [showAdd, setShowAdd] = useState(false);
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">
-          Repositories <span className="text-muted-foreground">({repos.length})</span>
-        </h2>
-        <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
-          {showAdd ? (
-            "Cancel"
-          ) : (
-            <>
-              <Plus /> Add repo
-            </>
-          )}
-        </Button>
-      </div>
-      {showAdd && <AddRepoForm onDone={() => setShowAdd(false)} />}
-      {repos.length === 0 && !showAdd && (
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No repositories yet. Add one to start automating issues.
-          </CardContent>
-        </Card>
-      )}
-      <div className="grid gap-3 sm:grid-cols-2">
-        {repos.map((repo) => (
-          <RepoCard key={repo.id} repo={repo} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function RepoCard({ repo }: { repo: RepoWithStats }) {
-  const [pending, start] = useTransition();
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const { success, error } = useToast();
-
-  function remove() {
-    start(async () => {
-      try {
-        await removeRepoAction(repo.id);
-        success("Repository removed", repo.name);
-      } catch (e) {
-        error("Failed to remove repository", e instanceof Error ? e.message : String(e));
-      }
-    });
-  }
-
-  return (
-    <Card className="hover-elevate transition-shadow hover:shadow-md">
-      <CardContent className="space-y-3 p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <Link
-              href={`/repos/${repo.id}`}
-              className="font-mono text-sm font-semibold hover:underline"
-            >
-              {repo.name}
-            </Link>
-            <p className="truncate text-xs text-muted-foreground">{repo.path}</p>
-          </div>
-          {repo.workingCount > 0 && <Badge status="working">running</Badge>}
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {repo.platform === "gitlab" && <Badge tone="primary">GitLab</Badge>}
-          <Badge tone="neutral">{repo.queuedCount} queued</Badge>
-          <Badge tone="primary">{repo.workingCount} running</Badge>
-          <Badge tone="success">{repo.mergedCount} merged</Badge>
-        </div>
-        <div className="flex gap-2">
-          <Link href={`/repos/${repo.id}`}>
-            <Button size="sm">Open</Button>
-          </Link>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={pending}
-            onClick={() => setConfirmRemove(true)}
-          >
-            Remove
-          </Button>
-        </div>
-      </CardContent>
-      <ConfirmDialog
-        open={confirmRemove}
-        onOpenChange={setConfirmRemove}
-        onConfirm={remove}
-        title="Remove repository?"
-        description={`This stops watching ${repo.name}. Existing jobs are unaffected.`}
-        confirmLabel="Remove"
-        variant="destructive"
-        pending={pending}
-      />
-    </Card>
-  );
-}
+import { addRepoAction } from "@/lib/repos/actions";
 
 /** Basename without importing the server-only fs helper into the client bundle. */
 function basename(path: string): string {
   return path.replace(/\/+$/, "").split("/").pop() ?? "";
 }
 
-function AddRepoForm({ onDone }: { onDone: () => void }) {
+export function AddRepoForm({ onDone }: { onDone: () => void }) {
   const [pending, start] = useTransition();
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
