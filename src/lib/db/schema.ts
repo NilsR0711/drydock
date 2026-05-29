@@ -9,7 +9,7 @@ export const repos = sqliteTable("repos", {
   queueLabel: text("queue_label").notNull().default("drydock:queue"),
   workingLabel: text("working_label").notNull().default("drydock:working"),
   needsHumanLabel: text("needs_human_label").notNull().default("drydock:needs-human"),
-  defaultModel: text("default_model").notNull().default("claude-opus-4-7"),
+  defaultModel: text("default_model").notNull().default("claude-opus-4-8"),
   agent: text("agent").notNull().default("claude"),
   platform: text("platform").notNull().default("github"),
   apiBaseUrl: text("api_base_url"),

@@ -4,7 +4,7 @@ import type { AgentProvider } from "./types";
 
 /** CI-fix resume runs on Haiku with a tighter turn budget (SPEC §6.3). */
 export const CLAUDE_RESUME_MODEL = "claude-haiku-4-5";
-export const CLAUDE_DEFAULT_MODEL = "claude-opus-4-7";
+export const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
 
 /**
  * The Claude Code CLI as an AgentProvider. This is the behavior-preserving move

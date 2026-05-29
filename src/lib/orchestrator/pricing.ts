@@ -9,6 +9,8 @@ export interface ModelPrice {
 }
 
 export const PRICING: Record<string, ModelPrice> = {
+  // Opus 4.8 — $5 / $25 per MTok (2026-05; per the official Anthropic rate card)
+  "claude-opus-4-8": { inputPerMTok: 5, outputPerMTok: 25 },
   // Opus 4.7 — $15 / $75 per MTok (2026-05; verify against current rate card)
   "claude-opus-4-7": { inputPerMTok: 15, outputPerMTok: 75 },
   // Sonnet 4.5 — $3 / $15 per MTok (2026-05)
