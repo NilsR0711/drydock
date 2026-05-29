@@ -10,6 +10,7 @@ import {
   type SubtaskGenerator,
 } from "@/lib/issues/decompose";
 import { ensureSubtasks, listSubtasks, transitionSubtask } from "@/lib/issues/subtasks";
+import { runOneShotAndRecordCost } from "./one-shot-runner";
 import type { SubtaskStatus } from "./subtask-state";
 
 /**
@@ -68,17 +69,24 @@ export function buildSubtaskGenerator(deps: {
   command: string;
   model: string;
   cwd: string;
+  repoId?: number;
+  db?: DB;
   runner?: CommandRunner;
 }): SubtaskGenerator {
-  const runner = deps.runner ?? spawnRunner;
   return async (input) => {
-    const args = deps.provider.buildOneShotArgs({
-      prompt: subtaskPrompt(input),
+    const { text, exitCode } = await runOneShotAndRecordCost({
+      provider: deps.provider,
+      command: deps.command,
       model: deps.model,
+      cwd: deps.cwd,
+      prompt: subtaskPrompt(input),
+      repoId: deps.repoId,
+      type: "decompose",
+      runner: deps.runner,
+      db: deps.db,
     });
-    const res = await runner(deps.command, args, deps.cwd);
-    if (res.exitCode !== 0) return [];
-    return parseSubtaskList(res.stdout);
+    if (exitCode !== 0) return [];
+    return parseSubtaskList(text);
   };
 }
 

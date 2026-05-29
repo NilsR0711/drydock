@@ -25,7 +25,8 @@ export async function runOneShotAndRecordCost(opts: {
   model: string;
   cwd: string;
   prompt: string;
-  repoId: number;
+  /** When omitted, cost is tracked in memory only (no DB row). */
+  repoId?: number;
   type: OneShotType;
   timeoutMs?: number;
   runner?: CommandRunner;
@@ -33,18 +34,26 @@ export async function runOneShotAndRecordCost(opts: {
 }): Promise<OneShotResult> {
   const runner = opts.runner ?? spawnRunner;
   const db = opts.db ?? getDb();
-  const cmdOpts: CommandOptions = opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {};
+  const cmdOpts: CommandOptions | undefined =
+    opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : undefined;
 
-  const streamArgs = opts.provider.buildStreamOneShotArgs({ prompt: opts.prompt, model: opts.model });
+  const streamArgs = opts.provider.buildStreamOneShotArgs({
+    prompt: opts.prompt,
+    model: opts.model,
+  });
 
   if (streamArgs === null) {
     // Provider does not support stream-json one-shots — run plain, no cost tracking.
     const plainArgs = opts.provider.buildOneShotArgs({ prompt: opts.prompt, model: opts.model });
-    const res = await runner(opts.command, plainArgs, opts.cwd, cmdOpts);
+    const res = cmdOpts
+      ? await runner(opts.command, plainArgs, opts.cwd, cmdOpts)
+      : await runner(opts.command, plainArgs, opts.cwd);
     return { text: res.stdout, exitCode: res.exitCode, costUsd: 0 };
   }
 
-  const res = await runner(opts.command, streamArgs, opts.cwd, cmdOpts);
+  const res = cmdOpts
+    ? await runner(opts.command, streamArgs, opts.cwd, cmdOpts)
+    : await runner(opts.command, streamArgs, opts.cwd);
 
   // Parse the NDJSON stream to extract text content and cost.
   const parser = new StreamJsonParser();
@@ -61,7 +70,7 @@ export async function runOneShotAndRecordCost(opts: {
 
   const costUsd = parser.costUsd > 0 ? parser.costUsd : 0;
 
-  if (costUsd > 0) {
+  if (costUsd > 0 && opts.repoId !== undefined) {
     db.insert(oneShotCosts)
       .values({
         repoId: opts.repoId,

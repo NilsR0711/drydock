@@ -24,6 +24,7 @@ import {
 } from "@/lib/release/release-service";
 import type { ReleaseStatus } from "@/lib/release/release-state";
 import type { SemverBump } from "@/lib/version/semver";
+import { runOneShotAndRecordCost } from "./one-shot-runner";
 
 /**
  * Driver glue for the opt-in release manager (issue #59, ADR 028): the read-only
@@ -62,20 +63,28 @@ export function buildReleaseEvaluationGenerator(deps: {
   command: string;
   model: string;
   cwd: string;
+  repoId?: number;
+  db?: DB;
   runner?: CommandRunner;
   timeoutMs?: number;
 }): ReleaseEvaluationGenerator {
-  const runner = deps.runner ?? spawnRunner;
   const timeoutMs = deps.timeoutMs ?? RELEASE_EVAL_TIMEOUT_MS;
   return async (input) => {
-    const args = deps.provider.buildOneShotArgs({
-      prompt: buildReleaseEvaluationPrompt(input),
-      model: deps.model,
-    });
     try {
-      const res = await runner(deps.command, args, deps.cwd, { timeoutMs });
-      if (res.exitCode !== 0) return null;
-      return parseReleaseEvaluation(res.stdout);
+      const { text, exitCode } = await runOneShotAndRecordCost({
+        provider: deps.provider,
+        command: deps.command,
+        model: deps.model,
+        cwd: deps.cwd,
+        prompt: buildReleaseEvaluationPrompt(input),
+        repoId: deps.repoId,
+        type: "release",
+        timeoutMs,
+        runner: deps.runner,
+        db: deps.db,
+      });
+      if (exitCode !== 0) return null;
+      return parseReleaseEvaluation(text);
     } catch {
       return null;
     }

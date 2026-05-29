@@ -6,7 +6,10 @@ describe("pricing", () => {
   it("knows Opus 4.8, Opus 4.7, Sonnet 4.5 and Haiku 4.5 rates", () => {
     expect(priceForModel("claude-opus-4-8")).toMatchObject({ inputPerMTok: 5, outputPerMTok: 25 });
     expect(priceForModel("claude-opus-4-7")).toMatchObject({ inputPerMTok: 15, outputPerMTok: 75 });
-    expect(priceForModel("claude-sonnet-4-5")).toMatchObject({ inputPerMTok: 3, outputPerMTok: 15 });
+    expect(priceForModel("claude-sonnet-4-5")).toMatchObject({
+      inputPerMTok: 3,
+      outputPerMTok: 15,
+    });
     expect(priceForModel("claude-haiku-4-5")).toMatchObject({ inputPerMTok: 1, outputPerMTok: 5 });
   });
 
@@ -112,9 +115,15 @@ describe("cache token pricing (issue #95)", () => {
 
 describe("codex pricing", () => {
   it("knows gpt-5-codex, gpt-5 and gpt-5-mini rates", () => {
-    expect(codexPriceForModel("gpt-5-codex")).toMatchObject({ inputPerMTok: 1.25, outputPerMTok: 10 });
+    expect(codexPriceForModel("gpt-5-codex")).toMatchObject({
+      inputPerMTok: 1.25,
+      outputPerMTok: 10,
+    });
     expect(codexPriceForModel("gpt-5")).toMatchObject({ inputPerMTok: 1.25, outputPerMTok: 10 });
-    expect(codexPriceForModel("gpt-5-mini")).toMatchObject({ inputPerMTok: 0.25, outputPerMTok: 2 });
+    expect(codexPriceForModel("gpt-5-mini")).toMatchObject({
+      inputPerMTok: 0.25,
+      outputPerMTok: 2,
+    });
   });
 
   describe("unknown model id handling (fail-safe for budgeting)", () => {

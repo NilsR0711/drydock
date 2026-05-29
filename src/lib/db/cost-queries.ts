@@ -61,8 +61,7 @@ export function todayCost(db: DB = getDb(), repoId?: number): number {
 
   // Union job costs + one-shot costs for today. Raw SQL is cleaner than two
   // separate Drizzle queries because Drizzle doesn't expose UNION ALL natively.
-  const row = db
-    .get<{ total: number }>(sql`
+  const row = db.get<{ total: number }>(sql`
       SELECT coalesce(sum(c), 0) AS total FROM (
         SELECT coalesce(sum(cost_usd), 0) AS c
         FROM jobs

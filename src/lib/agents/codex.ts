@@ -16,7 +16,12 @@ export const CODEX_DEFAULT_MODEL = "gpt-5-codex";
  * stream, so the orchestrator always estimates from these.
  */
 export const CODEX_PRICING: Record<string, ModelPrice> = {
-  "gpt-5-codex": { inputPerMTok: 1.25, outputPerMTok: 10, cacheWritePerMTok: 0, cacheReadPerMTok: 0 },
+  "gpt-5-codex": {
+    inputPerMTok: 1.25,
+    outputPerMTok: 10,
+    cacheWritePerMTok: 0,
+    cacheReadPerMTok: 0,
+  },
   "gpt-5": { inputPerMTok: 1.25, outputPerMTok: 10, cacheWritePerMTok: 0, cacheReadPerMTok: 0 },
   "gpt-5-mini": { inputPerMTok: 0.25, outputPerMTok: 2, cacheWritePerMTok: 0, cacheReadPerMTok: 0 },
 };

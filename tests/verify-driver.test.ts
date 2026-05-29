@@ -74,7 +74,7 @@ describe("buildVerificationGenerator", () => {
   };
 
   it("parses a verification result from a clean one-shot run", async () => {
-    const runner = fakeRunner({ stdout: JSON.stringify(vResult()) });
+    const runner = fakeRunner({ stdout: oneShotNdjson(JSON.stringify(vResult())) });
     const gen = buildVerificationGenerator({
       provider,
       command: "claude",

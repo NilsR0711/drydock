@@ -75,7 +75,14 @@ describe("cost queries", () => {
   it("todayCost includes one-shot costs from oneShotCosts table (issue #95)", () => {
     const now = Math.floor(Date.now() / 1000);
     db.insert(oneShotCosts)
-      .values({ repoId, type: "verify", costUsd: 0.01, inputTokens: 80, outputTokens: 20, createdAt: now })
+      .values({
+        repoId,
+        type: "verify",
+        costUsd: 0.01,
+        inputTokens: 80,
+        outputTokens: 20,
+        createdAt: now,
+      })
       .run();
     // jobs sum = 0.07, one-shot = 0.01 → total 0.08
     expect(todayCost(db, repoId)).toBeCloseTo(0.08);
@@ -86,7 +93,14 @@ describe("cost queries", () => {
     const b = addRepo({ path: "/b3", name: "b3" }, db).id;
     const now = Math.floor(Date.now() / 1000);
     db.insert(oneShotCosts)
-      .values({ repoId: b, type: "decompose", costUsd: 0.05, inputTokens: 500, outputTokens: 100, createdAt: now })
+      .values({
+        repoId: b,
+        type: "decompose",
+        costUsd: 0.05,
+        inputTokens: 500,
+        outputTokens: 100,
+        createdAt: now,
+      })
       .run();
     // repoId has only its jobs (0.07), not repo b's one-shots
     expect(todayCost(db, repoId)).toBeCloseTo(0.07);

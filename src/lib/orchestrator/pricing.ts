@@ -12,13 +12,33 @@ export interface ModelPrice {
 
 export const PRICING: Record<string, ModelPrice> = {
   // Opus 4.8 — $5 / $25 per MTok; cache write $6.25, read $0.50 (2026-05)
-  "claude-opus-4-8": { inputPerMTok: 5, outputPerMTok: 25, cacheWritePerMTok: 6.25, cacheReadPerMTok: 0.5 },
+  "claude-opus-4-8": {
+    inputPerMTok: 5,
+    outputPerMTok: 25,
+    cacheWritePerMTok: 6.25,
+    cacheReadPerMTok: 0.5,
+  },
   // Opus 4.7 — $15 / $75 per MTok; cache write $18.75, read $1.50 (2026-05)
-  "claude-opus-4-7": { inputPerMTok: 15, outputPerMTok: 75, cacheWritePerMTok: 18.75, cacheReadPerMTok: 1.5 },
+  "claude-opus-4-7": {
+    inputPerMTok: 15,
+    outputPerMTok: 75,
+    cacheWritePerMTok: 18.75,
+    cacheReadPerMTok: 1.5,
+  },
   // Sonnet 4.5 — $3 / $15 per MTok; cache write $3.75, read $0.30 (2026-05)
-  "claude-sonnet-4-5": { inputPerMTok: 3, outputPerMTok: 15, cacheWritePerMTok: 3.75, cacheReadPerMTok: 0.3 },
+  "claude-sonnet-4-5": {
+    inputPerMTok: 3,
+    outputPerMTok: 15,
+    cacheWritePerMTok: 3.75,
+    cacheReadPerMTok: 0.3,
+  },
   // Haiku 4.5 — $1 / $5 per MTok; cache write $1.25, read $0.10 (2026-05)
-  "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5, cacheWritePerMTok: 1.25, cacheReadPerMTok: 0.1 },
+  "claude-haiku-4-5": {
+    inputPerMTok: 1,
+    outputPerMTok: 5,
+    cacheWritePerMTok: 1.25,
+    cacheReadPerMTok: 0.1,
+  },
 };
 
 /** The most expensive entry in PRICING by output rate — used as a fail-safe fallback. */

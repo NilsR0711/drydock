@@ -1,5 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAgentProvider } from "@/lib/agents/registry";
+
+/** Wrap plain text in the NDJSON envelope that stream-json one-shots emit. */
+function oneShotNdjson(text: string): string {
+  return (
+    [
+      JSON.stringify({ type: "system", session_id: "s1", model: "claude-opus-4-8" }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text }],
+          usage: { input_tokens: 10, output_tokens: 10 },
+        },
+      }),
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        total_cost_usd: 0.001,
+        usage: { input_tokens: 10, output_tokens: 10 },
+      }),
+    ].join("\n") + "\n"
+  );
+}
 import { createDb, type DB } from "@/lib/db/client";
 import type { Job, Repo } from "@/lib/db/schema";
 import type { CommandResult, CommandRunner } from "@/lib/exec/runner";
@@ -76,7 +100,7 @@ const input = {
 
 describe("buildAnswerGenerator", () => {
   it("returns the trimmed answer from a clean one-shot run", async () => {
-    const runner = fakeRunner({ stdout: "  here is the answer  " });
+    const runner = fakeRunner({ stdout: oneShotNdjson("  here is the answer  ") });
     const gen = buildAnswerGenerator({
       provider,
       command: "claude",

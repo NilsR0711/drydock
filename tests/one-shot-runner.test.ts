@@ -31,12 +31,14 @@ function oneShotNdjson(text: string, costUsd = 0.002): string {
 }
 
 function fakeRunner(result: Partial<CommandResult>) {
-  return vi.fn(async (): Promise<CommandResult> => ({
-    stdout: "",
-    stderr: "",
-    exitCode: 0,
-    ...result,
-  }));
+  return vi.fn(
+    async (): Promise<CommandResult> => ({
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      ...result,
+    }),
+  );
 }
 
 const provider = getAgentProvider("claude");

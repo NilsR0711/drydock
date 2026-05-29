@@ -207,7 +207,7 @@ describe("publishRelease (manual)", () => {
 describe("buildReleaseEvaluationGenerator", () => {
   it("returns null on a non-zero exit", async () => {
     const generate = buildReleaseEvaluationGenerator({
-      provider: { buildOneShotArgs: () => ["-p", "x"] } as never,
+      provider: { buildOneShotArgs: () => ["-p", "x"], buildStreamOneShotArgs: () => null } as never,
       command: "claude",
       model: "m",
       cwd: "/tmp",
@@ -218,7 +218,7 @@ describe("buildReleaseEvaluationGenerator", () => {
 
   it("parses a valid evaluation from agent stdout", async () => {
     const generate = buildReleaseEvaluationGenerator({
-      provider: { buildOneShotArgs: () => ["-p", "x"] } as never,
+      provider: { buildOneShotArgs: () => ["-p", "x"], buildStreamOneShotArgs: () => null } as never,
       command: "claude",
       model: "m",
       cwd: "/tmp",
