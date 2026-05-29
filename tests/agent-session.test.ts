@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { codexProvider } from "@/lib/agents/codex";
 import type { AgentProvider } from "@/lib/agents/types";
 import { createDb, type DB } from "@/lib/db/client";
+import { jobs } from "@/lib/db/schema";
 import type { StreamCallbacks, StreamHandle, StreamRunner } from "@/lib/exec/stream-runner";
 import { resumeAgentSession, spawnAgentSession } from "@/lib/orchestrator/agent-session";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
@@ -286,5 +288,127 @@ describe("resumeAgentSession fallback", () => {
     });
     expect(res.timedOut).toBe(true);
     expect(aborted).toBe(true);
+  });
+});
+
+describe("resumeAgentSession cumulative cost guard (issue #94)", () => {
+  // Prices output tokens at a flat $0.001 each so costs are deterministic.
+  const pricedProvider: AgentProvider = {
+    ...codexProvider,
+    createParser: () => new StreamJsonParser(),
+    estimateCost: (_m, _in, out) => out * 0.001,
+  };
+
+  function assistantUsage(outputTokens: number): string {
+    return `${JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "fixing" }],
+        usage: { output_tokens: outputTokens },
+      },
+    })}\n`;
+  }
+
+  it("aborts a resume when prior job cost plus this invocation crosses the cap", async () => {
+    // Prior spend: $0.40. Cap: $0.50. This resume adds 150 tok → $0.15.
+    // Cumulative: $0.40 + $0.15 = $0.55 > $0.50 → should abort.
+    const job = createJob({ repoId, issueNumber: 20, agent: "codex" }, db);
+    db.update(jobs).set({ costUsd: 0.4 }).where(eq(jobs.id, job.id)).run();
+    let aborted = false;
+    const hangingRunner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks) => {
+      cb.onStdout(assistantUsage(150));
+      return {
+        done: new Promise<number>(() => {}),
+        abort: () => {
+          aborted = true;
+        },
+      };
+    };
+    const res = await resumeAgentSession(getJob(job.id, db) as never, "th-1", "CI log", "/work", {
+      db,
+      broker: new LogBroker(db),
+      provider: pricedProvider,
+      runner: hangingRunner,
+      costCapUsd: 0.5,
+    });
+    expect(res.costExceeded).toBe(true);
+    expect(aborted).toBe(true);
+  });
+
+  it("does not abort a resume when prior cost plus this invocation stays under the cap", async () => {
+    // Prior spend: $0.30. Cap: $0.50. This resume adds 50 tok → $0.05.
+    // Cumulative: $0.30 + $0.05 = $0.35 < $0.50 → should not abort.
+    const job = createJob({ repoId, issueNumber: 21, agent: "codex" }, db);
+    db.update(jobs).set({ costUsd: 0.3 }).where(eq(jobs.id, job.id)).run();
+    let aborted = false;
+    const runner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks): StreamHandle => {
+      cb.onStdout(assistantUsage(50));
+      return {
+        done: Promise.resolve(0),
+        abort: () => {
+          aborted = true;
+        },
+      };
+    };
+    const res = await resumeAgentSession(getJob(job.id, db) as never, "th-1", "CI log", "/work", {
+      db,
+      broker: new LogBroker(db),
+      provider: pricedProvider,
+      runner,
+      costCapUsd: 0.5,
+    });
+    expect(res.costExceeded).toBe(false);
+    expect(aborted).toBe(false);
+  });
+
+  it("aborts immediately when prior cost alone already meets or exceeds the cap", async () => {
+    // Prior spend: $0.55. Cap: $0.50. Even 1 token of new spend should abort.
+    const job = createJob({ repoId, issueNumber: 22, agent: "codex" }, db);
+    db.update(jobs).set({ costUsd: 0.55 }).where(eq(jobs.id, job.id)).run();
+    let aborted = false;
+    const hangingRunner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks) => {
+      cb.onStdout(assistantUsage(1));
+      return {
+        done: new Promise<number>(() => {}),
+        abort: () => {
+          aborted = true;
+        },
+      };
+    };
+    const res = await resumeAgentSession(getJob(job.id, db) as never, "th-1", "CI log", "/work", {
+      db,
+      broker: new LogBroker(db),
+      provider: pricedProvider,
+      runner: hangingRunner,
+      costCapUsd: 0.5,
+    });
+    expect(res.costExceeded).toBe(true);
+    expect(aborted).toBe(true);
+  });
+
+  it("ignores prior cost when no cap is configured", async () => {
+    // Prior spend: $99. No cap → should never abort.
+    const job = createJob({ repoId, issueNumber: 23, agent: "codex" }, db);
+    db.update(jobs).set({ costUsd: 99 }).where(eq(jobs.id, job.id)).run();
+    let aborted = false;
+    const runner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks): StreamHandle => {
+      cb.onStdout(assistantUsage(1));
+      return {
+        done: Promise.resolve(0),
+        abort: () => {
+          aborted = true;
+        },
+      };
+    };
+    const res = await resumeAgentSession(getJob(job.id, db) as never, "th-1", "CI log", "/work", {
+      db,
+      broker: new LogBroker(db),
+      provider: pricedProvider,
+      runner,
+      costCapUsd: 0,
+    });
+    expect(res.costExceeded).toBe(false);
+    expect(aborted).toBe(false);
   });
 });
