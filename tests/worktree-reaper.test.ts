@@ -113,16 +113,91 @@ describe("reapOrphanedWorktrees", () => {
     expect(existsSync(orphanDir)).toBe(false);
   });
 
-  it("ignores non job-* entries under the worktrees root", async () => {
-    const fbDir = makeWorktreeDir("fb-some-key");
-    const dhDir = makeWorktreeDir("dh-other-key");
+  it("ignores unrecognized directory names under the worktrees root", async () => {
+    const randomDir = makeWorktreeDir("random-dir");
+    const tmpDir = makeWorktreeDir(".tmp-abc");
+
+    const { run } = recordingRunner();
+    const reaped = await reapOrphanedWorktrees({ db, run });
+
+    expect(reaped).toBe(0);
+    expect(existsSync(randomDir)).toBe(true);
+    expect(existsSync(tmpDir)).toBe(true);
+  });
+
+  it("reaps an orphaned fb-* worktree whose job is in a terminal state", async () => {
+    const job = createJob({ repoId, issueNumber: 10 }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "aborted", {}, db);
+    const fbDir = makeWorktreeDir(`fb-${job.id}-review-thread-1`);
+
+    const { run } = recordingRunner();
+    const reaped = await reapOrphanedWorktrees({ db, run });
+
+    expect(reaped).toBe(1);
+    expect(existsSync(fbDir)).toBe(false);
+  });
+
+  it("reaps an orphaned dh-* worktree whose job no longer exists", async () => {
+    const dhDir = makeWorktreeDir("dh-9999-abc1234");
+
+    const { run } = recordingRunner();
+    const reaped = await reapOrphanedWorktrees({ db, run });
+
+    expect(reaped).toBe(1);
+    expect(existsSync(dhDir)).toBe(false);
+  });
+
+  it("preserves a fb-* worktree for a live (non-terminal) job", async () => {
+    const job = createJob({ repoId, issueNumber: 11 }, db);
+    transitionJob(job.id, "working", {}, db);
+    const fbDir = makeWorktreeDir(`fb-${job.id}-some-thread`);
 
     const { run } = recordingRunner();
     const reaped = await reapOrphanedWorktrees({ db, run });
 
     expect(reaped).toBe(0);
     expect(existsSync(fbDir)).toBe(true);
+  });
+
+  it("preserves a dh-* worktree for a live (non-terminal) job", async () => {
+    const job = createJob({ repoId, issueNumber: 12 }, db);
+    transitionJob(job.id, "working", {}, db);
+    const dhDir = makeWorktreeDir(`dh-${job.id}-abc1234`);
+
+    const { run } = recordingRunner();
+    const reaped = await reapOrphanedWorktrees({ db, run });
+
+    expect(reaped).toBe(0);
     expect(existsSync(dhDir)).toBe(true);
+  });
+
+  it("reaps mixed orphaned job/fb/dh worktrees while preserving live ones", async () => {
+    // job1 is live — its job-* dir must survive
+    const job1 = createJob({ repoId, issueNumber: 20 }, db);
+    transitionJob(job1.id, "working", {}, db);
+    const liveJobDir = makeWorktreeDir(`job-${job1.id}`);
+
+    // job2 is terminal — its fb-* dir must be reaped
+    const job2 = createJob({ repoId, issueNumber: 21 }, db);
+    transitionJob(job2.id, "working", {}, db);
+    transitionJob(job2.id, "aborted", {}, db);
+    const terminalFbDir = makeWorktreeDir(`fb-${job2.id}-thread-1`);
+
+    // orphaned job dir (no DB entry)
+    const orphanJobDir = makeWorktreeDir("job-9999");
+
+    // orphaned dh dir (no DB entry)
+    const orphanDhDir = makeWorktreeDir("dh-9998-abc1234");
+
+    const { run } = recordingRunner();
+    const reaped = await reapOrphanedWorktrees({ db, run });
+
+    expect(reaped).toBe(3);
+    expect(existsSync(liveJobDir)).toBe(true);
+    expect(existsSync(terminalFbDir)).toBe(false);
+    expect(existsSync(orphanJobDir)).toBe(false);
+    expect(existsSync(orphanDhDir)).toBe(false);
   });
 
   it("does not crash when a repo has no worktrees directory yet", async () => {
