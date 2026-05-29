@@ -65,16 +65,55 @@ const email: Channel = {
 
 const CHANNELS: readonly Channel[] = [telegram, slack, email];
 
+/**
+ * Hard upper bound (ms) on a single {@link dispatch} fan-out. `dispatch` is
+ * awaited in blocking paths — graceful shutdown and the settings-save server
+ * action (issue #90) — so even though each channel's network I/O is bounded
+ * below, this caps the whole fan-out so a hung host can never delay shutdown or
+ * a save past a few seconds. On expiry the in-flight delivery keeps running in
+ * the background (its own per-channel timeout eventually reaps it). Kept in
+ * step with the orchestrator's 5s shutdown grace windows.
+ */
+export const NOTIFY_DISPATCH_BUDGET_MS = 5_000;
+
+/** Bounded timeout (ms) for a single outbound HTTP notification POST. */
+const NOTIFY_HTTP_TIMEOUT_MS = 10_000;
+
+/** Bounded SMTP connect/greeting/socket timeouts (ms) for email delivery. */
+const NOTIFY_SMTP_TIMEOUT_MS = 10_000;
+
 /** Channels that have enough configuration to attempt delivery. */
 function configuredChannels(s: Settings): Channel[] {
   return CHANNELS.filter((c) => c.isConfigured(s));
 }
 
 /**
+ * Resolve when `work` settles or `ms` elapses, whichever comes first — never
+ * rejects. On timeout `onTimeout` runs and the promise resolves anyway, so an
+ * awaited caller is freed while `work` continues in the background.
+ */
+function withTimeout(work: Promise<void>, ms: number, onTimeout: () => void): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      onTimeout();
+      resolve();
+    }, ms);
+    timer.unref?.();
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    work.then(done, done);
+  });
+}
+
+/**
  * Deliver `text` for `event` to every configured channel the user opted into.
  * Never throws and never blocks the orchestrator: each channel's failure is
  * isolated and logged with secrets redacted, so one broken webhook cannot
- * suppress the others.
+ * suppress the others, and the whole fan-out is bounded by
+ * {@link NOTIFY_DISPATCH_BUDGET_MS} so a hung host cannot delay an awaited
+ * caller (issue #90).
  */
 export async function dispatch(
   event: NotificationEvent,
@@ -84,7 +123,23 @@ export async function dispatch(
 ): Promise<void> {
   const s = getSettings(db);
   if (!s.notifyEvents.includes(event)) return;
-  for (const channel of configuredChannels(s)) {
+  const channels = configuredChannels(s);
+  if (channels.length === 0) return;
+  await withTimeout(deliver(channels, text, s, transports), NOTIFY_DISPATCH_BUDGET_MS, () =>
+    console.error(
+      `[notify] dispatch for ${event} exceeded ${NOTIFY_DISPATCH_BUDGET_MS}ms; continuing in background`,
+    ),
+  );
+}
+
+/** Sequentially deliver to each channel, isolating and logging failures. */
+async function deliver(
+  channels: Channel[],
+  text: string,
+  s: Settings,
+  transports: NotifyTransports,
+): Promise<void> {
+  for (const channel of channels) {
     try {
       await channel.send(text, s, transports);
     } catch (err) {
@@ -135,6 +190,9 @@ const postJson: NotifyTransports["postJson"] = async (url, body) => {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    // Bound the request so a hung host cannot hold the socket open past the
+    // timeout (issue #90); undici's headersTimeout alone is ~300s.
+    signal: AbortSignal.timeout(NOTIFY_HTTP_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 };
@@ -148,6 +206,10 @@ const sendMail: NotifyTransports["sendMail"] = async (msg, smtp) => {
     port: smtp.port,
     secure: smtp.port === 465,
     auth: smtp.user ? { user: smtp.user, pass: smtp.pass } : undefined,
+    // Without these an unreachable SMTP host blocks indefinitely (issue #90).
+    connectionTimeout: NOTIFY_SMTP_TIMEOUT_MS,
+    greetingTimeout: NOTIFY_SMTP_TIMEOUT_MS,
+    socketTimeout: NOTIFY_SMTP_TIMEOUT_MS,
   });
   await transporter.sendMail(msg);
 };

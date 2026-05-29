@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
-import { dispatch, type NotifyTransports, sendTest } from "@/lib/notify/notifier";
+import {
+  defaultTransports,
+  dispatch,
+  NOTIFY_DISPATCH_BUDGET_MS,
+  type NotifyTransports,
+  sendTest,
+} from "@/lib/notify/notifier";
 import { saveSettings } from "@/lib/settings/service";
 
 let db: DB;
@@ -164,5 +170,70 @@ describe("sendTest", () => {
   it("returns an empty list when nothing is configured", async () => {
     const results = await sendTest(db, transports);
     expect(results).toEqual([]);
+  });
+});
+
+describe("dispatch bounded completion (issue #90)", () => {
+  it("resolves within the dispatch budget when a channel never responds", async () => {
+    vi.useFakeTimers();
+    try {
+      saveSettings({ telegramBotToken: "TOK", telegramChatId: "42" }, db);
+      const hanging: NotifyTransports = {
+        // Never resolves — models a hung webhook host that holds the socket open.
+        postJson: () => new Promise<void>(() => {}),
+        sendMail: vi.fn(async () => {}),
+      };
+      let settled = false;
+      const p = dispatch("pr_merged", "go", db, hanging).then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(NOTIFY_DISPATCH_BUDGET_MS);
+      await p;
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not wait the full budget when delivery completes promptly", async () => {
+    saveSettings({ telegramBotToken: "TOK", telegramChatId: "42" }, db);
+    const postJson = vi.fn(async () => {});
+    await expect(
+      dispatch("pr_merged", "go", db, { postJson, sendMail: vi.fn(async () => {}) }),
+    ).resolves.toBeUndefined();
+    expect(postJson).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("defaultTransports network I/O timeouts (issue #90)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.doUnmock("nodemailer");
+  });
+
+  it("passes an abort signal so a hung HTTP POST cannot block forever", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      return new Response(null, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await defaultTransports.postJson("https://example.com/hook", { hello: "world" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sets connection/greeting/socket timeouts on the SMTP transport", async () => {
+    const createTransport = vi.fn(() => ({ sendMail: vi.fn(async () => {}) }));
+    vi.doMock("nodemailer", () => ({ default: { createTransport }, createTransport }));
+    await defaultTransports.sendMail(
+      { to: "a@b.c", from: "d@e.f", subject: "s", text: "t" },
+      { host: "smtp.example.com", port: 587, user: "u", pass: "p" },
+    );
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionTimeout: expect.any(Number),
+        greetingTimeout: expect.any(Number),
+        socketTimeout: expect.any(Number),
+      }),
+    );
   });
 });

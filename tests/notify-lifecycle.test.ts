@@ -6,7 +6,7 @@ import {
   notifyDraining,
   notifyPauseTransition,
 } from "@/lib/notify/lifecycle";
-import type { NotifyTransports } from "@/lib/notify/notifier";
+import { NOTIFY_DISPATCH_BUDGET_MS, type NotifyTransports } from "@/lib/notify/notifier";
 import { saveSettings } from "@/lib/settings/service";
 
 let db: DB;
@@ -62,5 +62,24 @@ describe("notifyDraining", () => {
   it("dispatches an automation_paused notification", async () => {
     await notifyDraining(db, transports);
     expect(postJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes within the dispatch budget when the channel never responds", async () => {
+    vi.useFakeTimers();
+    try {
+      const hanging: NotifyTransports = {
+        postJson: () => new Promise<void>(() => {}),
+        sendMail: vi.fn(async () => {}),
+      };
+      let settled = false;
+      const p = notifyDraining(db, hanging).then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(NOTIFY_DISPATCH_BUDGET_MS);
+      await p;
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
