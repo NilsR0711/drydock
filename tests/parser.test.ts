@@ -51,6 +51,31 @@ describe("StreamJsonParser against fixtures", () => {
     expect(events.at(-1)?.isError).toBe(false);
   });
 
+  it("reports the result event's session-total usage without double-counting (issue #87)", () => {
+    const p = new StreamJsonParser();
+    [...p.push(fixture("success.ndjson")), ...p.flush()];
+    // The result event's usage is the authoritative session total; it must be
+    // assigned, not added on top of the per-assistant-turn usages.
+    expect(p.totalInputTokens).toBe(15300);
+    expect(p.totalOutputTokens).toBe(2200);
+  });
+
+  it("retains per-turn token accumulation when the result omits usage", () => {
+    const p = new StreamJsonParser();
+    const assistant = JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "hi" }],
+        usage: { input_tokens: 120, output_tokens: 40 },
+      },
+    });
+    const result = JSON.stringify({ type: "result", subtype: "success", is_error: false });
+    [...p.push(`${assistant}\n${result}\n`), ...p.flush()];
+    expect(p.totalInputTokens).toBe(120);
+    expect(p.totalOutputTokens).toBe(40);
+  });
+
   it("parses the tool-use heavy run", () => {
     const p = new StreamJsonParser();
     const events = [...p.push(fixture("tool-use.ndjson")), ...p.flush()];
