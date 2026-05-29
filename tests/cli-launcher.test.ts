@@ -4,11 +4,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  compareVersions,
   detectInstallKind,
   isMainModule,
   parseArgs,
+  planUpdate,
   resolveDataDir,
   resolveDbPath,
+  resolveLatestVersion,
   updateCommand,
 } from "../bin/drydock.mjs";
 
@@ -116,6 +119,92 @@ describe("updateCommand", () => {
       command: "npm",
       args: ["install", "--global", "@nilsr0711/drydock@latest"],
     });
+  });
+});
+
+describe("compareVersions", () => {
+  it("orders by major, then minor, then patch", () => {
+    expect(compareVersions("1.0.0", "0.9.9")).toBe(1);
+    expect(compareVersions("0.2.0", "0.1.9")).toBe(1);
+    expect(compareVersions("0.1.2", "0.1.1")).toBe(1);
+    expect(compareVersions("0.1.1", "0.1.2")).toBe(-1);
+    expect(compareVersions("1.2.3", "1.2.3")).toBe(0);
+  });
+
+  it("tolerates a leading v", () => {
+    expect(compareVersions("v0.1.2", "0.1.1")).toBe(1);
+  });
+
+  it("throws on an unparseable version", () => {
+    expect(() => compareVersions("nope", "0.1.0")).toThrow();
+  });
+});
+
+describe("planUpdate", () => {
+  it("skips when already on the latest version", () => {
+    expect(planUpdate("0.1.2", "0.1.2")).toEqual({ action: "skip", reason: "up-to-date" });
+  });
+
+  it("skips when the installed version is ahead of the registry (dev build)", () => {
+    expect(planUpdate("0.2.0", "0.1.2")).toEqual({ action: "skip", reason: "up-to-date" });
+  });
+
+  it("installs and reports the transition when an update is available", () => {
+    expect(planUpdate("0.1.1", "0.1.2")).toEqual({
+      action: "install",
+      reason: "update-available",
+      latestVersion: "0.1.2",
+    });
+  });
+
+  it("installs anyway when the latest version is unknown", () => {
+    expect(planUpdate("0.1.1", null)).toEqual({ action: "install", reason: "unknown-latest" });
+  });
+
+  it("installs anyway when the latest version is unparseable", () => {
+    expect(planUpdate("0.1.1", "garbage")).toEqual({ action: "install", reason: "unknown-latest" });
+  });
+});
+
+describe("resolveLatestVersion", () => {
+  // Minimal stand-in for fetch; only `ok` and `json` are read by the function.
+  const fakeFetch = (impl: () => Promise<{ ok: boolean; json: () => Promise<unknown> }>) =>
+    impl as unknown as typeof fetch;
+
+  it("reads the version from the npm registry latest dist-tag", async () => {
+    const fetchImpl = fakeFetch(async () => ({
+      ok: true,
+      json: async () => ({ version: "0.1.2" }),
+    }));
+    expect(await resolveLatestVersion("@nilsr0711/drydock", { fetchImpl })).toBe("0.1.2");
+  });
+
+  it("returns null on a non-ok response", async () => {
+    const fetchImpl = fakeFetch(async () => ({ ok: false, json: async () => ({}) }));
+    expect(await resolveLatestVersion("@nilsr0711/drydock", { fetchImpl })).toBeNull();
+  });
+
+  it("returns null when the payload has no version", async () => {
+    const fetchImpl = fakeFetch(async () => ({ ok: true, json: async () => ({}) }));
+    expect(await resolveLatestVersion("@nilsr0711/drydock", { fetchImpl })).toBeNull();
+  });
+
+  it("returns null when the request throws", async () => {
+    const fetchImpl = fakeFetch(async () => {
+      throw new Error("offline");
+    });
+    expect(await resolveLatestVersion("@nilsr0711/drydock", { fetchImpl })).toBeNull();
+  });
+
+  it("fully encodes the scoped package name in the registry URL", async () => {
+    let requested = "";
+    const fetchImpl = ((url: string) => {
+      requested = url;
+      return Promise.resolve({ ok: true, json: async () => ({ version: "0.1.2" }) });
+    }) as unknown as typeof fetch;
+    await resolveLatestVersion("@nilsr0711/drydock", { fetchImpl });
+    expect(requested).toBe("https://registry.npmjs.org/%40nilsr0711%2Fdrydock/latest");
+    expect(requested).not.toContain("@nilsr0711/drydock");
   });
 });
 
