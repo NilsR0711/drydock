@@ -4,26 +4,24 @@ import { codexProvider } from "@/lib/agents/codex";
 
 /** Wrap plain text in the NDJSON envelope that stream-json one-shots emit. */
 function oneShotNdjson(text: string): string {
-  return (
-    [
-      JSON.stringify({ type: "system", session_id: "s1", model: "claude-opus-4-8" }),
-      JSON.stringify({
-        type: "assistant",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text }],
-          usage: { input_tokens: 10, output_tokens: 10 },
-        },
-      }),
-      JSON.stringify({
-        type: "result",
-        subtype: "success",
-        is_error: false,
-        total_cost_usd: 0.001,
+  return `${[
+    JSON.stringify({ type: "system", session_id: "s1", model: "claude-opus-4-8" }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text }],
         usage: { input_tokens: 10, output_tokens: 10 },
-      }),
-    ].join("\n") + "\n"
-  );
+      },
+    }),
+    JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      total_cost_usd: 0.001,
+      usage: { input_tokens: 10, output_tokens: 10 },
+    }),
+  ].join("\n")}\n`;
 }
 
 import { createDb, type DB } from "@/lib/db/client";
@@ -36,6 +34,7 @@ import {
   type DecomposeForge,
   decomposeRepo,
   markSubtasksDone,
+  markSubtasksParked,
   markSubtasksWorking,
   parseSubtaskList,
   subtaskPromptSection,
@@ -229,5 +228,41 @@ describe("markSubtasksWorking / markSubtasksDone", () => {
     replaceSubtasks(repo.id, 5, ["A", "B"], "h", db);
     markSubtasksDone(repo.id, 5, db);
     expect(listSubtasks(repo.id, 5, db).every((s) => s.status === "done")).toBe(true);
+  });
+});
+
+describe("markSubtasksParked", () => {
+  it("resets in_progress subtasks to pending so a retry picks them up again", () => {
+    replaceSubtasks(repo.id, 5, ["A", "B"], "h", db);
+    markSubtasksWorking(repo.id, 5, db);
+    expect(listSubtasks(repo.id, 5, db).every((s) => s.status === "in_progress")).toBe(true);
+
+    markSubtasksParked(repo.id, 5, db);
+    expect(listSubtasks(repo.id, 5, db).every((s) => s.status === "pending")).toBe(true);
+  });
+
+  it("leaves terminal subtasks alone (done, skipped)", () => {
+    replaceSubtasks(repo.id, 5, ["A", "B"], "h", db);
+    markSubtasksDone(repo.id, 5, db);
+
+    markSubtasksParked(repo.id, 5, db);
+    expect(listSubtasks(repo.id, 5, db).every((s) => s.status === "done")).toBe(true);
+  });
+
+  it("is a no-op when subtasks are already pending", () => {
+    replaceSubtasks(repo.id, 5, ["A", "B"], "h", db);
+
+    markSubtasksParked(repo.id, 5, db);
+    expect(listSubtasks(repo.id, 5, db).every((s) => s.status === "pending")).toBe(true);
+  });
+
+  it("working → parked → working cycle keeps subtasks resumable", () => {
+    replaceSubtasks(repo.id, 5, ["A", "B"], "h", db);
+
+    markSubtasksWorking(repo.id, 5, db);
+    markSubtasksParked(repo.id, 5, db);
+    markSubtasksWorking(repo.id, 5, db);
+
+    expect(listSubtasks(repo.id, 5, db).every((s) => s.status === "in_progress")).toBe(true);
   });
 });
