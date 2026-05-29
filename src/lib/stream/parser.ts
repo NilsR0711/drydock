@@ -208,9 +208,18 @@ export class StreamJsonParser {
     if (!parsed) return null;
     if (parsed.sessionId) this.sessionId = parsed.sessionId;
     if (parsed.model) this.model = parsed.model;
-    this.totalInputTokens += parsed.inputTokens;
-    this.totalOutputTokens += parsed.outputTokens;
-    if (parsed.type === "result" && parsed.costUsd !== undefined) this.costUsd = parsed.costUsd;
+    if (parsed.type === "result") {
+      // The result event's `usage` is the authoritative session total, not a
+      // per-turn delta — assign it rather than add, otherwise it double-counts
+      // on top of the per-assistant-turn usages already accumulated (issue #87).
+      // If the result omits usage (0/0), keep the accumulated per-turn totals.
+      if (parsed.inputTokens > 0) this.totalInputTokens = parsed.inputTokens;
+      if (parsed.outputTokens > 0) this.totalOutputTokens = parsed.outputTokens;
+      if (parsed.costUsd !== undefined) this.costUsd = parsed.costUsd;
+    } else {
+      this.totalInputTokens += parsed.inputTokens;
+      this.totalOutputTokens += parsed.outputTokens;
+    }
     return parsed;
   }
 }
