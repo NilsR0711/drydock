@@ -141,6 +141,13 @@
       "when": 1780010868125,
       "tag": "0019_uneven_meggan",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1780014414336,
+      "tag": "0020_chunky_meggan",
+      "breakpoints": true
     }
   ]
 }

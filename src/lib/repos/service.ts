@@ -56,6 +56,9 @@ export const repoInputSchema = z.object({
   // back to the global settings.maxJobCostUsd default.
   maxJobCostUsd: z.number().nonnegative().nullish(),
   agentInstructions: z.string().max(AGENT_INSTRUCTIONS_MAX_CHARS).nullish(),
+  // Per-repo inbound webhook secret (issue #61). Non-empty enables webhook-driven
+  // sync; null/empty disables it and leaves polling as the sole sync path.
+  webhookSecret: z.string().nullish(),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 

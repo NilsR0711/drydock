@@ -89,6 +89,12 @@ export const repos = sqliteTable("repos", {
   // → publish release pipeline. Cutting a public release is hard to reverse, so
   // it is gated globally and per repo and is fully previewable.
   releaseEnabled: integer("release_enabled", { mode: "boolean" }).notNull().default(false),
+  // Opt-in webhook-driven issue sync (issue #61). See ADR 029. A non-empty
+  // secret enables the inbound receiver at /api/webhooks/<repoId>: it verifies
+  // each delivery (GitHub HMAC-SHA256 signature / GitLab token) and triggers a
+  // targeted, debounced sync for this repo. Null/empty leaves polling as the
+  // sole sync path; the secret doubles as the per-repo opt-in switch.
+  webhookSecret: text("webhook_secret"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 
