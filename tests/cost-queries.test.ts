@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { costByModel, dailyCosts, todayCost, topJobs } from "@/lib/db/cost-queries";
-import { jobs } from "@/lib/db/schema";
+import { jobs, oneShotCosts } from "@/lib/db/schema";
 import { addRepo } from "@/lib/repos/service";
 
 let db: DB;
@@ -70,5 +70,41 @@ describe("cost queries", () => {
     const now = Math.floor(Date.now() / 1000);
     db.insert(jobs).values({ repoId: b, issueNumber: 9, startedAt: now, costUsd: 1 }).run();
     expect(dailyCosts(db, repoId)[0]?.costUsd).toBeCloseTo(0.07);
+  });
+
+  it("todayCost includes one-shot costs from oneShotCosts table (issue #95)", () => {
+    const now = Math.floor(Date.now() / 1000);
+    db.insert(oneShotCosts)
+      .values({
+        repoId,
+        type: "verify",
+        costUsd: 0.01,
+        inputTokens: 80,
+        outputTokens: 20,
+        createdAt: now,
+      })
+      .run();
+    // jobs sum = 0.07, one-shot = 0.01 → total 0.08
+    expect(todayCost(db, repoId)).toBeCloseTo(0.08);
+    expect(todayCost(db)).toBeCloseTo(0.08);
+  });
+
+  it("todayCost one-shot costs scope to repo (issue #95)", () => {
+    const b = addRepo({ path: "/b3", name: "b3" }, db).id;
+    const now = Math.floor(Date.now() / 1000);
+    db.insert(oneShotCosts)
+      .values({
+        repoId: b,
+        type: "decompose",
+        costUsd: 0.05,
+        inputTokens: 500,
+        outputTokens: 100,
+        createdAt: now,
+      })
+      .run();
+    // repoId has only its jobs (0.07), not repo b's one-shots
+    expect(todayCost(db, repoId)).toBeCloseTo(0.07);
+    expect(todayCost(db, b)).toBeCloseTo(0.05);
+    expect(todayCost(db)).toBeCloseTo(0.12);
   });
 });

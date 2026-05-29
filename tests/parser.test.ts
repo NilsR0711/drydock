@@ -101,6 +101,104 @@ describe("StreamJsonParser against fixtures", () => {
   });
 });
 
+describe("StreamJsonParser cache token tracking (issue #95)", () => {
+  it("extracts cache_creation_input_tokens from an assistant event", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "hi" }],
+        usage: { input_tokens: 100, output_tokens: 20, cache_creation_input_tokens: 500 },
+      },
+    });
+    const e = parseLine(line);
+    expect(e?.cacheCreationInputTokens).toBe(500);
+    expect(e?.cacheReadInputTokens).toBe(0);
+  });
+
+  it("extracts cache_read_input_tokens from an assistant event", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "hi" }],
+        usage: { input_tokens: 80, output_tokens: 10, cache_read_input_tokens: 2000 },
+      },
+    });
+    const e = parseLine(line);
+    expect(e?.cacheReadInputTokens).toBe(2000);
+    expect(e?.cacheCreationInputTokens).toBe(0);
+  });
+
+  it("extracts cache tokens from a result event", () => {
+    const line = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      total_cost_usd: 0.01,
+      usage: { input_tokens: 300, output_tokens: 50, cache_read_input_tokens: 5000 },
+    });
+    const e = parseLine(line);
+    expect(e?.cacheReadInputTokens).toBe(5000);
+  });
+
+  it("accumulates totalCacheCreationInputTokens across assistant events", () => {
+    const p = new StreamJsonParser();
+    const turn = (cacheWrite: number) =>
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [],
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: cacheWrite },
+        },
+      });
+    p.push(`${turn(300)}\n${turn(200)}\n`);
+    expect(p.totalCacheCreationInputTokens).toBe(500);
+  });
+
+  it("assigns totalCacheReadInputTokens from the result event (authoritative session total)", () => {
+    const p = new StreamJsonParser();
+    const assistantLine = JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [],
+        usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100 },
+      },
+    });
+    const resultLine = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 8000 },
+    });
+    p.push(`${assistantLine}\n${resultLine}\n`);
+    // Result event is authoritative — should override accumulated value
+    expect(p.totalCacheReadInputTokens).toBe(8000);
+  });
+
+  it("retains per-turn cache accumulation when result omits cache fields", () => {
+    const p = new StreamJsonParser();
+    const assistantLine = JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [],
+        usage: { input_tokens: 50, output_tokens: 10, cache_read_input_tokens: 300 },
+      },
+    });
+    const resultLine = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      usage: { input_tokens: 50, output_tokens: 10 },
+    });
+    p.push(`${assistantLine}\n${resultLine}\n`);
+    expect(p.totalCacheReadInputTokens).toBe(300);
+  });
+});
+
 describe("StreamJsonParser malformed input resilience (issue #46)", () => {
   it("does not throw when a non-JSON line is pushed", () => {
     const p = new StreamJsonParser();

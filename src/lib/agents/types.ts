@@ -75,6 +75,12 @@ export interface AgentProvider {
    * exits (no streaming event format). Used by issue decomposition (issue #49).
    */
   buildOneShotArgs(opts: OneShotArgsOptions): string[];
+  /**
+   * Build CLI args for a cost-tracked one-shot in stream-json format, so the
+   * runner can extract token usage and `total_cost_usd` from the result event.
+   * Returns null when the provider does not support stream-json one-shots.
+   */
+  buildStreamOneShotArgs(opts: OneShotArgsOptions): string[] | null;
   /** Create a fresh incremental parser for this agent's stdout. */
   createParser(): StreamParser;
   /** Estimate cost in USD from token counts (used when the stream omits it). */

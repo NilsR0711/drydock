@@ -4,10 +4,13 @@ import { estimateCost, MAX_PRICE, PRICING, priceForModel } from "@/lib/orchestra
 
 describe("pricing", () => {
   it("knows Opus 4.8, Opus 4.7, Sonnet 4.5 and Haiku 4.5 rates", () => {
-    expect(priceForModel("claude-opus-4-8")).toEqual({ inputPerMTok: 5, outputPerMTok: 25 });
-    expect(priceForModel("claude-opus-4-7")).toEqual({ inputPerMTok: 15, outputPerMTok: 75 });
-    expect(priceForModel("claude-sonnet-4-5")).toEqual({ inputPerMTok: 3, outputPerMTok: 15 });
-    expect(priceForModel("claude-haiku-4-5")).toEqual({ inputPerMTok: 1, outputPerMTok: 5 });
+    expect(priceForModel("claude-opus-4-8")).toMatchObject({ inputPerMTok: 5, outputPerMTok: 25 });
+    expect(priceForModel("claude-opus-4-7")).toMatchObject({ inputPerMTok: 15, outputPerMTok: 75 });
+    expect(priceForModel("claude-sonnet-4-5")).toMatchObject({
+      inputPerMTok: 3,
+      outputPerMTok: 15,
+    });
+    expect(priceForModel("claude-haiku-4-5")).toMatchObject({ inputPerMTok: 1, outputPerMTok: 5 });
   });
 
   it("estimates cost from tokens", () => {
@@ -63,11 +66,64 @@ describe("pricing", () => {
   });
 });
 
+describe("cache token pricing (issue #95)", () => {
+  it("all known Claude models carry cache write and read rates", () => {
+    for (const [id, price] of Object.entries(PRICING)) {
+      expect(price.cacheWritePerMTok, `${id} missing cacheWritePerMTok`).toBeGreaterThan(0);
+      expect(price.cacheReadPerMTok, `${id} missing cacheReadPerMTok`).toBeGreaterThan(0);
+    }
+  });
+
+  it("cache write rate is 1.25× the input rate for all known Claude models", () => {
+    for (const [id, price] of Object.entries(PRICING)) {
+      expect(price.cacheWritePerMTok, id).toBeCloseTo(price.inputPerMTok * 1.25, 5);
+    }
+  });
+
+  it("cache read rate is 0.10× the input rate for all known Claude models", () => {
+    for (const [id, price] of Object.entries(PRICING)) {
+      expect(price.cacheReadPerMTok, id).toBeCloseTo(price.inputPerMTok * 0.1, 5);
+    }
+  });
+
+  it("estimateCost includes cache creation token cost", () => {
+    // Sonnet 4.5: $3/MTok input, $3.75/MTok cache-write
+    // 1M cache-write @ $3.75 = $3.75; 0 input, 0 output → $3.75
+    expect(estimateCost("claude-sonnet-4-5", 0, 0, 1_000_000, 0)).toBeCloseTo(3.75);
+  });
+
+  it("estimateCost includes cache read token cost", () => {
+    // Sonnet 4.5: $3/MTok input, $0.30/MTok cache-read
+    // 1M cache-read @ $0.30 = $0.30; 0 input, 0 output → $0.30
+    expect(estimateCost("claude-sonnet-4-5", 0, 0, 0, 1_000_000)).toBeCloseTo(0.3);
+  });
+
+  it("estimateCost sums regular + cache tokens", () => {
+    // Haiku 4.5: $1/MTok input, $5/MTok output, $1.25/MTok write, $0.10/MTok read
+    // 1M input @ $1 + 1M output @ $5 + 500k write @ $1.25 + 2M read @ $0.10
+    // = $1 + $5 + $0.625 + $0.20 = $6.825
+    expect(estimateCost("claude-haiku-4-5", 1_000_000, 1_000_000, 500_000, 2_000_000)).toBeCloseTo(
+      6.825,
+    );
+  });
+
+  it("estimateCost is backward-compatible when cache params are omitted", () => {
+    // Existing callers that pass only input/output tokens must still work
+    expect(estimateCost("claude-sonnet-4-5", 1_000_000, 1_000_000)).toBeCloseTo(18);
+  });
+});
+
 describe("codex pricing", () => {
   it("knows gpt-5-codex, gpt-5 and gpt-5-mini rates", () => {
-    expect(codexPriceForModel("gpt-5-codex")).toEqual({ inputPerMTok: 1.25, outputPerMTok: 10 });
-    expect(codexPriceForModel("gpt-5")).toEqual({ inputPerMTok: 1.25, outputPerMTok: 10 });
-    expect(codexPriceForModel("gpt-5-mini")).toEqual({ inputPerMTok: 0.25, outputPerMTok: 2 });
+    expect(codexPriceForModel("gpt-5-codex")).toMatchObject({
+      inputPerMTok: 1.25,
+      outputPerMTok: 10,
+    });
+    expect(codexPriceForModel("gpt-5")).toMatchObject({ inputPerMTok: 1.25, outputPerMTok: 10 });
+    expect(codexPriceForModel("gpt-5-mini")).toMatchObject({
+      inputPerMTok: 0.25,
+      outputPerMTok: 2,
+    });
   });
 
   describe("unknown model id handling (fail-safe for budgeting)", () => {

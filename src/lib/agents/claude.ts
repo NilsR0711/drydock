@@ -52,6 +52,18 @@ export const claudeProvider: AgentProvider = {
   // caller gets the plain final answer to parse a JSON array out of.
   buildOneShotArgs: ({ prompt, model }) => ["-p", prompt, "--model", model],
 
+  // Cost-tracked one-shot: same as start args but without --max-turns and
+  // --permission-mode, since one-shots don't edit files and exit after one turn.
+  buildStreamOneShotArgs: ({ prompt, model }) => [
+    "-p",
+    prompt,
+    "--model",
+    model,
+    "--output-format",
+    "stream-json",
+    "--verbose",
+  ],
+
   createParser: () => new StreamJsonParser(),
 
   estimateCost,

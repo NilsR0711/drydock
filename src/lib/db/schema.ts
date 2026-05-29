@@ -434,6 +434,34 @@ export const settings = sqliteTable("settings", {
   value: text("value").notNull(),
 });
 
+/**
+ * Cost ledger for one-shot agent calls that are not bound to a job: issue
+ * decomposition sweeps and release evaluation runs (issue #95). These calls
+ * spawn a real agent CLI but have no originating job, so their spend is
+ * recorded here and folded into `todayCost`/`dailyCosts` alongside job spend.
+ */
+export const oneShotCosts = sqliteTable(
+  "one_shot_costs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repos.id, { onDelete: "cascade" }),
+    /** The driver that made the call: "decompose" | "release". */
+    type: text("type").notNull(),
+    costUsd: real("cost_usd").notNull().default(0),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    repoIdx: index("one_shot_costs_repo_idx").on(t.repoId),
+  }),
+);
+
+export type OneShotCost = typeof oneShotCosts.$inferSelect;
+export type NewOneShotCost = typeof oneShotCosts.$inferInsert;
+
 export type Repo = typeof repos.$inferSelect;
 export type NewRepo = typeof repos.$inferInsert;
 export type Job = typeof jobs.$inferSelect;

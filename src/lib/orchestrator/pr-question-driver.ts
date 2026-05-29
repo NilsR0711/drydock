@@ -18,6 +18,7 @@ import {
 import { listIssues } from "@/lib/issues/service";
 import { redactSecrets } from "@/lib/log/redact";
 import { recordEvent } from "./jobs";
+import { runOneShotAndRecordCost } from "./one-shot-runner";
 import { markQuestionAnswered, markQuestionError } from "./pr-questions";
 import { listFeedbackItems } from "./review-feedback";
 
@@ -56,20 +57,28 @@ export function buildAnswerGenerator(deps: {
   command: string;
   model: string;
   cwd: string;
+  repoId?: number;
+  db?: DB;
   runner?: CommandRunner;
   timeoutMs?: number;
 }): PrAnswerGenerator {
-  const runner = deps.runner ?? spawnRunner;
   const timeoutMs = deps.timeoutMs ?? PR_QUESTION_TIMEOUT_MS;
   return async (input) => {
-    const args = deps.provider.buildOneShotArgs({
-      prompt: buildQuestionPrompt(input),
-      model: deps.model,
-    });
     try {
-      const res = await runner(deps.command, args, deps.cwd, { timeoutMs });
-      if (res.exitCode !== 0) return null;
-      return parseAnswer(res.stdout);
+      const { text, exitCode } = await runOneShotAndRecordCost({
+        provider: deps.provider,
+        command: deps.command,
+        model: deps.model,
+        cwd: deps.cwd,
+        prompt: buildQuestionPrompt(input),
+        repoId: deps.repoId,
+        type: "pr-question",
+        timeoutMs,
+        runner: deps.runner,
+        db: deps.db,
+      });
+      if (exitCode !== 0) return null;
+      return parseAnswer(text);
     } catch {
       return null;
     }

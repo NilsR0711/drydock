@@ -16,6 +16,7 @@ import {
 } from "@/lib/issues/verify";
 import { redactSecrets } from "@/lib/log/redact";
 import { recordEvent } from "./jobs";
+import { runOneShotAndRecordCost } from "./one-shot-runner";
 import type { SubtaskStatus } from "./subtask-state";
 
 /**
@@ -47,20 +48,28 @@ export function buildVerificationGenerator(deps: {
   command: string;
   model: string;
   cwd: string;
+  repoId?: number;
+  db?: DB;
   runner?: CommandRunner;
   timeoutMs?: number;
 }): VerificationGenerator {
-  const runner = deps.runner ?? spawnRunner;
   const timeoutMs = deps.timeoutMs ?? VERIFY_TIMEOUT_MS;
   return async (input) => {
-    const args = deps.provider.buildOneShotArgs({
-      prompt: buildVerificationPrompt(input),
-      model: deps.model,
-    });
     try {
-      const res = await runner(deps.command, args, deps.cwd, { timeoutMs });
-      if (res.exitCode !== 0) return null;
-      return parseVerification(res.stdout);
+      const { text, exitCode } = await runOneShotAndRecordCost({
+        provider: deps.provider,
+        command: deps.command,
+        model: deps.model,
+        cwd: deps.cwd,
+        prompt: buildVerificationPrompt(input),
+        repoId: deps.repoId,
+        type: "verify",
+        timeoutMs,
+        runner: deps.runner,
+        db: deps.db,
+      });
+      if (exitCode !== 0) return null;
+      return parseVerification(text);
     } catch {
       return null;
     }
@@ -202,6 +211,8 @@ export async function runVerificationPass(
         command,
         model,
         cwd: tmp,
+        repoId: repo.id,
+        db,
         runner: deps.runner,
       });
     }

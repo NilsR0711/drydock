@@ -1,6 +1,6 @@
 import { and, desc, type SQL, sql } from "drizzle-orm";
 import { type DB, getDb } from "./client";
-import { type Job, jobs } from "./schema";
+import { type Job, jobs, oneShotCosts } from "./schema";
 
 export interface DailyCost {
   day: string;
@@ -57,13 +57,23 @@ export function topJobs(limit = 10, db: DB = getDb(), repoId?: number): Job[] {
 
 /** Total cost for the current UTC day — used to enforce the daily limit. */
 export function todayCost(db: DB = getDb(), repoId?: number): number {
-  const today = sql`strftime('%Y-%m-%d', ${jobs.startedAt}, 'unixepoch') = strftime('%Y-%m-%d', 'now')`;
-  const row = db
-    .select({
-      total: sql<number>`coalesce(sum(${jobs.costUsd}), 0)`,
-    })
-    .from(jobs)
-    .where(and(today, repoFilter(repoId)))
-    .get();
+  const repoWhere = repoId !== undefined ? sql` AND repo_id = ${repoId}` : sql``;
+
+  // Union job costs + one-shot costs for today. Raw SQL is cleaner than two
+  // separate Drizzle queries because Drizzle doesn't expose UNION ALL natively.
+  const row = db.get<{ total: number }>(sql`
+      SELECT coalesce(sum(c), 0) AS total FROM (
+        SELECT coalesce(sum(cost_usd), 0) AS c
+        FROM jobs
+        WHERE strftime('%Y-%m-%d', started_at, 'unixepoch') = strftime('%Y-%m-%d', 'now')
+          AND started_at IS NOT NULL
+          ${repoWhere}
+        UNION ALL
+        SELECT coalesce(sum(cost_usd), 0) AS c
+        FROM one_shot_costs
+        WHERE strftime('%Y-%m-%d', created_at, 'unixepoch') = strftime('%Y-%m-%d', 'now')
+          ${repoWhere}
+      )
+    `);
   return row?.total ?? 0;
 }

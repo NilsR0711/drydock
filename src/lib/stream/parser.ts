@@ -76,6 +76,8 @@ export interface ParsedEvent {
   chunks: ContentChunk[];
   inputTokens: number;
   outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
   costUsd?: number;
   isError: boolean;
   /** The original event as emitted by the agent CLI (shape varies per agent). */
@@ -115,6 +117,8 @@ function toParsed(event: StreamEvent): ParsedEvent {
     chunks: [],
     inputTokens: 0,
     outputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
     isError: false,
     raw: event,
   };
@@ -126,6 +130,8 @@ function toParsed(event: StreamEvent): ParsedEvent {
     base.chunks = extractContent(event.message.content);
     base.inputTokens = event.message.usage?.input_tokens ?? 0;
     base.outputTokens = event.message.usage?.output_tokens ?? 0;
+    base.cacheCreationInputTokens = event.message.usage?.cache_creation_input_tokens ?? 0;
+    base.cacheReadInputTokens = event.message.usage?.cache_read_input_tokens ?? 0;
   } else if (event.type === "user") {
     base.chunks = extractContent(event.message.content);
   } else {
@@ -133,6 +139,8 @@ function toParsed(event: StreamEvent): ParsedEvent {
     base.costUsd = event.total_cost_usd;
     base.inputTokens = event.usage?.input_tokens ?? 0;
     base.outputTokens = event.usage?.output_tokens ?? 0;
+    base.cacheCreationInputTokens = event.usage?.cache_creation_input_tokens ?? 0;
+    base.cacheReadInputTokens = event.usage?.cache_read_input_tokens ?? 0;
     base.isError = event.is_error ?? false;
   }
   return base;
@@ -168,6 +176,8 @@ export class StreamJsonParser {
   model?: string;
   totalInputTokens = 0;
   totalOutputTokens = 0;
+  totalCacheCreationInputTokens = 0;
+  totalCacheReadInputTokens = 0;
   costUsd = 0;
   /** Invoked for every line that fails to parse; the line is then skipped. */
   onParseError?: (error: ParseError) => void;
@@ -215,10 +225,14 @@ export class StreamJsonParser {
       // If the result omits usage (0/0), keep the accumulated per-turn totals.
       if (parsed.inputTokens > 0) this.totalInputTokens = parsed.inputTokens;
       if (parsed.outputTokens > 0) this.totalOutputTokens = parsed.outputTokens;
+      if (parsed.cacheReadInputTokens > 0)
+        this.totalCacheReadInputTokens = parsed.cacheReadInputTokens;
       if (parsed.costUsd !== undefined) this.costUsd = parsed.costUsd;
     } else {
       this.totalInputTokens += parsed.inputTokens;
       this.totalOutputTokens += parsed.outputTokens;
+      this.totalCacheCreationInputTokens += parsed.cacheCreationInputTokens;
+      this.totalCacheReadInputTokens += parsed.cacheReadInputTokens;
     }
     return parsed;
   }

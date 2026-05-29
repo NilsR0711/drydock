@@ -16,15 +16,20 @@ export const CODEX_DEFAULT_MODEL = "gpt-5-codex";
  * stream, so the orchestrator always estimates from these.
  */
 export const CODEX_PRICING: Record<string, ModelPrice> = {
-  "gpt-5-codex": { inputPerMTok: 1.25, outputPerMTok: 10 },
-  "gpt-5": { inputPerMTok: 1.25, outputPerMTok: 10 },
-  "gpt-5-mini": { inputPerMTok: 0.25, outputPerMTok: 2 },
+  "gpt-5-codex": {
+    inputPerMTok: 1.25,
+    outputPerMTok: 10,
+    cacheWritePerMTok: 0,
+    cacheReadPerMTok: 0,
+  },
+  "gpt-5": { inputPerMTok: 1.25, outputPerMTok: 10, cacheWritePerMTok: 0, cacheReadPerMTok: 0 },
+  "gpt-5-mini": { inputPerMTok: 0.25, outputPerMTok: 2, cacheWritePerMTok: 0, cacheReadPerMTok: 0 },
 };
 
 /** The most expensive entry in CODEX_PRICING by output rate — used as a fail-safe fallback. */
 export const CODEX_MAX_PRICE: ModelPrice = Object.values(CODEX_PRICING).reduce(
   (max, p) => (p.outputPerMTok > max.outputPerMTok ? p : max),
-  { inputPerMTok: 0, outputPerMTok: 0 },
+  { inputPerMTok: 0, outputPerMTok: 0, cacheWritePerMTok: 0, cacheReadPerMTok: 0 },
 );
 
 export function codexPriceForModel(model: string | null | undefined): ModelPrice {
@@ -123,6 +128,8 @@ function toParsed(event: CodexEvent): ParsedEvent | null {
     chunks: [],
     inputTokens: 0,
     outputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
     isError: false,
     raw: event,
   };
@@ -265,6 +272,10 @@ export const codexProvider: AgentProvider = {
   // plain final message, which the caller parses for a JSON array. No sandbox
   // flag — decomposition only reads the issue prose, it never edits the repo.
   buildOneShotArgs: ({ prompt, model }) => ["exec", "--model", model, prompt],
+
+  // Codex CLI does not support --output-format stream-json; cost tracking for
+  // Codex one-shots is not available.
+  buildStreamOneShotArgs: () => null,
 
   createParser: () => new CodexStreamParser(),
 
