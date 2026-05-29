@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { type CommandResult, type CommandRunner, spawnRunner } from "@/lib/exec/runner";
 import { type EtagCache, sharedEtagCache } from "./etag-cache";
-import { parseIncludeResponse } from "./gh-response";
+import { type IncludeResponse, parseIncludeResponse, parseNextLink } from "./gh-response";
 import { currentPriority } from "./priority";
 import {
   parseRateLimitHeaders,
@@ -152,6 +152,13 @@ const reviewThreadsSchema = z.object({
 export class GhError extends Error {}
 
 /**
+ * Hard cap on the number of issue-list pages followed in a single fetch. At 100
+ * issues per page this bounds a sweep at 10k open issues — far above any real
+ * repo — so a misbehaving `Link` header can never spin the loop indefinitely.
+ */
+export const MAX_ISSUE_PAGES = 100;
+
+/**
  * Join a flag and a user-controlled value as a single `--flag=value` token.
  * Using the `=` form prevents `gh`/cobra from interpreting a value that begins
  * with `-` (e.g. a title like "-rf") as another flag (argument injection).
@@ -163,6 +170,18 @@ function flagEq(flag: string, value: string): string {
 /** A 429 (or a primary-limit 403 with `remaining: 0`) is a hard rate-limit. */
 function isRateLimitStatus(status: number | null, headers: Record<string, string>): boolean {
   return status === 429 || (status === 403 && headers["x-ratelimit-remaining"] === "0");
+}
+
+/** Parse one issue-list page body into its raw JSON array of REST rows. */
+function parseRawIssueArray(body: string): unknown[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(body || "[]");
+  } catch {
+    throw new GhError("unexpected gh output: response body was not valid JSON");
+  }
+  if (!Array.isArray(value)) throw new GhError("unexpected gh output: expected a JSON array");
+  return value;
 }
 
 /**
@@ -225,10 +244,16 @@ export class GhClient {
   }
 
   /**
-   * Conditional GET of an issues list via `gh api --include`. Sends the cached
-   * ETag as `If-None-Match`; on a 304 the unchanged body is reused (no budget
-   * spent). Observes rate-limit headers, backs off on a 429, and caches the
-   * ETag of a fresh 200. Pull requests are filtered out.
+   * Conditional, paginated GET of an issues list via `gh api --include`.
+   *
+   * The first page sends the cached ETag as `If-None-Match`; on a 304 the cached
+   * body — the full multi-page list captured on the prior fetch — is replayed
+   * without spending budget. A fresh 200 starts the accumulation and the
+   * `rel="next"` `Link` header is followed (bounded by {@link MAX_ISSUE_PAGES})
+   * until the list is exhausted. The combined list is cached under the first
+   * page's ETag so an unchanged first page replays every page. Rate-limit
+   * headers are observed on every page, a 429 backs off, and pull requests are
+   * filtered out.
    */
   private async conditionalList(cacheKey: string, query: string): Promise<GhIssue[]> {
     this.gate("core");
@@ -237,27 +262,54 @@ export class GhClient {
     if (prior) args.push("-H", `If-None-Match: ${prior.etag}`);
 
     const res = await this.run("gh", args, this.cwd);
-    const response = parseIncludeResponse(res.stdout);
+    const response = this.checkListResponse(res, parseIncludeResponse(res.stdout));
 
+    if (response.status === 304 && prior) {
+      return this.toGhIssues(parseRawIssueArray(prior.body)); // unchanged: no budget consumed
+    }
+
+    const raw: unknown[] = [...parseRawIssueArray(response.body)];
+    let next = parseNextLink(response.headers.link);
+    let pages = 1;
+    while (next && pages < MAX_ISSUE_PAGES) {
+      this.gate("core");
+      const pageRes = await this.run("gh", ["api", next, "--include"], this.cwd);
+      const page = this.checkListResponse(pageRes, parseIncludeResponse(pageRes.stdout));
+      raw.push(...parseRawIssueArray(page.body));
+      next = parseNextLink(page.headers.link);
+      pages++;
+    }
+
+    // Cache the combined list under the first page's ETag so a later 304 (first
+    // page unchanged) replays every page, not just the first.
+    const etag = response.headers.etag;
+    if (etag) this.etags.set(cacheKey, etag, JSON.stringify(raw));
+    return this.toGhIssues(raw);
+  }
+
+  /**
+   * Observe rate-limit headers and turn a non-2xx (other than a 304 with a prior
+   * ETag) into the right error: a 429/limited status backs off and throws, any
+   * other non-200 throws. Returns the parsed response for the caller to use.
+   */
+  private checkListResponse(res: CommandResult, response: IncludeResponse): IncludeResponse {
     const rl = parseRateLimitHeaders(response.headers);
     if (rl) this.governor.observe(rl.resource, rl.snapshot);
-
-    let body: string;
-    if (response.status === 304 && prior) {
-      body = prior.body; // unchanged list: no budget consumed
-    } else if (isRateLimitStatus(response.status, response.headers)) {
+    if (response.status === 304) return response;
+    if (isRateLimitStatus(response.status, response.headers)) {
       const reset = Number(response.headers["x-ratelimit-reset"]);
       this.governor.note429("core", Number.isFinite(reset) ? reset : undefined);
       throw new GhError(`gh api rate limited (status ${response.status})`);
-    } else if (response.status === 200) {
-      const etag = response.headers.etag;
-      if (etag) this.etags.set(cacheKey, etag, response.body);
-      body = response.body;
-    } else {
+    }
+    if (response.status !== 200) {
       throw new GhError(res.stderr || `gh api failed (status ${response.status ?? "unknown"})`);
     }
+    return response;
+  }
 
-    const parsed = z.array(ghRestIssueSchema).safeParse(JSON.parse(body || "[]"));
+  /** Validate accumulated REST issue rows and drop pull requests. */
+  private toGhIssues(raw: unknown[]): GhIssue[] {
+    const parsed = z.array(ghRestIssueSchema).safeParse(raw);
     if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
     return parsed.data
       .filter((i) => !i.isPullRequest)

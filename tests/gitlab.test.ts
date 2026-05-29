@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CommandResult } from "@/lib/exec/runner";
-import { GitlabForge } from "@/lib/forge/gitlab";
+import { GitlabForge, MAX_ISSUE_PAGES } from "@/lib/forge/gitlab";
 import type { HttpClient, HttpRequest, HttpResponse } from "@/lib/forge/http";
 import { ForgeError } from "@/lib/forge/types";
 
@@ -131,6 +131,78 @@ describe("GitlabForge.listIssues", () => {
       },
     ]);
     await expect(forge.listIssues("x")).rejects.toBeInstanceOf(ForgeError);
+  });
+});
+
+describe("GitlabForge list pagination", () => {
+  it("follows X-Next-Page until every page is fetched (listAllIssues)", async () => {
+    const calls: string[] = [];
+    const http: HttpClient = async (url) => {
+      calls.push(url);
+      if (url.includes("page=2")) {
+        return {
+          status: 200,
+          ok: true,
+          body: JSON.stringify([{ iid: 2, title: "b", labels: [] }]),
+        };
+      }
+      return {
+        status: 200,
+        ok: true,
+        body: JSON.stringify([{ iid: 1, title: "a", labels: [] }]),
+        headers: { "x-next-page": "2" },
+      };
+    };
+    const forge = new GitlabForge(
+      { cwd: "/repo", baseUrl: null, token: "t" },
+      { http, run: fakeRun(REMOTE) },
+    );
+    const issues = await forge.listAllIssues();
+    expect(issues.map((i) => i.number)).toEqual([1, 2]);
+    expect(calls.some((u) => u.includes("page=2"))).toBe(true);
+  });
+
+  it("follows X-Next-Page for the labelled listIssues path too", async () => {
+    const http: HttpClient = async (url) => {
+      if (url.includes("page=2")) {
+        return {
+          status: 200,
+          ok: true,
+          body: JSON.stringify([{ iid: 4, title: "d", labels: [] }]),
+        };
+      }
+      return {
+        status: 200,
+        ok: true,
+        body: JSON.stringify([{ iid: 3, title: "c", labels: [] }]),
+        headers: { "x-next-page": "2" },
+      };
+    };
+    const forge = new GitlabForge(
+      { cwd: "/repo", baseUrl: null, token: "t" },
+      { http, run: fakeRun(REMOTE) },
+    );
+    const issues = await forge.listIssues("bug");
+    expect(issues.map((i) => i.number)).toEqual([3, 4]);
+  });
+
+  it("stops at MAX_ISSUE_PAGES when X-Next-Page never clears", async () => {
+    let requests = 0;
+    const http: HttpClient = async () => {
+      requests++;
+      return {
+        status: 200,
+        ok: true,
+        body: JSON.stringify([{ iid: requests, title: "x", labels: [] }]),
+        headers: { "x-next-page": String(requests + 1) }, // always advances
+      };
+    };
+    const forge = new GitlabForge(
+      { cwd: "/repo", baseUrl: null, token: "t" },
+      { http, run: fakeRun(REMOTE) },
+    );
+    await forge.listAllIssues();
+    expect(requests).toBe(MAX_ISSUE_PAGES);
   });
 });
 

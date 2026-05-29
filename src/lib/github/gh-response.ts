@@ -47,3 +47,17 @@ export function parseIncludeResponse(raw: string): IncludeResponse {
 
   return { status, headers, body };
 }
+
+/**
+ * Extract the `rel="next"` URL from a GitHub `Link` header, or null when there
+ * is no further page. The header lists comma-separated `<url>; rel="..."`
+ * entries; only the `next` relation is followed when paginating a list.
+ */
+export function parseNextLink(link: string | undefined): string | null {
+  if (!link) return null;
+  for (const part of link.split(",")) {
+    const match = part.match(/<([^>]+)>\s*;\s*rel="?next"?/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
