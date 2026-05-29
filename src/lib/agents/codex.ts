@@ -268,6 +268,10 @@ export const codexProvider: AgentProvider = {
   // flag — decomposition only reads the issue prose, it never edits the repo.
   buildOneShotArgs: ({ prompt, model }) => ["exec", "--model", model, prompt],
 
+  // Codex CLI does not support --output-format stream-json; cost tracking for
+  // Codex one-shots is not available.
+  buildStreamOneShotArgs: () => null,
+
   createParser: () => new CodexStreamParser(),
 
   estimateCost: estimateCodexCost,
