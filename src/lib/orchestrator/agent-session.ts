@@ -249,12 +249,21 @@ export async function resumeAgentSession(
     CI_LOG: failedLog,
   });
 
-  // Per-job cost ceiling (issue #57): a runaway resume is bounded just like the
-  // initial session. The guard trips on this invocation's own accumulated cost.
-  const liveCost = () =>
-    parser.costUsd > 0
-      ? parser.costUsd
-      : provider.estimateCost(model, parser.totalInputTokens, parser.totalOutputTokens);
+  // Per-job cost ceiling (issue #57, #94): seed the guard with whatever the job
+  // already spent in prior sessions so the cap applies to the cumulative job
+  // spend, not just this invocation. Without this each CI-fix resume gets a
+  // fresh full budget and the effective cap becomes (1 + MAX_CI_RETRIES) × cap.
+  const priorCostUsd =
+    deps.costCapUsd && deps.costCapUsd > 0
+      ? (db.select().from(jobs).where(eq(jobs.id, job.id)).get()?.costUsd ?? 0)
+      : 0;
+  const liveCost = () => {
+    const thisInvocation =
+      parser.costUsd > 0
+        ? parser.costUsd
+        : provider.estimateCost(model, parser.totalInputTokens, parser.totalOutputTokens);
+    return priorCostUsd + thisInvocation;
+  };
   const guard =
     deps.costCapUsd && deps.costCapUsd > 0 ? makeCostGuard(deps.costCapUsd, liveCost) : undefined;
 
