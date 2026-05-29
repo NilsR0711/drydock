@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { JobMetrics } from "@/components/job-metrics";
+import { JobStopButton } from "@/components/job-stop-button";
 import { LogViewer } from "@/components/log-viewer";
 import { PrQuestionPanel } from "@/components/pr-question-panel";
 import { Badge } from "@/components/ui/badge";
@@ -18,12 +19,18 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   if (!job) notFound();
   const events = getDb().select().from(jobEvents).where(eq(jobEvents.jobId, jobId)).all();
   const questions = job.prNumber != null ? listPrQuestions(job.id) : [];
+  const inFlight = ["working", "ci_running", "retrying"].includes(job.status);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-bold">Job #{job.id}</h1>
         <Badge status={job.status}>{job.status}</Badge>
+        {inFlight && (
+          <div className="ml-auto">
+            <JobStopButton jobId={job.id} />
+          </div>
+        )}
       </div>
       <JobMetrics
         jobId={job.id}

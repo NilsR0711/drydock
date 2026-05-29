@@ -26,6 +26,38 @@ export function clearAbort(jobId: number): void {
   abortHandles.delete(jobId);
 }
 
+const DEFAULT_ABORT_GRACE_MS = 5000;
+
+/**
+ * Terminate the running agent subprocess for a single job by invoking its
+ * registered abort handle (SIGTERM → SIGKILL after `graceMs`). Returns true if
+ * a live handle was found and invoked, false otherwise. The handle is removed
+ * so a repeat call is a no-op. Used by the manual Abort/Stop UI action so
+ * marking a row `aborted` actually stops the agent (issue #89).
+ */
+export function abortJob(jobId: number, graceMs = DEFAULT_ABORT_GRACE_MS): boolean {
+  const abort = abortHandles.get(jobId);
+  // The job id reaches here from a server action argument; guard that the
+  // looked-up value is a callable we registered before invoking it, so a
+  // caller-supplied id can only ever fire one of our own abort handles.
+  if (typeof abort !== "function") return false;
+  abort(graceMs);
+  abortHandles.delete(jobId);
+  return true;
+}
+
+/**
+ * Terminate every running agent subprocess by draining the abort registry, the
+ * same mechanism graceful shutdown uses. Returns the job ids that had a live
+ * handle. Backs the navbar emergency stop (issue #89).
+ */
+export function abortAllJobs(graceMs = DEFAULT_ABORT_GRACE_MS): number[] {
+  const ids = [...abortHandles.keys()];
+  for (const abort of abortHandles.values()) abort(graceMs);
+  abortHandles.clear();
+  return ids;
+}
+
 /**
  * SPEC §8: drain new work, let in-flight jobs settle briefly, then mark any
  * still-running jobs interrupted and SIGTERM their subprocesses.
@@ -38,8 +70,7 @@ export async function gracefulShutdown(): Promise<void> {
 
   // Signal every running subprocess to terminate first; this unblocks the
   // in-flight runJob() promises so their `finally` worktree cleanup can run.
-  for (const abort of abortHandles.values()) abort(5000);
-  abortHandles.clear();
+  abortAllJobs(5000);
 
   // Wait for active jobs to settle (their cleanup + transitions) before exiting.
   await waitForIdle(5000);
