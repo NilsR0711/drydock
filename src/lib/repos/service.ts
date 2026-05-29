@@ -23,7 +23,7 @@ export const repoInputSchema = z.object({
   queueLabel: z.string().min(1).default("drydock:queue"),
   workingLabel: z.string().min(1).default("drydock:working"),
   needsHumanLabel: z.string().min(1).default("drydock:needs-human"),
-  defaultModel: z.string().min(1).default("claude-opus-4-7"),
+  defaultModel: z.string().min(1).default("claude-opus-4-8"),
   agent: z.enum(["claude", "codex"]).default("claude"),
   platform: z.enum(["github", "gitlab"]).default("github"),
   apiBaseUrl: z.string().nullish(),

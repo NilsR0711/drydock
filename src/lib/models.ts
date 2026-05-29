@@ -13,6 +13,7 @@ export interface ModelOption {
 }
 
 export const MODELS: ModelOption[] = [
+  { id: "claude-opus-4-8", label: "Claude Opus 4.8", agent: "claude" },
   { id: "claude-opus-4-7", label: "Claude Opus 4.7", agent: "claude" },
   { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", agent: "claude" },
   { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", agent: "claude" },
@@ -21,7 +22,7 @@ export const MODELS: ModelOption[] = [
   { id: "gpt-5-mini", label: "GPT-5 Mini", agent: "codex" },
 ];
 
-export const DEFAULT_MODEL = "claude-opus-4-7";
+export const DEFAULT_MODEL = "claude-opus-4-8";
 
 export function modelsForAgent(agent: AgentId): ModelOption[] {
   return MODELS.filter((m) => m.agent === agent);

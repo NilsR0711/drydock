@@ -51,7 +51,7 @@ describe("repos service", () => {
 
   it("new repo defaults to the opus model (schema/service consistent)", () => {
     const repo = addRepo({ path: "/m", name: "m" }, db);
-    expect(repo.defaultModel).toBe("claude-opus-4-7");
+    expect(repo.defaultModel).toBe("claude-opus-4-8");
   });
 
   it("new repo gets the default daily cost limit", () => {
