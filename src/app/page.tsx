@@ -1,12 +1,10 @@
-import { DashboardStats } from "@/components/dashboard-stats";
-import { RepoList } from "@/components/repo-list";
-import { dashboardSummary, listReposWithStats } from "@/lib/db/queries";
+import { DashboardLive } from "@/components/dashboard-live";
+import { dashboardSnapshot } from "@/lib/db/queries";
 
 export const dynamic = "force-dynamic";
 
 export default function DashboardPage() {
-  const repos = listReposWithStats();
-  const summary = dashboardSummary();
+  const snapshot = dashboardSnapshot();
   return (
     <div className="space-y-6">
       <div>
@@ -15,8 +13,7 @@ export default function DashboardPage() {
           Autonomous issue → PR runs across your watched repositories.
         </p>
       </div>
-      <DashboardStats summary={summary} />
-      <RepoList repos={repos} />
+      <DashboardLive initial={snapshot} />
     </div>
   );
 }
