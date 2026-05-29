@@ -3,6 +3,7 @@
 import { Anchor, PauseCircle } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { EmergencyStopButton } from "@/components/emergency-stop-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/update-banner";
 import { cn } from "@/lib/utils";
@@ -89,6 +90,7 @@ export function AppShell({
                 Paused
               </Link>
             )}
+            <EmergencyStopButton />
             <ThemeToggle />
           </div>
         </div>
