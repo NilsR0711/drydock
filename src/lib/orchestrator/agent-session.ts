@@ -33,6 +33,12 @@ export interface AgentSessionDeps {
    * non-positive disables the ceiling.
    */
   costCapUsd?: number;
+  /**
+   * Drain timeout in ms after force-abort before finalising cost/log (issue #97).
+   * Defaults to 5000 (same as the SIGKILL grace period). Set to a low value in
+   * tests to avoid slow test runs when using hanging runners.
+   */
+  graceMs?: number;
 }
 
 export interface AgentSessionResult {
@@ -87,38 +93,58 @@ function makeCostGuard(capUsd: number, liveCost: () => number): CostGuard {
 /**
  * Await a stream handle's exit, bounded by a wall-clock timeout (issue #47) and
  * a per-job cost ceiling (issue #57). On either breach the subprocess is
- * aborted and the outcome flagged accordingly; we do not keep awaiting the
- * (possibly never-resolving) `done` promise once we have decided to bail.
+ * aborted and the outcome flagged accordingly. After aborting we drain the
+ * child for up to `graceMs` milliseconds so that any stdout emitted during the
+ * grace window is counted in the persisted cost (issue #97).
  */
 function awaitBounded(
   handle: StreamHandle,
-  opts: { timeoutMs?: number; costTripped?: Promise<void> } = {},
+  opts: { timeoutMs?: number; costTripped?: Promise<void>; graceMs?: number } = {},
 ): Promise<{ exitCode: number; timedOut: boolean; costExceeded: boolean }> {
   const { timeoutMs, costTripped } = opts;
+  const graceMs = opts.graceMs ?? 5000;
   const hasTimeout = !!timeoutMs && timeoutMs > 0;
   if (!hasTimeout && !costTripped) {
     return handle.done.then((exitCode) => ({ exitCode, timedOut: false, costExceeded: false }));
   }
   return new Promise((resolve) => {
     let settled = false;
+    let aborting = false;
     const finish = (r: { exitCode: number; timedOut: boolean; costExceeded: boolean }) => {
       if (settled) return;
       settled = true;
       resolve(r);
     };
+    // After force-aborting, wait for the child to actually exit (or for the
+    // grace timeout to expire) so that any stdout emitted during the grace
+    // window flows through onStdout → parser before we finalise cost (issue #97).
+    const abortAndDrain = (r: { exitCode: number; timedOut: boolean; costExceeded: boolean }) => {
+      if (aborting) return;
+      aborting = true;
+      if (timer) clearTimeout(timer);
+      handle.abort();
+      let graceTimer: ReturnType<typeof setTimeout> | undefined;
+      const graceTimeout = new Promise<void>((res) => {
+        graceTimer = setTimeout(res, graceMs);
+        graceTimer.unref?.();
+      });
+      void Promise.race([handle.done, graceTimeout]).then(() => {
+        clearTimeout(graceTimer);
+        finish(r);
+      });
+    };
     let timer: ReturnType<typeof setTimeout> | undefined;
     if (hasTimeout) {
       timer = setTimeout(() => {
-        handle.abort();
-        finish({ exitCode: TIMED_OUT_EXIT, timedOut: true, costExceeded: false });
+        abortAndDrain({ exitCode: TIMED_OUT_EXIT, timedOut: true, costExceeded: false });
       }, timeoutMs);
       timer.unref?.();
     }
     costTripped?.then(() => {
-      handle.abort();
-      finish({ exitCode: COST_EXCEEDED_EXIT, timedOut: false, costExceeded: true });
+      abortAndDrain({ exitCode: COST_EXCEEDED_EXIT, timedOut: false, costExceeded: true });
     });
     handle.done.then((exitCode) => {
+      if (aborting) return; // drain path owns the resolution
       if (timer) clearTimeout(timer);
       finish({ exitCode, timedOut: false, costExceeded: false });
     });
@@ -180,6 +206,7 @@ export async function spawnAgentSession(
   const { exitCode, timedOut, costExceeded } = await awaitBounded(handle, {
     timeoutMs: deps.timeoutMs,
     costTripped: guard?.tripped,
+    graceMs: deps.graceMs,
   });
   clearAbort(job.id);
   if (timedOut) {
@@ -297,6 +324,7 @@ export async function resumeAgentSession(
   const { exitCode, timedOut, costExceeded } = await awaitBounded(handle, {
     timeoutMs: deps.timeoutMs,
     costTripped: guard?.tripped,
+    graceMs: deps.graceMs,
   });
   clearAbort(job.id);
   if (timedOut) {

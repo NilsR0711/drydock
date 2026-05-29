@@ -81,10 +81,15 @@ describe("spawnAgentSession", () => {
   it("bounds a never-resolving runner by the wall-clock timeout and aborts it (issue #47)", async () => {
     const job = createJob({ repoId, issueNumber: 5, agent: "codex" }, db);
     let aborted = false;
+    let resolveDone: (code: number) => void;
+    const done = new Promise<number>((res) => {
+      resolveDone = res;
+    });
     const hangingRunner: StreamRunner = () => ({
-      done: new Promise<number>(() => {}), // never resolves
+      done,
       abort: () => {
         aborted = true;
+        resolveDone(0); // resolve done when aborted so drain completes immediately
       },
     });
     const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
@@ -124,10 +129,15 @@ describe("spawnAgentSession", () => {
     let aborted = false;
     const hangingRunner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks) => {
       cb.onStdout(assistantUsage(1000)); // 1000 tok → $1.00, over the $0.50 cap
+      let resolveDone: (code: number) => void;
+      const done = new Promise<number>((res) => {
+        resolveDone = res;
+      });
       return {
-        done: new Promise<number>(() => {}), // never resolves on its own
+        done,
         abort: () => {
           aborted = true;
+          resolveDone(0); // resolve done when aborted so drain completes immediately
         },
       };
     };
@@ -253,10 +263,15 @@ describe("resumeAgentSession fallback", () => {
     })}\n`;
     const hangingRunner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks) => {
       cb.onStdout(assistant);
+      let resolveDone: (code: number) => void;
+      const done = new Promise<number>((res) => {
+        resolveDone = res;
+      });
       return {
-        done: new Promise<number>(() => {}),
+        done,
         abort: () => {
           aborted = true;
+          resolveDone(0); // resolve done when aborted so drain completes immediately
         },
       };
     };
@@ -274,10 +289,15 @@ describe("resumeAgentSession fallback", () => {
   it("bounds a never-resolving resume runner and aborts it (issue #47)", async () => {
     const job = createJob({ repoId, issueNumber: 7, agent: "codex" }, db);
     let aborted = false;
+    let resolveDone: (code: number) => void;
+    const done = new Promise<number>((res) => {
+      resolveDone = res;
+    });
     const hangingRunner: StreamRunner = () => ({
-      done: new Promise<number>(() => {}),
+      done,
       abort: () => {
         aborted = true;
+        resolveDone(0); // resolve done when aborted so drain completes immediately
       },
     });
     const res = await resumeAgentSession(getJob(job.id, db) as never, "th-1", "CI log", "/work", {
@@ -429,10 +449,15 @@ describe("resumeAgentSession cumulative cost guard (issue #94)", () => {
     let aborted = false;
     const hangingRunner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks) => {
       cb.onStdout(assistantUsage(150));
+      let resolveDone: (code: number) => void;
+      const done = new Promise<number>((res) => {
+        resolveDone = res;
+      });
       return {
-        done: new Promise<number>(() => {}),
+        done,
         abort: () => {
           aborted = true;
+          resolveDone(0); // resolve done when aborted so drain completes immediately
         },
       };
     };
@@ -480,10 +505,15 @@ describe("resumeAgentSession cumulative cost guard (issue #94)", () => {
     let aborted = false;
     const hangingRunner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks) => {
       cb.onStdout(assistantUsage(1));
+      let resolveDone: (code: number) => void;
+      const done = new Promise<number>((res) => {
+        resolveDone = res;
+      });
       return {
-        done: new Promise<number>(() => {}),
+        done,
         abort: () => {
           aborted = true;
+          resolveDone(0); // resolve done when aborted so drain completes immediately
         },
       };
     };
