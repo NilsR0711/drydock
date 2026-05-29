@@ -10,6 +10,7 @@ import { RepoDeploymentHealingPanel } from "@/components/repo-deployment-healing
 import { RepoHealingPanel } from "@/components/repo-healing-panel";
 import { RepoReleasePanel } from "@/components/repo-release-panel";
 import { RepoSettingsBar } from "@/components/repo-settings-bar";
+import { RepoWebhookPanel } from "@/components/repo-webhook-panel";
 import { listAdrs } from "@/lib/adr/service";
 import { getDb } from "@/lib/db/client";
 import { dailyCosts, todayCost } from "@/lib/db/cost-queries";
@@ -59,6 +60,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
 
       <RepoSettingsBar repo={ws.repo} />
       <RepoAutomationBar repo={ws.repo} />
+      <RepoWebhookPanel repo={ws.repo} />
 
       <IssueBoard
         repoId={ws.repo.id}
