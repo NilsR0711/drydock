@@ -25,6 +25,7 @@ function oneShotNdjson(text: string): string {
     ].join("\n") + "\n"
   );
 }
+
 import { createDb, type DB } from "@/lib/db/client";
 import type { Repo } from "@/lib/db/schema";
 import type { IssueDetail } from "@/lib/github/gh";
