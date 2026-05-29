@@ -13,6 +13,36 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3737;
+
+/**
+ * Returns true when the given host address binds only to the local machine.
+ * Loopback addresses (127.0.0.1, ::1, localhost) are safe because they are
+ * unreachable from the network; all other values expand the attack surface.
+ *
+ * @param {string} host
+ */
+export function isLoopbackHost(host) {
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
+
+/**
+ * Throws an informative Error when `host` is a non-loopback address and the
+ * operator has not set DRYDOCK_ALLOW_REMOTE=1. This is the only gate between
+ * the unauthenticated dashboard and the network.
+ *
+ * @param {string} host
+ * @param {Record<string, string | undefined>} [env]
+ */
+export function assertSafeHost(host, env = process.env) {
+  if (isLoopbackHost(host)) return;
+  if (env.DRYDOCK_ALLOW_REMOTE) return;
+  throw new Error(
+    `Refusing to bind to "${host}": the Drydock dashboard has no authentication and ` +
+      `would be reachable by anyone on the network.\n` +
+      `To opt in and accept this risk, set DRYDOCK_ALLOW_REMOTE=1:\n` +
+      `  DRYDOCK_ALLOW_REMOTE=1 drydock --host ${host}`,
+  );
+}
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
@@ -270,6 +300,8 @@ async function waitForServer(url, { attempts = 100, intervalMs = 100 } = {}) {
 }
 
 async function serve({ host, port, open }) {
+  assertSafeHost(host);
+
   const serverEntry = join(PACKAGE_ROOT, ".next", "standalone", "server.js");
   if (!existsSync(serverEntry)) {
     throw new Error(
