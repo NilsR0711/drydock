@@ -2,7 +2,7 @@ process.env.DRYDOCK_DB = ":memory:";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/lib/db/client";
-import { issues, repos } from "@/lib/db/schema";
+import { issues, jobs, repos } from "@/lib/db/schema";
 import { __setForgeFactory } from "@/lib/forge/registry";
 import {
   addToQueueAction,
@@ -10,6 +10,7 @@ import {
   editIssueAction,
   removeFromQueueAction,
   setIssueStateAction,
+  startIssueAction,
   viewIssueAction,
 } from "@/lib/issues/actions";
 
@@ -36,9 +37,17 @@ function fakeGh() {
 }
 
 /** Seed a repo + one issue row into the shared (in-memory) DB. */
-function seedRepoWithIssue(number: number, queueLabel = "drydock:queue"): number {
+function seedRepoWithIssue(
+  number: number,
+  queueLabel = "drydock:queue",
+  defaultModel = "claude-opus-4-8",
+): number {
   const db = getDb();
-  const repo = db.insert(repos).values({ path: "/r", name: "r", queueLabel }).returning().get();
+  const repo = db
+    .insert(repos)
+    .values({ path: "/r", name: "r", queueLabel, defaultModel })
+    .returning()
+    .get();
   db.insert(issues)
     .values({ repoId: repo.id, number, title: "seed", labels: "[]", priority: 0 })
     .run();
@@ -97,5 +106,64 @@ describe("issue server actions", () => {
     expect(gh.closeIssue).toHaveBeenCalledWith(3);
     await setIssueStateAction(repoId, 3, "open");
     expect(gh.reopenIssue).toHaveBeenCalledWith(3);
+  });
+
+  describe("startIssueAction model/agent override", () => {
+    it("creates a job with the repo default model when no override given", async () => {
+      const repoId = seedRepoWithIssue(7, "drydock:queue", "claude-haiku-4-5");
+      const job = await startIssueAction(repoId, 7);
+      expect(job.model).toBe("claude-haiku-4-5");
+    });
+
+    it("creates a job with the specified model override", async () => {
+      const repoId = seedRepoWithIssue(8, "drydock:queue", "claude-haiku-4-5");
+      const job = await startIssueAction(repoId, 8, { model: "claude-opus-4-8" });
+      expect(job.model).toBe("claude-opus-4-8");
+    });
+
+    it("creates a job with the specified agent override", async () => {
+      const repoId = seedRepoWithIssue(9);
+      const job = await startIssueAction(repoId, 9, { agent: "codex" });
+      expect(job.agent).toBe("codex");
+    });
+  });
+
+  describe("addToQueueAction model/agent override", () => {
+    it("persists modelOverride on the issues row", async () => {
+      const db = getDb();
+      const repoId = seedRepoWithIssue(11);
+      await addToQueueAction(repoId, 11, { model: "claude-sonnet-4-5" });
+      const row = db
+        .select()
+        .from(issues)
+        .all()
+        .find((i) => i.number === 11 && i.repoId === repoId);
+      expect(row?.modelOverride).toBe("claude-sonnet-4-5");
+    });
+
+    it("persists agentOverride on the issues row", async () => {
+      const db = getDb();
+      const repoId = seedRepoWithIssue(12);
+      await addToQueueAction(repoId, 12, { agent: "codex" });
+      const row = db
+        .select()
+        .from(issues)
+        .all()
+        .find((i) => i.number === 12 && i.repoId === repoId);
+      expect(row?.agentOverride).toBe("codex");
+    });
+
+    it("leaves overrides null when not specified", async () => {
+      const db = getDb();
+      const repoId = seedRepoWithIssue(13);
+      await addToQueueAction(repoId, 13);
+      const row = db
+        .select()
+        .from(issues)
+        .all()
+        .find((i) => i.number === 13 && i.repoId === repoId);
+      expect(row?.modelOverride).toBeNull();
+      expect(row?.agentOverride).toBeNull();
+    });
   });
 });

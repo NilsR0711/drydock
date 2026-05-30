@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
-import { type Job, jobs } from "@/lib/db/schema";
+import { issues, type Job, jobs } from "@/lib/db/schema";
 import { reorderIssues, syncIssuesFromGh } from "@/lib/issues/service";
 import { driveTick } from "@/lib/orchestrator/driver-loop";
 import { createJob, getJob, listJobsByStatus } from "@/lib/orchestrator/jobs";
@@ -265,5 +265,105 @@ describe("driveTick auto-processing", () => {
       [issue],
       db,
     );
+  });
+});
+
+describe("driveTick model/agent override (issue #101)", () => {
+  it("uses issue modelOverride when enqueuing a manual-queue issue", async () => {
+    const r = addRepo({ path: "/mo", name: "mo", defaultModel: "claude-haiku-4-5" }, db);
+    // Pre-seed the issue with a model override
+    db.insert(issues)
+      .values({
+        repoId: r.id,
+        number: 42,
+        title: "override me",
+        labels: JSON.stringify([r.queueLabel]),
+        priority: 0,
+        modelOverride: "claude-opus-4-8",
+      })
+      .run();
+
+    const started: number[] = [];
+    await driveTick({
+      db,
+      fetchIssues: vi.fn(async () => [
+        { number: 42, title: "override me", labels: [{ name: r.queueLabel }] },
+      ]),
+      runJob: vi.fn(async (id: number) => {
+        started.push(id);
+        db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, id)).run();
+        return db.select().from(jobs).where(eq(jobs.id, id)).get() as Job;
+      }),
+    } as never);
+
+    const enqueued = db
+      .select()
+      .from(jobs)
+      .where(and(eq(jobs.repoId, r.id), eq(jobs.issueNumber, 42)))
+      .get();
+    expect(enqueued?.model).toBe("claude-opus-4-8");
+  });
+
+  it("falls back to repo default when no modelOverride is set", async () => {
+    const r = addRepo({ path: "/mo2", name: "mo2", defaultModel: "claude-sonnet-4-5" }, db);
+    db.insert(issues)
+      .values({
+        repoId: r.id,
+        number: 43,
+        title: "no override",
+        labels: JSON.stringify([r.queueLabel]),
+        priority: 0,
+      })
+      .run();
+
+    await driveTick({
+      db,
+      fetchIssues: vi.fn(async () => [
+        { number: 43, title: "no override", labels: [{ name: r.queueLabel }] },
+      ]),
+      runJob: vi.fn(async (id: number) => {
+        db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, id)).run();
+        return db.select().from(jobs).where(eq(jobs.id, id)).get() as Job;
+      }),
+    } as never);
+
+    const enqueued = db
+      .select()
+      .from(jobs)
+      .where(and(eq(jobs.repoId, r.id), eq(jobs.issueNumber, 43)))
+      .get();
+    expect(enqueued?.model).toBe("claude-sonnet-4-5");
+  });
+
+  it("uses issue agentOverride when enqueuing", async () => {
+    const r = addRepo({ path: "/ao", name: "ao", agent: "claude" }, db);
+    db.insert(issues)
+      .values({
+        repoId: r.id,
+        number: 44,
+        title: "agent override",
+        labels: JSON.stringify([r.queueLabel]),
+        priority: 0,
+        agentOverride: "codex",
+      })
+      .run();
+
+    await driveTick({
+      db,
+      fetchIssues: vi.fn(async () => [
+        { number: 44, title: "agent override", labels: [{ name: r.queueLabel }] },
+      ]),
+      runJob: vi.fn(async (id: number) => {
+        db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, id)).run();
+        return db.select().from(jobs).where(eq(jobs.id, id)).get() as Job;
+      }),
+    } as never);
+
+    const enqueued = db
+      .select()
+      .from(jobs)
+      .where(and(eq(jobs.repoId, r.id), eq(jobs.issueNumber, 44)))
+      .get();
+    expect(enqueued?.agent).toBe("codex");
   });
 });
