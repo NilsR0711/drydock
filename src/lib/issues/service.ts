@@ -123,6 +123,7 @@ export async function syncRepoIssues(repoId: number, db: DB = getDb()): Promise<
 export async function queueIssue(
   repoId: number,
   issueNumber: number,
+  opts: { model?: string; agent?: string } = {},
   db: DB = getDb(),
 ): Promise<Issue[]> {
   const repo = requireRepo(repoId, db);
@@ -130,6 +131,15 @@ export async function queueIssue(
   await gh.ensureLabel(repo.queueLabel, QUEUE_LABEL_OPTS);
   await gh.addLabels(issueNumber, [repo.queueLabel]);
   setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true, db);
+  if (opts.model !== undefined || opts.agent !== undefined) {
+    db.update(issues)
+      .set({
+        modelOverride: opts.model ?? null,
+        agentOverride: opts.agent ?? null,
+      })
+      .where(and(eq(issues.repoId, repoId), eq(issues.number, issueNumber)))
+      .run();
+  }
   return listIssues(repoId, db);
 }
 
