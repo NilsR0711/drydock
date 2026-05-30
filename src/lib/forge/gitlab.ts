@@ -70,7 +70,9 @@ const gitlabJobSchema = z.object({
   status: z.string().default(""),
 });
 
-const gitlabPipelineSchema = z.object({ id: z.number() });
+const gitlabMrHeadPipelineSchema = z.object({
+  head_pipeline: z.object({ id: z.number() }).nullable().optional(),
+});
 
 const gitlabDiffSchema = z.object({
   old_path: z.string().default(""),
@@ -325,15 +327,26 @@ export class GitlabForge implements ForgeClient {
       const jobsRes = await this.request("GET", `/pipelines/${pipelineId}/jobs`, {
         query: { per_page: "100" },
       });
-      if (!jobsRes.ok) return "";
+      if (!jobsRes.ok) {
+        console.error(
+          `GitLab failedRunLog: pipeline ${pipelineId} jobs request failed (${jobsRes.status})`,
+        );
+        return "";
+      }
       const jobs = z.array(gitlabJobSchema).safeParse(safeJson(jobsRes.body, []));
       if (!jobs.success) return "";
       const failed = jobs.data.find((j) => j.status === "failed" && j.id !== undefined);
       if (!failed) return "";
       const traceRes = await this.request("GET", `/jobs/${failed.id}/trace`);
-      if (!traceRes.ok) return "";
+      if (!traceRes.ok) {
+        console.error(
+          `GitLab failedRunLog: job ${failed.id} trace request failed (${traceRes.status})`,
+        );
+        return "";
+      }
       return traceRes.body.slice(-8000);
-    } catch {
+    } catch (err) {
+      console.error("GitLab failedRunLog error:", err);
       return "";
     }
   }
@@ -343,20 +356,24 @@ export class GitlabForge implements ForgeClient {
       const res = await this.request("GET", `/merge_requests/${prNumber}/diffs`, {
         query: { per_page: "100" },
       });
-      if (!res.ok) return "";
+      if (!res.ok) {
+        console.error(`GitLab prDiff: MR ${prNumber} diffs request failed (${res.status})`);
+        return "";
+      }
       const parsed = z.array(gitlabDiffSchema).safeParse(safeJson(res.body, []));
       if (!parsed.success) return "";
       return parsed.data
         .map((d) => `--- a/${d.old_path}\n+++ b/${d.new_path}\n${d.diff}`)
         .join("\n");
-    } catch {
+    } catch (err) {
+      console.error("GitLab prDiff error:", err);
       return "";
     }
   }
 
   async mergePr(prNumber: number): Promise<void> {
     await this.mutate("PUT", `/merge_requests/${prNumber}/merge`, {
-      body: { squash: true, merge_when_pipeline_succeeds: true },
+      body: { squash: true },
     });
   }
 
@@ -377,13 +394,13 @@ export class GitlabForge implements ForgeClient {
     return z.object({ iid: z.number() }).parse(safeJson(res.body, {})).iid;
   }
 
-  /** Latest pipeline id for an MR, or null when none exists yet. */
+  /** Latest pipeline id for an MR via `head_pipeline`, or null when none exists yet. */
   private async latestPipelineId(prNumber: number): Promise<number | null> {
-    const res = await this.request("GET", `/merge_requests/${prNumber}/pipelines`);
+    const res = await this.request("GET", `/merge_requests/${prNumber}`);
     if (!res.ok) return null;
-    const parsed = z.array(gitlabPipelineSchema).safeParse(safeJson(res.body, []));
-    const latest = parsed.success ? parsed.data[0] : undefined;
-    return latest ? latest.id : null;
+    const parsed = gitlabMrHeadPipelineSchema.safeParse(safeJson(res.body, {}));
+    const hp = parsed.success ? (parsed.data.head_pipeline ?? null) : null;
+    return hp ? hp.id : null;
   }
 }
 
