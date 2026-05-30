@@ -1,7 +1,6 @@
 process.env.DRYDOCK_DB = ":memory:";
 
-import { beforeEach, describe, expect, it } from "vitest";
-import { vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/lib/db/client";
 import { getVersionAction, loadTemplateAction, saveTemplateAction } from "@/lib/prompts/actions";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
