@@ -42,6 +42,12 @@ export function AppShell({
   const pathname = usePathname();
   return (
     <div className="min-h-screen bg-background">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-background focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:ring-2 focus:ring-ring"
+      >
+        Skip to main content
+      </a>
       <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur">
         <div className="mx-auto flex h-12 max-w-7xl items-center gap-1 px-4">
           <Link href="/" className="mr-3 flex items-center gap-2">
@@ -85,7 +91,7 @@ export function AppShell({
               <Link
                 href="/settings"
                 aria-label="Automation paused — open settings"
-                className="flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-muted px-2 py-1 text-xs font-medium text-warning"
+                className="flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-muted px-2 py-1 text-xs font-medium text-warning-foreground"
               >
                 <PauseCircle className="h-3.5 w-3.5" />
                 Paused
@@ -96,7 +102,9 @@ export function AppShell({
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
+      <main id="main" className="mx-auto max-w-7xl px-4 py-6">
+        {children}
+      </main>
     </div>
   );
 }

@@ -94,12 +94,16 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
         />
         Sequential (wait for merge)
       </label>
-      <span className="text-muted-foreground">Agent:</span>
-      <AgentSelect value={agent} onChange={changeAgent} />
-      <span className="text-muted-foreground">Model:</span>
-      <ModelSelect value={model} onChange={change} agent={agent} />
+      <label htmlFor="agent-select" className="text-muted-foreground">
+        Agent:
+      </label>
+      <AgentSelect id="agent-select" value={agent} onChange={changeAgent} />
+      <label htmlFor="model-select" className="text-muted-foreground">
+        Model:
+      </label>
+      <ModelSelect id="model-select" value={model} onChange={change} agent={agent} />
       {pending && <span className="text-xs text-muted-foreground">Saving…</span>}
-      {saved && <span className="text-xs text-success">Saved</span>}
+      {saved && <span className="text-xs text-success-foreground">Saved</span>}
     </div>
   );
 }

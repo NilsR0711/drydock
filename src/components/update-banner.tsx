@@ -47,7 +47,7 @@ export function UpdateBanner({
   };
 
   return (
-    <div className="flex items-center gap-1.5 rounded-md border border-success-border bg-success-muted px-2 py-1 text-xs font-medium text-success">
+    <div className="flex items-center gap-1.5 rounded-md border border-success-border bg-success-muted px-2 py-1 text-xs font-medium text-success-foreground">
       <ArrowUpCircle className="h-3.5 w-3.5 shrink-0" />
       {status.releaseUrl ? (
         <a

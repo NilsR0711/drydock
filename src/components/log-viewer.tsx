@@ -38,7 +38,12 @@ export function LogViewer({ jobId, initial = [] }: { jobId: number; initial?: Lo
   }, [jobId]);
 
   return (
-    <div className="h-96 rounded border border-card-border">
+    <div
+      role="log"
+      aria-live="polite"
+      aria-label="Job log stream"
+      className="h-96 rounded border border-card-border"
+    >
       <Virtuoso
         data={lines}
         followOutput="smooth"

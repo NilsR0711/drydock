@@ -290,7 +290,7 @@ export function SettingsForm({ initial }: { initial: Settings }) {
         <Button type="button" variant="outline" onClick={sendTest} disabled={testing}>
           {testing ? "Sending…" : "Send test notification"}
         </Button>
-        {saved && <span className="text-xs text-success">Saved</span>}
+        {saved && <span className="text-xs text-success-foreground">Saved</span>}
       </div>
     </form>
   );

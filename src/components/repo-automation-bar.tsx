@@ -189,7 +189,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
           Manage releases
         </label>
         {pending && <span className="text-xs text-muted-foreground">Saving…</span>}
-        {saved && <span className="text-xs text-success">Saved</span>}
+        {saved && <span className="text-xs text-success-foreground">Saved</span>}
       </div>
 
       <p className="text-xs text-muted-foreground">
