@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, like, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, like, or, type SQL, sql } from "drizzle-orm";
 import { type DB, getDb } from "./client";
 import { todayCost } from "./cost-queries";
 import { type Issue, issues, type Job, jobs, type Repo, repos } from "./schema";
@@ -244,7 +244,7 @@ export function listJobsPage(filters: JobHistoryFilters, db: DB = getDb()): JobH
         or(
           like(issues.title, `%${term}%`),
           // Also allow falling back to number search if input happens to look like a number fragment
-          sql`LOWER(${issues.title}) LIKE LOWER(${"%" + term + "%"})`,
+          sql`LOWER(${issues.title}) LIKE LOWER(${`%${term}%`})`,
         ) as SQL,
       );
     }

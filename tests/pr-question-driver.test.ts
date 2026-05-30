@@ -3,26 +3,24 @@ import { getAgentProvider } from "@/lib/agents/registry";
 
 /** Wrap plain text in the NDJSON envelope that stream-json one-shots emit. */
 function oneShotNdjson(text: string): string {
-  return (
-    [
-      JSON.stringify({ type: "system", session_id: "s1", model: "claude-opus-4-8" }),
-      JSON.stringify({
-        type: "assistant",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text }],
-          usage: { input_tokens: 10, output_tokens: 10 },
-        },
-      }),
-      JSON.stringify({
-        type: "result",
-        subtype: "success",
-        is_error: false,
-        total_cost_usd: 0.001,
+  return `${[
+    JSON.stringify({ type: "system", session_id: "s1", model: "claude-opus-4-8" }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text }],
         usage: { input_tokens: 10, output_tokens: 10 },
-      }),
-    ].join("\n") + "\n"
-  );
+      },
+    }),
+    JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      total_cost_usd: 0.001,
+      usage: { input_tokens: 10, output_tokens: 10 },
+    }),
+  ].join("\n")}\n`;
 }
 
 import { createDb, type DB } from "@/lib/db/client";

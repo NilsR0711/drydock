@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { AgentProvider } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import type { ReleaseRun, Repo } from "@/lib/db/schema";
-import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
+import type { CommandRunner } from "@/lib/exec/runner";
 import type { CreateReleaseInput, ForgeMergedPr, ReleaseSummary } from "@/lib/forge/types";
 import {
   buildReleaseEvaluationPrompt,

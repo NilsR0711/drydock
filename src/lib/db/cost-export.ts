@@ -158,7 +158,7 @@ export function toCsv(table: CostExportTable): string {
   const body = table.rows.map((row) =>
     table.columns.map((col) => csvField(row[col] ?? "")).join(","),
   );
-  return [header, ...body].join("\r\n") + "\r\n";
+  return `${[header, ...body].join("\r\n")}\r\n`;
 }
 
 /** Serialize a table's rows as a pretty-printed JSON array of objects. */

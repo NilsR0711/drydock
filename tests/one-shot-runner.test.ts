@@ -8,26 +8,24 @@ import { addRepo } from "@/lib/repos/service";
 
 /** Minimal stream-json one-shot response that embeds plain text. */
 function oneShotNdjson(text: string, costUsd = 0.002): string {
-  return (
-    [
-      JSON.stringify({ type: "system", session_id: "s1", model: "claude-opus-4-8" }),
-      JSON.stringify({
-        type: "assistant",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text }],
-          usage: { input_tokens: 80, output_tokens: 30 },
-        },
-      }),
-      JSON.stringify({
-        type: "result",
-        subtype: "success",
-        is_error: false,
-        total_cost_usd: costUsd,
+  return `${[
+    JSON.stringify({ type: "system", session_id: "s1", model: "claude-opus-4-8" }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text }],
         usage: { input_tokens: 80, output_tokens: 30 },
-      }),
-    ].join("\n") + "\n"
-  );
+      },
+    }),
+    JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      total_cost_usd: costUsd,
+      usage: { input_tokens: 80, output_tokens: 30 },
+    }),
+  ].join("\n")}\n`;
 }
 
 function fakeRunner(result: Partial<CommandResult>) {

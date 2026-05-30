@@ -2,7 +2,7 @@ process.env.DRYDOCK_DB = ":memory:";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/lib/db/client";
-import { issues, jobs, repos } from "@/lib/db/schema";
+import { issues, repos } from "@/lib/db/schema";
 import { __setForgeFactory } from "@/lib/forge/registry";
 import {
   addToQueueAction,

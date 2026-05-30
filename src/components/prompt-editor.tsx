@@ -1,6 +1,6 @@
 "use client";
 
-import Editor from "@monaco-editor/react";
+import Editor, { DiffEditor } from "@monaco-editor/react";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +16,16 @@ interface RepoOption {
 interface VersionInfo {
   version: number;
   updatedAt: number;
+  content: string;
+}
+
+function formatDate(unixSeconds: number) {
+  return new Date(unixSeconds * 1000).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export function PromptEditor({
@@ -33,6 +43,7 @@ export function PromptEditor({
   const [versions, setVersions] = useState<VersionInfo[]>(initialVersions);
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState<number | null>(null);
+  const [diffVersion, setDiffVersion] = useState<VersionInfo | null>(null);
   const { success, error } = useToast();
 
   function load(nextRepo: number, nextName: string) {
@@ -42,8 +53,30 @@ export function PromptEditor({
         setContent(res.content);
         setVersions(res.versions);
         setSaved(null);
+        setDiffVersion(null);
       } catch (e) {
         error("Failed to load template", e instanceof Error ? e.message : String(e));
+      }
+    });
+  }
+
+  function selectVersion(v: VersionInfo) {
+    setDiffVersion((prev) => (prev?.version === v.version ? null : v));
+  }
+
+  function restoreVersion() {
+    if (!diffVersion) return;
+    start(async () => {
+      try {
+        const row = await saveTemplateAction({ repoId, name, content: diffVersion.content });
+        setSaved(row.version);
+        const res = await loadTemplateAction(repoId, name);
+        setContent(res.content);
+        setVersions(res.versions);
+        setDiffVersion(null);
+        success("Version restored", `Saved as v${row.version}`);
+      } catch (e) {
+        error("Failed to restore version", e instanceof Error ? e.message : String(e));
       }
     });
   }
@@ -95,35 +128,79 @@ export function PromptEditor({
               <option value={TEMPLATE_NAMES.ciFix}>CI fix</option>
             </select>
           </div>
-          <div className="h-72 border border-card-border">
-            <Editor
-              defaultLanguage="markdown"
-              value={content}
-              onChange={(v) => setContent(v ?? "")}
-              options={{ minimap: { enabled: false }, fontSize: 13 }}
-            />
-          </div>
-          <Button
-            disabled={pending || !repoId}
-            onClick={() =>
-              start(async () => {
-                try {
-                  const row = await saveTemplateAction({ repoId, name, content });
-                  setSaved(row.version);
-                  const res = await loadTemplateAction(repoId, name);
-                  setVersions(res.versions);
-                  success("Template saved", `Version ${row.version}`);
-                } catch (e) {
-                  error("Failed to save template", e instanceof Error ? e.message : String(e));
+
+          {diffVersion ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 rounded border border-card-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+                <span>
+                  Diffing{" "}
+                  <span className="font-medium text-foreground">v{diffVersion.version}</span> (
+                  {formatDate(diffVersion.updatedAt)}) vs active
+                </span>
+                <button
+                  type="button"
+                  className="ml-auto underline hover:text-foreground"
+                  onClick={() => setDiffVersion(null)}
+                >
+                  Close diff
+                </button>
+              </div>
+              <div className="h-72 border border-card-border">
+                <DiffEditor
+                  language="markdown"
+                  original={diffVersion.content}
+                  modified={content}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    readOnly: true,
+                    renderSideBySide: true,
+                  }}
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button disabled={pending} variant="outline" onClick={restoreVersion}>
+                  Restore v{diffVersion.version}
+                </Button>
+                <Button variant="ghost" onClick={() => setDiffVersion(null)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="h-72 border border-card-border">
+                <Editor
+                  defaultLanguage="markdown"
+                  value={content}
+                  onChange={(v) => setContent(v ?? "")}
+                  options={{ minimap: { enabled: false }, fontSize: 13 }}
+                />
+              </div>
+              <Button
+                disabled={pending || !repoId}
+                onClick={() =>
+                  start(async () => {
+                    try {
+                      const row = await saveTemplateAction({ repoId, name, content });
+                      setSaved(row.version);
+                      const res = await loadTemplateAction(repoId, name);
+                      setVersions(res.versions);
+                      success("Template saved", `Version ${row.version}`);
+                    } catch (e) {
+                      error("Failed to save template", e instanceof Error ? e.message : String(e));
+                    }
+                  })
                 }
-              })
-            }
-          >
-            Save version
-          </Button>
-          {saved !== null && <span className="ml-2 text-xs text-success">Saved v{saved}</span>}
+              >
+                Save version
+              </Button>
+              {saved !== null && <span className="ml-2 text-xs text-success">Saved v{saved}</span>}
+            </>
+          )}
         </CardContent>
       </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Preview (sample data)</CardTitle>
@@ -131,11 +208,37 @@ export function PromptEditor({
         <CardContent>
           <pre className="whitespace-pre-wrap text-xs">{preview}</pre>
           <h3 className="mt-4 mb-1 text-sm font-semibold">Versions</h3>
-          <ul className="text-xs text-muted-foreground">
-            {versions.map((v) => (
-              <li key={v.version}>v{v.version}</li>
-            ))}
-          </ul>
+          {versions.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No saved versions yet.</p>
+          ) : (
+            <ul className="space-y-0.5 text-xs">
+              {versions.map((v) => {
+                const isActive = v.version === versions[0]?.version;
+                const isSelected = diffVersion?.version === v.version;
+                return (
+                  <li key={v.version}>
+                    <button
+                      type="button"
+                      className={[
+                        "flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors",
+                        isSelected
+                          ? "bg-primary/10 text-primary"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                      ].join(" ")}
+                      onClick={() => selectVersion(v)}
+                      title={isActive ? "Active version" : "Click to diff against active"}
+                    >
+                      <span className="font-medium">v{v.version}</span>
+                      {isActive && (
+                        <span className="rounded bg-success/15 px-1 text-success">active</span>
+                      )}
+                      <span className="ml-auto tabular-nums">{formatDate(v.updatedAt)}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </CardContent>
       </Card>
     </div>
