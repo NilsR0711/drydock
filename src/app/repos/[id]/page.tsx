@@ -67,6 +67,8 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
         queueLabel={ws.repo.queueLabel}
         initialIssues={ws.issues}
         pollIntervalSec={settings.pollIntervalSec}
+        defaultModel={ws.repo.defaultModel}
+        defaultAgent={ws.repo.agent}
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
