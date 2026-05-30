@@ -13,6 +13,7 @@ export default function PromptsPage() {
     ? listVersions(first.id, TEMPLATE_NAMES.main).map((v) => ({
         version: v.version,
         updatedAt: v.updatedAt,
+        content: v.content,
       }))
     : [];
 
