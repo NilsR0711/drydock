@@ -383,15 +383,12 @@ describe("GitlabForge.createPr / mergePr", () => {
     });
   });
 
-  it("mergePr squashes and sets merge-when-pipeline-succeeds", async () => {
+  it("mergePr squashes the merge request", async () => {
     const { forge, calls } = makeForge([
       { method: "PUT", match: "/merge_requests/12/merge", response: { body: "{}" } },
     ]);
     await forge.mergePr(12);
-    expect(JSON.parse(calls[0]?.init?.body ?? "{}")).toMatchObject({
-      squash: true,
-      merge_when_pipeline_succeeds: true,
-    });
+    expect(JSON.parse(calls[0]?.init?.body ?? "{}")).toMatchObject({ squash: true });
   });
 });
 
@@ -400,8 +397,8 @@ describe("GitlabForge.prChecks", () => {
     const { forge } = makeForge([
       {
         method: "GET",
-        match: "/merge_requests/12/pipelines",
-        response: { body: JSON.stringify([{ id: 99 }]) },
+        match: /\/merge_requests\/12$/,
+        response: { body: JSON.stringify({ iid: 12, sha: "abc", head_pipeline: { id: 99 } }) },
       },
       {
         method: "GET",
@@ -425,9 +422,13 @@ describe("GitlabForge.prChecks", () => {
     ]);
   });
 
-  it("returns [] when the MR has no pipeline yet", async () => {
+  it("returns [] when the MR has no pipeline yet (head_pipeline is null)", async () => {
     const { forge } = makeForge([
-      { method: "GET", match: "/merge_requests/12/pipelines", response: { body: "[]" } },
+      {
+        method: "GET",
+        match: /\/merge_requests\/12$/,
+        response: { body: JSON.stringify({ iid: 12, sha: "abc", head_pipeline: null }) },
+      },
     ]);
     expect(await forge.prChecks(12)).toEqual([]);
   });
@@ -439,8 +440,8 @@ describe("GitlabForge.failedRunLog", () => {
     const { forge } = makeForge([
       {
         method: "GET",
-        match: "/merge_requests/12/pipelines",
-        response: { body: JSON.stringify([{ id: 99 }]) },
+        match: /\/merge_requests\/12$/,
+        response: { body: JSON.stringify({ iid: 12, sha: "abc", head_pipeline: { id: 99 } }) },
       },
       {
         method: "GET",
@@ -459,11 +460,164 @@ describe("GitlabForge.failedRunLog", () => {
     expect(log).toBe(trace.slice(-8000));
   });
 
-  it("returns an empty string when nothing failed", async () => {
+  it("returns an empty string when MR has no pipeline (head_pipeline is null)", async () => {
     const { forge } = makeForge([
-      { method: "GET", match: "/merge_requests/12/pipelines", response: { body: "[]" } },
+      {
+        method: "GET",
+        match: /\/merge_requests\/12$/,
+        response: { body: JSON.stringify({ iid: 12, sha: "abc", head_pipeline: null }) },
+      },
     ]);
     expect(await forge.failedRunLog(12)).toBe("");
+  });
+});
+
+describe("GitlabForge.mergePr no deprecated param (issue #108 A)", () => {
+  it("sends only { squash: true } — no merge_when_pipeline_succeeds", async () => {
+    const { forge, calls } = makeForge([
+      { method: "PUT", match: "/merge_requests/12/merge", response: { body: "{}" } },
+    ]);
+    await forge.mergePr(12);
+    const payload = JSON.parse(calls[0]?.init?.body ?? "{}");
+    expect(payload).toEqual({ squash: true });
+    expect("merge_when_pipeline_succeeds" in payload).toBe(false);
+  });
+});
+
+describe("GitlabForge.prChecks via head_pipeline (issue #108 B)", () => {
+  it("resolves the pipeline id from head_pipeline on the MR, not the pipelines list", async () => {
+    const { forge, calls } = makeForge([
+      {
+        method: "GET",
+        match: /\/merge_requests\/12$/,
+        response: {
+          body: JSON.stringify({ iid: 12, sha: "abc123", head_pipeline: { id: 55 } }),
+        },
+      },
+      {
+        method: "GET",
+        match: "/pipelines/55/jobs",
+        response: {
+          body: JSON.stringify([{ name: "ci", status: "success" }]),
+        },
+      },
+    ]);
+    const checks = await forge.prChecks(12);
+    expect(checks).toEqual([{ name: "ci", state: "SUCCESS" }]);
+    expect(calls.some((c) => c.url.includes("merge_requests/12/pipelines"))).toBe(false);
+  });
+
+  it("returns [] when MR head_pipeline is null", async () => {
+    const { forge } = makeForge([
+      {
+        method: "GET",
+        match: /\/merge_requests\/12$/,
+        response: {
+          body: JSON.stringify({ iid: 12, sha: "abc", head_pipeline: null }),
+        },
+      },
+    ]);
+    expect(await forge.prChecks(12)).toEqual([]);
+  });
+});
+
+describe("GitlabForge.failedRunLog error logging (issue #108 C)", () => {
+  it("console.errors when the jobs request fails and returns empty string", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { forge } = makeForge([
+      {
+        method: "GET",
+        match: /\/merge_requests\/12$/,
+        response: {
+          body: JSON.stringify({ iid: 12, sha: "abc", head_pipeline: { id: 88 } }),
+        },
+      },
+      {
+        method: "GET",
+        match: "/pipelines/88/jobs",
+        response: { status: 500, ok: false, body: "internal error" },
+      },
+    ]);
+    const result = await forge.failedRunLog(12);
+    expect(result).toBe("");
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("console.errors when the trace request fails and returns empty string", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { forge } = makeForge([
+      {
+        method: "GET",
+        match: /\/merge_requests\/12$/,
+        response: {
+          body: JSON.stringify({ iid: 12, sha: "abc", head_pipeline: { id: 88 } }),
+        },
+      },
+      {
+        method: "GET",
+        match: "/pipelines/88/jobs",
+        response: {
+          body: JSON.stringify([{ id: 7, name: "test", status: "failed" }]),
+        },
+      },
+      {
+        method: "GET",
+        match: "/jobs/7/trace",
+        response: { status: 403, ok: false, body: "forbidden" },
+      },
+    ]);
+    const result = await forge.failedRunLog(12);
+    expect(result).toBe("");
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("console.errors when an exception is thrown", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const http: HttpClient = async () => {
+      throw new Error("network failure");
+    };
+    const forge = new GitlabForge(
+      { cwd: "/repo", baseUrl: null, token: "t" },
+      { http, run: fakeRun(REMOTE) },
+    );
+    const result = await forge.failedRunLog(12);
+    expect(result).toBe("");
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
+describe("GitlabForge.prDiff error logging (issue #108 C)", () => {
+  it("console.errors on a non-ok diffs response", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { forge } = makeForge([
+      {
+        method: "GET",
+        match: "/merge_requests/12/diffs",
+        response: { status: 401, ok: false, body: "unauthorized" },
+      },
+    ]);
+    const result = await forge.prDiff(12);
+    expect(result).toBe("");
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("console.errors when an exception is thrown", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const http: HttpClient = async () => {
+      throw new Error("network failure");
+    };
+    const forge = new GitlabForge(
+      { cwd: "/repo", baseUrl: null, token: "t" },
+      { http, run: fakeRun(REMOTE) },
+    );
+    const result = await forge.prDiff(12);
+    expect(result).toBe("");
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
   });
 });
 
