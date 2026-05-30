@@ -207,6 +207,10 @@ export const issues = sqliteTable(
     // last time it was decomposed. Lets the decomposer skip an unchanged issue
     // (and avoid re-running the agent fallback) until its body actually changes.
     decomposedHash: text("decomposed_hash"),
+    // Per-issue model/agent override (issue #101). When set, the driver loop
+    // uses these instead of the repo defaults when enqueuing the job.
+    modelOverride: text("model_override"),
+    agentOverride: text("agent_override"),
     syncedAt: integer("synced_at").notNull().default(sql`(unixepoch())`),
   },
   (t) => ({
