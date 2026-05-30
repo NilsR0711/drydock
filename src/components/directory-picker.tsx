@@ -30,10 +30,10 @@ export function DirectoryPicker({
   }, []);
 
   return (
-    <Dialog open onClose={onClose}>
+    <Dialog open onClose={onClose} labelledById="dir-picker-title">
       <div className="flex max-h-[70vh] flex-col">
         <div className="flex items-center justify-between border-b border-card-border pb-3">
-          <span className="flex items-center gap-2 font-semibold">
+          <span id="dir-picker-title" className="flex items-center gap-2 font-semibold">
             <Folder className="h-4 w-4 text-muted-foreground" />
             Choose a folder
           </span>

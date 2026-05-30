@@ -104,8 +104,14 @@ export function IssueDetailModal({
 
   if (issueNumber === null) return null;
 
+  const titleId = `issue-modal-title-${issueNumber}`;
+
   return (
-    <Dialog open={open} onClose={onClose}>
+    <Dialog open={open} onClose={onClose} labelledById={titleId}>
+      {/* Accessible name — always rendered regardless of loading state. */}
+      <span id={titleId} className="sr-only">
+        Issue #{issueNumber}
+      </span>
       {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
       {!detail ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
