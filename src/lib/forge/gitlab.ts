@@ -10,6 +10,38 @@ import {
   type PrCheck,
 } from "./types";
 
+/** Fallback backoff window for a GitLab 429 with no usable reset header (ms). */
+const DEFAULT_GITLAB_BACKOFF_MS = 60_000;
+
+/** Maximum sleep duration for a single 429 backoff (5 minutes). */
+const MAX_GITLAB_BACKOFF_MS = 300_000;
+
+/**
+ * Derive how long to back off after a GitLab 429 response. Prefers
+ * `Retry-After` (seconds), then `RateLimit-Reset` (epoch seconds), then
+ * falls back to {@link DEFAULT_GITLAB_BACKOFF_MS}.
+ */
+export function parseGitLabRetryAfterMs(headers?: Record<string, string>): number {
+  if (headers) {
+    const retryAfter = headers["retry-after"];
+    if (retryAfter) {
+      const seconds = Number(retryAfter);
+      if (Number.isFinite(seconds) && seconds > 0) {
+        return Math.min(seconds * 1000, MAX_GITLAB_BACKOFF_MS);
+      }
+    }
+    const reset = headers["ratelimit-reset"] ?? headers["x-ratelimit-reset"];
+    if (reset) {
+      const resetEpochSec = Number(reset);
+      if (Number.isFinite(resetEpochSec)) {
+        const waitMs = resetEpochSec * 1000 - Date.now();
+        if (waitMs > 0) return Math.min(waitMs, MAX_GITLAB_BACKOFF_MS);
+      }
+    }
+  }
+  return DEFAULT_GITLAB_BACKOFF_MS;
+}
+
 const gitlabIssueSchema = z.object({
   iid: z.number(),
   title: z.string(),
@@ -103,14 +135,16 @@ function parseRemote(remote: string): { host: string; path: string } {
 export class GitlabForge implements ForgeClient {
   private readonly http: HttpClient;
   private readonly run: CommandRunner;
+  private readonly sleep: (ms: number) => Promise<void>;
   private projectRef?: Promise<ProjectRef>;
 
   constructor(
     private readonly config: ForgeConfig,
-    deps: { http?: HttpClient; run?: CommandRunner } = {},
+    deps: { http?: HttpClient; run?: CommandRunner; sleep?: (ms: number) => Promise<void> } = {},
   ) {
     this.http = deps.http ?? fetchHttp;
     this.run = deps.run ?? spawnRunner;
+    this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
   private resolveProject(): Promise<ProjectRef> {
@@ -156,6 +190,12 @@ export class GitlabForge implements ForgeClient {
     opts: { query?: Record<string, string>; body?: unknown } = {},
   ): Promise<HttpResponse> {
     const res = await this.request(method, path, opts);
+    if (res.status === 429) {
+      await this.sleep(parseGitLabRetryAfterMs(res.headers));
+      throw new ForgeError(
+        `GitLab rate-limited: ${errorMessage(res) || `${method} ${path} returned 429`}`,
+      );
+    }
     if (!res.ok) throw new ForgeError(errorMessage(res) || `GitLab ${method} ${path} failed`);
     return res;
   }
