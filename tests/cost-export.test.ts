@@ -197,6 +197,44 @@ describe("toCsv", () => {
     expect(lines[1]).toBe('"Acme, ""Inc""",0.07');
     expect(lines[2]).toBe("beta,0.13");
   });
+
+  it("prefixes formula-trigger characters (=cmd, @SUM, -1) with an apostrophe", () => {
+    const table: CostExportTable = {
+      report: "line-items",
+      columns: ["repo", "model"],
+      rows: [
+        { repo: "=cmd|/C calc", model: "@SUM(1+1)" },
+        { repo: "-1", model: "+positive" },
+      ],
+    };
+    const csv = toCsv(table);
+    const lines = csv.trimEnd().split("\r\n");
+    expect(lines[0]).toBe("repo,model");
+    expect(lines[1]).toBe("'=cmd|/C calc,'@SUM(1+1)");
+    expect(lines[2]).toBe("'-1,'+positive");
+  });
+
+  it("applies RFC-4180 quoting after the injection prefix when a trigger field contains a comma", () => {
+    const table: CostExportTable = {
+      report: "by-repo",
+      columns: ["repo"],
+      rows: [{ repo: "=cmd,foo" }],
+    };
+    const csv = toCsv(table);
+    const lines = csv.trimEnd().split("\r\n");
+    expect(lines[1]).toBe(`"'=cmd,foo"`);
+  });
+
+  it("does not modify safe string fields or numeric values", () => {
+    const table: CostExportTable = {
+      report: "by-repo",
+      columns: ["repo", "total_cost_usd"],
+      rows: [{ repo: "safe-repo", total_cost_usd: 0.07 }],
+    };
+    const csv = toCsv(table);
+    const lines = csv.trimEnd().split("\r\n");
+    expect(lines[1]).toBe("safe-repo,0.07");
+  });
 });
 
 describe("toJson", () => {
