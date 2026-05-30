@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import {
   getActiveTemplate,
+  getVersion,
   listVersions,
   resolveTemplateContent,
   saveTemplate,
@@ -22,7 +23,19 @@ export async function loadTemplateAction(repoId: number, name: string) {
     versions: listVersions(repoId, name).map((v) => ({
       version: v.version,
       updatedAt: v.updatedAt,
+      content: v.content,
     })),
     hasRow: Boolean(getActiveTemplate(repoId, name)),
   };
+}
+
+/** Return a single version's full content, or null when not found. */
+export async function getVersionAction(
+  repoId: number,
+  name: string,
+  version: number,
+): Promise<{ version: number; content: string; updatedAt: number } | null> {
+  const row = getVersion(repoId, name, version);
+  if (!row) return null;
+  return { version: row.version, content: row.content, updatedAt: row.updatedAt };
 }
