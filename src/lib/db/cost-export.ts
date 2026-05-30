@@ -9,9 +9,9 @@ export type CostReport = "line-items" | "by-repo" | "by-model";
 export type CostExportFormat = "csv" | "json";
 
 export interface CostExportFilter {
-  /** Inclusive lower-bound day (UTC), `YYYY-MM-DD`. Omit for no lower bound. */
+  /** Inclusive lower-bound day (local), `YYYY-MM-DD`. Omit for no lower bound. */
   from?: string;
-  /** Inclusive upper-bound day (UTC), `YYYY-MM-DD`. Omit for no upper bound. */
+  /** Inclusive upper-bound day (local), `YYYY-MM-DD`. Omit for no upper bound. */
   to?: string;
   /** Restrict to a single repo. Omit for fleet-wide totals. */
   repoId?: number;
@@ -29,9 +29,9 @@ export interface CostExportTable {
 // 4-decimal dashboard display.
 const roundCost = (n: number): number => Math.round(n * 1_000_000) / 1_000_000;
 
-// The day a job is attributed to, in UTC — identical to the dashboard's daily
-// grouping (see cost-queries.ts), so exported totals reconcile with it.
-const dayExpr = sql<string>`strftime('%Y-%m-%d', ${jobs.startedAt}, 'unixepoch')`;
+// The day a job is attributed to, in local time — identical to the dashboard's
+// daily grouping (see cost-queries.ts), so exported totals reconcile with it.
+const dayExpr = sql<string>`strftime('%Y-%m-%d', ${jobs.startedAt}, 'unixepoch', 'localtime')`;
 
 // Shared base predicate. A job needs a start date to belong to any date bucket;
 // undated jobs (e.g. still queued) carry no realized cost to report and are
@@ -146,10 +146,13 @@ export function buildCostExport(
 }
 
 // RFC 4180: quote a field that contains a comma, quote, CR or LF; escape inner
-// quotes by doubling them.
+// quotes by doubling them.  Additionally prefix spreadsheet formula triggers
+// (= + - @ tab) with a leading apostrophe so spreadsheet apps treat the cell
+// as plain text rather than evaluating it as a formula (CSV injection defence).
 function csvField(value: string | number): string {
   const s = String(value);
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  const safe = /^[=+\-@\t]/.test(s) ? `'${s}` : s;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
 /** Serialize a table as RFC-4180 CSV (CRLF line endings, trailing newline). */
