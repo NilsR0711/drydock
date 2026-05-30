@@ -2,6 +2,7 @@
 
 import { CheckCircle2, Info, X, XCircle } from "lucide-react";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { ariaLiveForVariant } from "@/lib/ui/aria-utils";
 import { cn } from "@/lib/utils";
 
 type ToastVariant = "success" | "error" | "info";
@@ -86,6 +87,27 @@ const TONES: Record<ToastVariant, string> = {
   info: "text-muted-foreground",
 };
 
+function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
+  const Icon = ICONS[t.variant];
+  return (
+    <div className="pointer-events-auto flex items-start gap-3 rounded-xl border border-card-border bg-card p-3 shadow-lg">
+      <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", TONES[t.variant])} />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{t.title}</p>
+        {t.description && <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>}
+      </div>
+      <button
+        type="button"
+        aria-label="Dismiss notification"
+        onClick={() => onDismiss(t.id)}
+        className="shrink-0 rounded-md p-0.5 text-muted-foreground hover-elevate"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
 function ToastContainer({
   toasts,
   onDismiss,
@@ -93,35 +115,22 @@ function ToastContainer({
   toasts: Toast[];
   onDismiss: (id: number) => void;
 }) {
-  if (toasts.length === 0) return null;
+  const errorToasts = toasts.filter((t) => ariaLiveForVariant(t.variant) === "assertive");
+  const politeToasts = toasts.filter((t) => ariaLiveForVariant(t.variant) === "polite");
   return (
     <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col gap-2">
-      {toasts.map((t) => {
-        const Icon = ICONS[t.variant];
-        return (
-          <output
-            key={t.id}
-            aria-live="polite"
-            className="pointer-events-auto flex items-start gap-3 rounded-xl border border-card-border bg-card p-3 shadow-lg"
-          >
-            <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", TONES[t.variant])} />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">{t.title}</p>
-              {t.description && (
-                <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
-              )}
-            </div>
-            <button
-              type="button"
-              aria-label="Dismiss notification"
-              onClick={() => onDismiss(t.id)}
-              className="shrink-0 rounded-md p-0.5 text-muted-foreground hover-elevate"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </output>
-        );
-      })}
+      {/* Always-present assertive region — screen readers have a stable anchor for errors. */}
+      <div role="alert" aria-live="assertive" aria-atomic="false" className="flex flex-col gap-2">
+        {errorToasts.map((t) => (
+          <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />
+        ))}
+      </div>
+      {/* Always-present polite region for success/info notifications. */}
+      <div aria-live="polite" aria-atomic="false" className="flex flex-col gap-2">
+        {politeToasts.map((t) => (
+          <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />
+        ))}
+      </div>
     </div>
   );
 }

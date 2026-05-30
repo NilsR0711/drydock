@@ -54,13 +54,13 @@ export function RepoWebhookPanel({ repo }: { repo: Repo }) {
         <span className="text-sm font-semibold">Webhook sync</span>
         <span
           className={`rounded px-1.5 py-0.5 text-xs ${
-            enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"
+            enabled ? "bg-success/15 text-success-foreground" : "bg-muted text-muted-foreground"
           }`}
         >
           {enabled ? "On" : "Off"}
         </span>
         {pending && <span className="text-xs text-muted-foreground">Saving…</span>}
-        {saved && <span className="text-xs text-success">Saved</span>}
+        {saved && <span className="text-xs text-success-foreground">Saved</span>}
       </div>
 
       <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="webhook-secret">

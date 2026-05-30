@@ -47,7 +47,7 @@ export function DirectoryPicker({
             {result?.path ?? "…"}
           </p>
           {result?.isGitRepo && (
-            <span className="mt-1 inline-flex items-center gap-1 rounded bg-success-muted px-1.5 py-0.5 text-xs text-success">
+            <span className="mt-1 inline-flex items-center gap-1 rounded bg-success-muted px-1.5 py-0.5 text-xs text-success-foreground">
               <FolderGit2 className="h-3 w-3" />
               git repo
             </span>
@@ -83,7 +83,9 @@ export function DirectoryPicker({
                 {e.name}
               </span>
               {e.isGitRepo && (
-                <span className="rounded bg-success-muted px-1 text-[10px] text-success">git</span>
+                <span className="rounded bg-success-muted px-1 text-[10px] text-success-foreground">
+                  git
+                </span>
               )}
             </button>
           ))}

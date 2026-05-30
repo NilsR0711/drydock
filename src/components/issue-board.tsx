@@ -286,7 +286,11 @@ export function IssueBoard({
         placeholder="Search by title or label…"
         className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
       />
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for drag-and-drop; keyboard path is via the action buttons on each row */}
