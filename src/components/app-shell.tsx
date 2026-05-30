@@ -13,6 +13,7 @@ import type { UpdateStatus } from "@/lib/version/update-check";
 const NAV: { href: string; label: string }[] = [
   { href: "/", label: "Dashboard" },
   { href: "/needs-human", label: "Needs human" },
+  { href: "/jobs", label: "Jobs" },
   { href: "/prompts", label: "Prompts" },
   { href: "/adrs", label: "ADRs" },
   { href: "/costs", label: "Costs" },

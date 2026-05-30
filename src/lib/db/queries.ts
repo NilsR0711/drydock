@@ -1,4 +1,4 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, like, or, type SQL, sql } from "drizzle-orm";
 import { type DB, getDb } from "./client";
 import { todayCost } from "./cost-queries";
 import { type Issue, issues, type Job, jobs, type Repo, repos } from "./schema";
@@ -193,4 +193,101 @@ export function dashboardSnapshot(db: DB = getDb()): DashboardSnapshot {
   });
 
   return { summary: dashboardSummary(db), repos: rows };
+}
+
+export interface JobHistoryFilters {
+  repoId?: number;
+  status?: string;
+  model?: string;
+  /** Free-text search: matches issue number (exact) or issue title (substring). */
+  search?: string;
+  /** 1-based page number. */
+  page?: number;
+  pageSize?: number;
+}
+
+export interface JobHistoryRow extends Job {
+  repoName: string;
+  issueTitle: string | null;
+}
+
+export interface JobHistoryPage {
+  rows: JobHistoryRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+const DEFAULT_PAGE_SIZE = 25;
+
+/**
+ * Paginated cross-repo job history with optional filters and free-text search.
+ * Rows are ordered newest-first by createdAt. Searching matches exact issue
+ * number or a case-insensitive issue title substring via the issues cache.
+ */
+export function listJobsPage(filters: JobHistoryFilters, db: DB = getDb()): JobHistoryPage {
+  const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE;
+
+  const conditions: SQL[] = [];
+  if (filters.repoId !== undefined) conditions.push(eq(jobs.repoId, filters.repoId));
+  if (filters.status) conditions.push(eq(jobs.status, filters.status));
+  if (filters.model) conditions.push(eq(jobs.model, filters.model));
+
+  if (filters.search?.trim()) {
+    const term = filters.search.trim();
+    const asNumber = Number(term);
+    if (!Number.isNaN(asNumber) && Number.isInteger(asNumber) && String(asNumber) === term) {
+      conditions.push(eq(jobs.issueNumber, asNumber));
+    } else {
+      conditions.push(
+        or(
+          like(issues.title, `%${term}%`),
+          // Also allow falling back to number search if input happens to look like a number fragment
+          sql`LOWER(${issues.title}) LIKE LOWER(${"%" + term + "%"})`,
+        ) as SQL,
+      );
+    }
+  }
+
+  const where = conditions.length ? and(...conditions) : undefined;
+
+  const totalResult = db
+    .select({ n: count() })
+    .from(jobs)
+    .leftJoin(issues, and(eq(issues.repoId, jobs.repoId), eq(issues.number, jobs.issueNumber)))
+    .innerJoin(repos, eq(repos.id, jobs.repoId))
+    .where(where)
+    .get();
+
+  const total = totalResult?.n ?? 0;
+  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+
+  // Clamp requested page to valid range.
+  const requestedPage = filters.page ?? 1;
+  const page = total === 0 ? 1 : Math.min(Math.max(1, requestedPage), Math.max(1, totalPages));
+  const offset = (page - 1) * pageSize;
+
+  const raw = db
+    .select({
+      job: jobs,
+      repoName: repos.name,
+      issueTitle: issues.title,
+    })
+    .from(jobs)
+    .leftJoin(issues, and(eq(issues.repoId, jobs.repoId), eq(issues.number, jobs.issueNumber)))
+    .innerJoin(repos, eq(repos.id, jobs.repoId))
+    .where(where)
+    .orderBy(desc(jobs.createdAt))
+    .limit(pageSize)
+    .offset(offset)
+    .all();
+
+  const rows: JobHistoryRow[] = raw.map((r) => ({
+    ...r.job,
+    repoName: r.repoName,
+    issueTitle: r.issueTitle ?? null,
+  }));
+
+  return { rows, total, page, pageSize, totalPages };
 }

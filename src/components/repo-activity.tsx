@@ -8,10 +8,12 @@ export function RepoActivity({
   activeJob,
   recentJobs,
   initialLog = [],
+  repoId,
 }: {
   activeJob: Job | undefined;
   recentJobs: Job[];
   initialLog?: LogLine[];
+  repoId?: number;
 }) {
   return (
     <div className="space-y-4">
@@ -43,9 +45,19 @@ export function RepoActivity({
       )}
 
       <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          History
-        </h3>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            History
+          </h3>
+          {repoId !== undefined && (
+            <Link
+              href={`/jobs?repo=${repoId}`}
+              className="text-xs text-muted-foreground hover:underline"
+            >
+              View all runs →
+            </Link>
+          )}
+        </div>
         <ul className="space-y-1">
           {recentJobs.map((j) => (
             <li key={j.id} className="flex items-center gap-2 text-sm">
