@@ -37,6 +37,26 @@ export function resolveTemplateContent(repoId: number, name: string, db: DB = ge
   );
 }
 
+/** A specific version of a named template for a repo, including its full content. */
+export function getVersion(
+  repoId: number,
+  name: string,
+  version: number,
+  db: DB = getDb(),
+): PromptTemplate | undefined {
+  return db
+    .select()
+    .from(promptTemplates)
+    .where(
+      and(
+        eq(promptTemplates.repoId, repoId),
+        eq(promptTemplates.name, name),
+        eq(promptTemplates.version, version),
+      ),
+    )
+    .get();
+}
+
 export function listVersions(repoId: number, name: string, db: DB = getDb()): PromptTemplate[] {
   return db
     .select()

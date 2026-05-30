@@ -3,6 +3,7 @@ import { createDb, type DB } from "@/lib/db/client";
 import { DEFAULT_TEMPLATES, TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import {
   getActiveTemplate,
+  getVersion,
   listVersions,
   MAX_VERSIONS,
   renderTemplate,
@@ -69,5 +70,35 @@ describe("template versioning", () => {
 
   it("rejects invalid input", () => {
     expect(() => saveTemplate({ repoId: 0, name: "", content: "x" }, db)).toThrow();
+  });
+});
+
+describe("getVersion", () => {
+  it("returns the full content of a specific version", () => {
+    saveTemplate({ repoId, name: "default", content: "first content" }, db);
+    saveTemplate({ repoId, name: "default", content: "second content" }, db);
+
+    const v1 = getVersion(repoId, "default", 1, db);
+    expect(v1?.content).toBe("first content");
+    expect(v1?.version).toBe(1);
+
+    const v2 = getVersion(repoId, "default", 2, db);
+    expect(v2?.content).toBe("second content");
+    expect(v2?.version).toBe(2);
+  });
+
+  it("returns undefined for a version number that does not exist", () => {
+    saveTemplate({ repoId, name: "default", content: "v1" }, db);
+    expect(getVersion(repoId, "default", 99, db)).toBeUndefined();
+  });
+
+  it("returns undefined when the template name does not exist", () => {
+    expect(getVersion(repoId, "nonexistent", 1, db)).toBeUndefined();
+  });
+
+  it("does not cross repo boundaries", () => {
+    const otherId = addRepo({ path: "/tmp/r2", name: "other" }, db).id;
+    saveTemplate({ repoId, name: "default", content: "v1" }, db);
+    expect(getVersion(otherId, "default", 1, db)).toBeUndefined();
   });
 });
