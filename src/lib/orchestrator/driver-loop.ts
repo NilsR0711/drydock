@@ -2,7 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { getAgentProvider } from "@/lib/agents/registry";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
-import { issues, type Job, jobs, type Repo } from "@/lib/db/schema";
+import { type Issue, issues, type Job, jobs, type Repo } from "@/lib/db/schema";
 import type { CommandRunner } from "@/lib/exec/runner";
 import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient } from "@/lib/forge/types";
@@ -185,6 +185,11 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
         const fetched = await fetch(repo.path, repo.queueLabel);
         syncIssuesFromGh(repo.id, fetched, db);
 
+        // Build a number→issue map so the enqueue step below can read
+        // per-issue model/agent overrides without a query per issue.
+        const cachedIssues = db.select().from(issues).where(eq(issues.repoId, repo.id)).all();
+        const issueByNumber = new Map<number, Issue>(cachedIssues.map((i) => [i.number, i]));
+
         const cfg = repoAutomation(repo);
         if (cfg.autoTriageEnabled) {
           await triage(repo, forge, fetched, db);
@@ -219,12 +224,14 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
           }
           // Dedupe-guarded enqueue (issue #23): the partial unique index makes a
           // racing duplicate a no-op rather than a second job for the same issue.
+          // Per-issue overrides (issue #101) take precedence over repo defaults.
+          const issueMeta = issueByNumber.get(gh.number);
           enqueueJob(
             {
               repoId: repo.id,
               issueNumber: gh.number,
-              model: repo.defaultModel,
-              agent: repo.agent,
+              model: issueMeta?.modelOverride ?? repo.defaultModel,
+              agent: issueMeta?.agentOverride ?? repo.agent,
             },
             db,
           );
