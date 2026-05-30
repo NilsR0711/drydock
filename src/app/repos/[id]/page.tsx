@@ -72,7 +72,12 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <RepoActivity activeJob={ws.activeJob} recentJobs={ws.recentJobs} initialLog={initialLog} />
+        <RepoActivity
+          activeJob={ws.activeJob}
+          recentJobs={ws.recentJobs}
+          initialLog={initialLog}
+          repoId={ws.repo.id}
+        />
         <RepoCostPanel todayUsd={todayUsd} limitUsd={ws.repo.dailyCostLimitUsd} daily={daily} />
         <RepoAdrPanel adrs={repoAdrs} />
         {ws.repo.autoHealCi && <RepoHealingPanel sessions={healingSessions} />}
