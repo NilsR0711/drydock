@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 import { IssueDetailModal } from "@/components/issue-detail-modal";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +12,7 @@ import {
   reorderIssuesAction,
   syncRepoIssuesAction,
 } from "@/lib/issues/actions";
+import { moveIssueDown, moveIssueUp } from "@/lib/issues/order";
 
 function parseLabels(raw: string): string[] {
   try {
@@ -115,17 +117,53 @@ export function IssueBoard({
     });
   }
 
-  function Row({
-    issue,
-    index,
-    reorderable,
-  }: {
-    issue: Issue;
-    index: number;
-    reorderable: boolean;
-  }) {
+  function Row({ issue, reorderable }: { issue: Issue; reorderable: boolean }) {
+    const allQueue = issues.filter(inQueue);
+    const fullIdx = allQueue.findIndex((i) => i.number === issue.number);
+    const isFirst = fullIdx === 0;
+    const isLast = fullIdx === allQueue.length - 1;
+
+    function handleAddToQueue(e: React.MouseEvent) {
+      e.stopPropagation();
+      start(() => {
+        addToQueueAction(repoId, issue.number)
+          .then(setIssues)
+          .catch((err: Error) => setError(err.message));
+      });
+    }
+
+    function handleRemoveFromQueue(e: React.MouseEvent) {
+      e.stopPropagation();
+      start(() => {
+        removeFromQueueAction(repoId, issue.number)
+          .then(setIssues)
+          .catch((err: Error) => setError(err.message));
+      });
+    }
+
+    function handleMoveUp(e: React.MouseEvent) {
+      e.stopPropagation();
+      const newOrder = moveIssueUp(
+        allQueue.map((i) => i.number),
+        issue.number,
+      );
+      start(() => {
+        reorderIssuesAction(repoId, newOrder).catch((err: Error) => setError(err.message));
+      });
+    }
+
+    function handleMoveDown(e: React.MouseEvent) {
+      e.stopPropagation();
+      const newOrder = moveIssueDown(
+        allQueue.map((i) => i.number),
+        issue.number,
+      );
+      start(() => {
+        reorderIssuesAction(repoId, newOrder).catch((err: Error) => setError(err.message));
+      });
+    }
+
     return (
-      // biome-ignore lint/a11y/useKeyWithClickEvents: row is primarily a drag target; keyboard users use the detail modal via other entry points
       <li
         draggable
         onDragStart={() => setDragNumber(issue.number)}
@@ -134,15 +172,18 @@ export function IssueBoard({
           e.stopPropagation();
           if (reorderable) reorderWithinQueue(issue.number);
         }}
-        className="issue-row flex cursor-pointer items-center gap-3 rounded-xl border border-card-border bg-card p-3"
-        onClick={() => setModalIssue(issue.number)}
+        className="issue-row flex items-center gap-3 rounded-xl border border-card-border bg-card p-3"
       >
         {reorderable && (
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-            {index + 1}
+            {fullIdx + 1}
           </span>
         )}
-        <div className="min-w-0 flex-1">
+        <button
+          type="button"
+          className="min-w-0 flex-1 cursor-pointer rounded-sm text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          onClick={() => setModalIssue(issue.number)}
+        >
           <p className="truncate text-sm font-medium">
             #{issue.number} {issue.title}
           </p>
@@ -161,8 +202,59 @@ export function IssueBoard({
                 <Badge key={l}>{l}</Badge>
               ))}
           </div>
+        </button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          {reorderable ? (
+            <>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label={`Move #${issue.number} up in queue`}
+                disabled={isFirst || pending}
+                onClick={handleMoveUp}
+                className="h-7 w-7"
+              >
+                <ArrowUp />
+              </Button>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label={`Move #${issue.number} down in queue`}
+                disabled={isLast || pending}
+                onClick={handleMoveDown}
+                className="h-7 w-7"
+              >
+                <ArrowDown />
+              </Button>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label={`Remove #${issue.number} from queue`}
+                disabled={pending}
+                onClick={handleRemoveFromQueue}
+                className="h-7 w-7 text-destructive hover:text-destructive"
+              >
+                <X />
+              </Button>
+            </>
+          ) : (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label={`Add #${issue.number} to queue`}
+              disabled={pending}
+              onClick={handleAddToQueue}
+              className="h-7 w-7"
+            >
+              <Plus />
+            </Button>
+          )}
         </div>
-        <span className="cursor-grab text-muted-foreground" title="Drag">
+        <span aria-hidden className="cursor-grab text-muted-foreground" title="Drag to reorder">
           ⠿
         </span>
       </li>
@@ -197,7 +289,7 @@ export function IssueBoard({
       {error && <p className="text-xs text-destructive">{error}</p>}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop target for the backlog column */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for drag-and-drop; keyboard path is via the action buttons on each row */}
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={dropToBacklog}
@@ -207,8 +299,8 @@ export function IssueBoard({
             Backlog ({backlog.length})
           </p>
           <ul className="space-y-2">
-            {backlog.map((issue, i) => (
-              <Row key={issue.number} issue={issue} index={i} reorderable={false} />
+            {backlog.map((issue) => (
+              <Row key={issue.number} issue={issue} reorderable={false} />
             ))}
             {backlog.length === 0 && (
               <li className="px-1 text-sm text-muted-foreground">No backlog issues.</li>
@@ -216,7 +308,7 @@ export function IssueBoard({
           </ul>
         </div>
 
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop target for the queue column */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for drag-and-drop; keyboard path is via the action buttons on each row */}
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={dropToQueue}
@@ -226,12 +318,12 @@ export function IssueBoard({
             Queue ({queue.length})
           </p>
           <ul className="space-y-2">
-            {queue.map((issue, i) => (
-              <Row key={issue.number} issue={issue} index={i} reorderable={true} />
+            {queue.map((issue) => (
+              <Row key={issue.number} issue={issue} reorderable={true} />
             ))}
             {queue.length === 0 && (
               <li className="px-1 text-sm text-muted-foreground">
-                Drag issues here to auto-process them.
+                Drag issues here to queue them, or use the + button.
               </li>
             )}
           </ul>

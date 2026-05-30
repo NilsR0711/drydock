@@ -3,7 +3,9 @@ export function moveIssueUp(orderedNumbers: number[], issueNumber: number): numb
   const idx = orderedNumbers.indexOf(issueNumber);
   if (idx <= 0) return orderedNumbers;
   const result = [...orderedNumbers];
-  [result[idx - 1], result[idx]] = [result[idx], result[idx - 1]];
+  const a = result[idx - 1] as number;
+  result[idx - 1] = result[idx] as number;
+  result[idx] = a;
   return result;
 }
 
@@ -12,6 +14,8 @@ export function moveIssueDown(orderedNumbers: number[], issueNumber: number): nu
   const idx = orderedNumbers.indexOf(issueNumber);
   if (idx === -1 || idx === orderedNumbers.length - 1) return orderedNumbers;
   const result = [...orderedNumbers];
-  [result[idx], result[idx + 1]] = [result[idx + 1], result[idx]];
+  const a = result[idx + 1] as number;
+  result[idx + 1] = result[idx] as number;
+  result[idx] = a;
   return result;
 }
