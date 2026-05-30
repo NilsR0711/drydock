@@ -78,7 +78,7 @@ describe("listJobsPage", () => {
     expect(result.rows).toHaveLength(4);
     expect(result.page).toBe(1);
     // Newest job (createdAt = NOW - 50) is first
-    expect(result.rows[0]!.status).toBe("working");
+    expect(result.rows[0]?.status).toBe("working");
   });
 
   it("respects pageSize and page offset", () => {
@@ -88,7 +88,7 @@ describe("listJobsPage", () => {
     expect(page1.rows).toHaveLength(2);
     expect(page2.rows).toHaveLength(2);
     expect(page1.totalPages).toBe(2);
-    expect(page1.rows[0]!.id).not.toBe(page2.rows[0]!.id);
+    expect(page1.rows[0]?.id).not.toBe(page2.rows[0]?.id);
   });
 
   it("filters by status", () => {
@@ -135,14 +135,14 @@ describe("listJobsPage", () => {
       .values({ repoId: repo.id, issueNumber: 99, status: "queued", model: null })
       .run();
     const result = listJobsPage({});
-    expect(result.rows[0]!.issueTitle).toBeNull();
+    expect(result.rows[0]?.issueTitle).toBeNull();
   });
 
   it("searches by exact issue number", () => {
     seed();
     const result = listJobsPage({ search: "10" });
     expect(result.total).toBe(1);
-    expect(result.rows[0]!.issueNumber).toBe(10);
+    expect(result.rows[0]?.issueNumber).toBe(10);
   });
 
   it("searches by issue title substring (case-insensitive)", () => {
@@ -158,7 +158,7 @@ describe("listJobsPage", () => {
     // "mode" matches "Add dark mode" and "Improve performance" doesn't; but "dark" is unique
     const result = listJobsPage({ search: "dark" });
     expect(result.total).toBe(1);
-    expect(result.rows[0]!.issueTitle).toBe("Add dark mode");
+    expect(result.rows[0]?.issueTitle).toBe("Add dark mode");
   });
 
   it("returns empty result when no jobs exist", () => {

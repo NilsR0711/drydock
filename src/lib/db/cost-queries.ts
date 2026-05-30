@@ -1,6 +1,6 @@
 import { and, desc, type SQL, sql } from "drizzle-orm";
 import { type DB, getDb } from "./client";
-import { type Job, jobs, oneShotCosts } from "./schema";
+import { type Job, jobs } from "./schema";
 
 export interface DailyCost {
   day: string;

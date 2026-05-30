@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import type { AgentProvider } from "@/lib/agents/types";
 import type { DB } from "@/lib/db/client";
 import { type Job, jobEvents } from "@/lib/db/schema";
-import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
+import type { CommandRunner } from "@/lib/exec/runner";
 import type { IssueDetail, PrCheck } from "@/lib/github/gh";
 import {
   buildQuestionPrompt,
