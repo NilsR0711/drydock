@@ -26,18 +26,31 @@ export async function reorderIssuesAction(repoId: number, orderedNumbers: number
   revalidatePath(`/repos/${repoId}`);
 }
 
-/** Create a queued job for a single issue (the repo's default model applies). */
-export async function startIssueAction(repoId: number, issueNumber: number) {
+/** Create a queued job for a single issue. Optionally override model and/or agent for this job only. */
+export async function startIssueAction(
+  repoId: number,
+  issueNumber: number,
+  opts: { model?: string; agent?: string } = {},
+) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  const job = createJob({ repoId, issueNumber, model: repo.defaultModel });
+  const job = createJob({
+    repoId,
+    issueNumber,
+    model: opts.model ?? repo.defaultModel,
+    agent: opts.agent,
+  });
   revalidatePath(`/repos/${repoId}`);
   return job;
 }
 
-/** Add the repo's queue label to an issue (GitHub + local cache). */
-export async function addToQueueAction(repoId: number, issueNumber: number) {
-  const result = await queueIssue(repoId, issueNumber);
+/** Add the repo's queue label to an issue (GitHub + local cache). Optionally persist model/agent overrides for the driver to pick up. */
+export async function addToQueueAction(
+  repoId: number,
+  issueNumber: number,
+  opts: { model?: string; agent?: string } = {},
+) {
+  const result = await queueIssue(repoId, issueNumber, opts);
   revalidatePath(`/repos/${repoId}`);
   return result;
 }

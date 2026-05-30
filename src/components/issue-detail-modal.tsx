@@ -1,20 +1,27 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { AgentSelect } from "@/components/agent-select";
+import { ModelSelect } from "@/components/model-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
+import type { AgentId } from "@/lib/agents/types";
 import type { IssueSubtask } from "@/lib/db/schema";
 import type { IssueDetail } from "@/lib/github/gh";
 import {
+  addToQueueAction,
   commentIssueAction,
   editIssueAction,
   listSubtasksAction,
+  removeFromQueueAction,
   setIssueLabelsAction,
   setIssueStateAction,
+  startIssueAction,
   viewIssueAction,
 } from "@/lib/issues/actions";
+import { defaultModelForAgent } from "@/lib/models";
 
 /** Display label and tone for each subtask lifecycle state. */
 const SUBTASK_DISPLAY: Record<string, { label: string; symbol: string }> = {
@@ -30,11 +37,17 @@ export function IssueDetailModal({
   issueNumber,
   open,
   onClose,
+  queueLabel,
+  defaultModel,
+  defaultAgent,
 }: {
   repoId: number;
   issueNumber: number | null;
   open: boolean;
   onClose: () => void;
+  queueLabel: string;
+  defaultModel: string;
+  defaultAgent: string;
 }) {
   const [detail, setDetail] = useState<IssueDetail | null>(null);
   const [subtasks, setSubtasks] = useState<IssueSubtask[]>([]);
@@ -42,9 +55,16 @@ export function IssueDetailModal({
   const [body, setBody] = useState("");
   const [comment, setComment] = useState("");
   const [newLabel, setNewLabel] = useState("");
+  const [overrideModel, setOverrideModel] = useState(defaultModel);
+  const [overrideAgent, setOverrideAgent] = useState<AgentId>(defaultAgent as AgentId);
   const [error, setError] = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const [pending, start] = useTransition();
+
+  useEffect(() => {
+    setOverrideModel(defaultModel);
+    setOverrideAgent(defaultAgent as AgentId);
+  }, [defaultModel, defaultAgent]);
 
   useEffect(() => {
     if (!open || issueNumber === null) return;
@@ -103,6 +123,96 @@ export function IssueDetailModal({
             >
               {detail.state === "open" ? "Close issue" : "Reopen issue"}
             </Button>
+          </div>
+
+          {/* Per-job model/agent override (issue #101) */}
+          <div className="rounded-lg border border-card-border bg-card p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Run settings
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-muted-foreground" htmlFor="modal-agent-select">
+                  Agent
+                </label>
+                <AgentSelect
+                  id="modal-agent-select"
+                  value={overrideAgent}
+                  onChange={(v) => {
+                    setOverrideAgent(v);
+                    setOverrideModel(defaultModelForAgent(v));
+                  }}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-muted-foreground" htmlFor="modal-model-select">
+                  Model
+                </label>
+                <ModelSelect
+                  id="modal-model-select"
+                  value={overrideModel}
+                  onChange={setOverrideModel}
+                  agent={overrideAgent}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <Button
+                size="sm"
+                disabled={pending}
+                onClick={() =>
+                  start(() => {
+                    startIssueAction(repoId, detail.number, {
+                      model: overrideModel !== defaultModel ? overrideModel : undefined,
+                      agent: overrideAgent !== defaultAgent ? overrideAgent : undefined,
+                    })
+                      .then(() => onClose())
+                      .catch((e: Error) => setError(e.message));
+                  })
+                }
+              >
+                Start job now
+              </Button>
+              {detail.labels.includes(queueLabel) ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() =>
+                    start(() => {
+                      removeFromQueueAction(repoId, detail.number)
+                        .then(reload)
+                        .catch((e: Error) => setError(e.message));
+                    })
+                  }
+                >
+                  Dequeue
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() =>
+                    start(() => {
+                      addToQueueAction(repoId, detail.number, {
+                        model: overrideModel !== defaultModel ? overrideModel : undefined,
+                        agent: overrideAgent !== defaultAgent ? overrideAgent : undefined,
+                      })
+                        .then(reload)
+                        .catch((e: Error) => setError(e.message));
+                    })
+                  }
+                >
+                  Add to queue
+                </Button>
+              )}
+            </div>
+            {overrideModel !== defaultModel || overrideAgent !== defaultAgent ? (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Override active — repo default: <span className="font-medium">{defaultModel}</span>
+              </p>
+            ) : null}
           </div>
 
           <input

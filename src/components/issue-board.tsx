@@ -26,11 +26,15 @@ export function IssueBoard({
   queueLabel,
   initialIssues,
   pollIntervalSec,
+  defaultModel,
+  defaultAgent,
 }: {
   repoId: number;
   queueLabel: string;
   initialIssues: Issue[];
   pollIntervalSec: number;
+  defaultModel: string;
+  defaultAgent: string;
 }) {
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [query, setQuery] = useState("");
@@ -239,6 +243,9 @@ export function IssueBoard({
         issueNumber={modalIssue}
         open={modalIssue !== null}
         onClose={() => setModalIssue(null)}
+        queueLabel={queueLabel}
+        defaultModel={defaultModel}
+        defaultAgent={defaultAgent}
       />
     </div>
   );

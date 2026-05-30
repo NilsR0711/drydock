@@ -155,7 +155,7 @@ export const tools: ToolDef[] = [
     handler: async (args, { db }) => {
       const { repoId, issueNumber } = parseArgs(issueRefShape, args);
       assertWorkAllowed(repoId, db);
-      return queueIssue(repoId, issueNumber, db);
+      return queueIssue(repoId, issueNumber, {}, db);
     },
   },
   {
