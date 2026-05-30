@@ -41,13 +41,18 @@ const REMOTE = "https://gitlab.com/group/proj.git";
 
 function makeForge(
   routes: Route[],
-  opts: { remote?: string; baseUrl?: string; token?: string } = {},
+  opts: {
+    remote?: string;
+    baseUrl?: string;
+    token?: string;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
 ) {
   const { http, calls } = fakeHttp(routes);
   const run = fakeRun(opts.remote ?? REMOTE);
   const forge = new GitlabForge(
     { cwd: "/repo", baseUrl: opts.baseUrl ?? null, token: opts.token ?? "glpat-secret" },
-    { http, run },
+    { http, run, sleep: opts.sleep },
   );
   return { forge, calls, run };
 }
@@ -459,5 +464,129 @@ describe("GitlabForge.failedRunLog", () => {
       { method: "GET", match: "/merge_requests/12/pipelines", response: { body: "[]" } },
     ]);
     expect(await forge.failedRunLog(12)).toBe("");
+  });
+});
+
+describe("GitlabForge 429 rate-limit backoff", () => {
+  it("sleeps for Retry-After seconds then throws ForgeError", async () => {
+    const sleptMs: number[] = [];
+    const { forge } = makeForge(
+      [
+        {
+          method: "GET",
+          match: "/issues",
+          response: {
+            status: 429,
+            ok: false,
+            body: JSON.stringify({ message: "Too Many Requests" }),
+            headers: { "retry-after": "30" },
+          },
+        },
+      ],
+      {
+        sleep: (ms) => {
+          sleptMs.push(ms);
+          return Promise.resolve();
+        },
+      },
+    );
+    await expect(forge.listAllIssues()).rejects.toBeInstanceOf(ForgeError);
+    expect(sleptMs).toEqual([30_000]);
+  });
+
+  it("uses RateLimit-Reset epoch to compute wait when Retry-After is absent", async () => {
+    const resetEpochSec = Math.floor(Date.now() / 1000) + 45;
+    const sleptMs: number[] = [];
+    const { forge } = makeForge(
+      [
+        {
+          method: "GET",
+          match: "/issues",
+          response: {
+            status: 429,
+            ok: false,
+            body: "",
+            headers: { "ratelimit-reset": String(resetEpochSec) },
+          },
+        },
+      ],
+      {
+        sleep: (ms) => {
+          sleptMs.push(ms);
+          return Promise.resolve();
+        },
+      },
+    );
+    await expect(forge.listAllIssues()).rejects.toBeInstanceOf(ForgeError);
+    expect(sleptMs[0]).toBeGreaterThan(40_000);
+    expect(sleptMs[0]).toBeLessThanOrEqual(50_000);
+  });
+
+  it("falls back to 60s when no rate-limit headers are present on 429", async () => {
+    const sleptMs: number[] = [];
+    const { forge } = makeForge(
+      [
+        {
+          method: "GET",
+          match: "/issues",
+          response: { status: 429, ok: false, body: "" },
+        },
+      ],
+      {
+        sleep: (ms) => {
+          sleptMs.push(ms);
+          return Promise.resolve();
+        },
+      },
+    );
+    await expect(forge.listAllIssues()).rejects.toBeInstanceOf(ForgeError);
+    expect(sleptMs).toEqual([60_000]);
+  });
+
+  it("caps the sleep at 5 minutes for extreme Retry-After values", async () => {
+    const sleptMs: number[] = [];
+    const { forge } = makeForge(
+      [
+        {
+          method: "GET",
+          match: "/issues",
+          response: {
+            status: 429,
+            ok: false,
+            body: "",
+            headers: { "retry-after": "99999" },
+          },
+        },
+      ],
+      {
+        sleep: (ms) => {
+          sleptMs.push(ms);
+          return Promise.resolve();
+        },
+      },
+    );
+    await expect(forge.listAllIssues()).rejects.toBeInstanceOf(ForgeError);
+    expect(sleptMs).toEqual([300_000]);
+  });
+
+  it("still throws ForgeError for non-429 failures without sleeping", async () => {
+    const sleptMs: number[] = [];
+    const { forge } = makeForge(
+      [
+        {
+          method: "GET",
+          match: "/issues",
+          response: { status: 401, ok: false, body: "unauthorized" },
+        },
+      ],
+      {
+        sleep: (ms) => {
+          sleptMs.push(ms);
+          return Promise.resolve();
+        },
+      },
+    );
+    await expect(forge.listAllIssues()).rejects.toBeInstanceOf(ForgeError);
+    expect(sleptMs).toHaveLength(0);
   });
 });
