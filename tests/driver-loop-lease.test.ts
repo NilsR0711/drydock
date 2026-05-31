@@ -100,4 +100,30 @@ describe("driveTick lease claim", () => {
 
     release();
   });
+
+  it("requeues a working job whose lease expired before the tick runs", async () => {
+    const job = createJob({ repoId, issueNumber: 2 }, db);
+    // Simulate a crashed worker: job is working with an expired lease
+    db.update(jobs)
+      .set({
+        status: "working",
+        leaseToken: "stale-token",
+        leaseExpiresAt: Math.floor(Date.now() / 1000) - 120, // expired 2 min ago
+        workerId: "dead-worker#99",
+      })
+      .where(eq(jobs.id, job.id))
+      .run();
+
+    // Drain mode prevents the dispatch loop from immediately re-claiming the
+    // requeued job, so we can observe the queued state directly.
+    setDrainMode(true);
+    const d = baseDeps({ runJob: vi.fn(async (jobId: number) => getJob(jobId, db) as Job) });
+    await driveTick(d as never);
+
+    const after = getJob(job.id, db) as Job;
+    // The expired lease should be reclaimed: job returns to queued with lease cleared
+    expect(after.status).toBe("queued");
+    expect(after.leaseToken).toBeNull();
+    expect(after.workerId).toBeNull();
+  });
 });

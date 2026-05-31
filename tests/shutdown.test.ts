@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { jobEvents } from "@/lib/db/schema";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { registerActiveJob, unregisterActiveJob } from "@/lib/orchestrator/runtime";
@@ -64,4 +64,33 @@ describe("gracefulShutdown", () => {
     expect(abort).toHaveBeenCalledWith(5000);
     expect(getJob(job.id, db)?.status).toBe("interrupted");
   });
+
+  it("waits for idle with a timeout strictly longer than the abort grace to allow worktree cleanup after SIGKILL", async () => {
+    // Use vi.doMock so that singleton picks up the mock when imported fresh.
+    let capturedIdleMs: number | undefined;
+    vi.doMock("@/lib/orchestrator/runtime", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("@/lib/orchestrator/runtime")>();
+      return {
+        ...actual,
+        waitForIdle: vi.fn(async (ms: number) => {
+          capturedIdleMs = ms;
+        }),
+      };
+    });
+
+    const { gracefulShutdown } = await import("@/lib/orchestrator/singleton");
+    await gracefulShutdown();
+
+    // The idle-wait timeout must exceed 5000 ms (the SIGKILL grace) so that a
+    // SIGTERM-ignoring process dying at t=5000 still has time to complete its
+    // worktree cleanup before process.exit fires.
+    expect(capturedIdleMs).toBeGreaterThan(5000);
+
+    vi.doUnmock("@/lib/orchestrator/runtime");
+  });
+});
+
+afterEach(() => {
+  delete process.env.DRYDOCK_DB;
+  vi.resetModules();
 });

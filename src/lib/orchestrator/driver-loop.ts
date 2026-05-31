@@ -25,6 +25,7 @@ import {
   HEARTBEAT_MS,
   heartbeat,
   releaseLease,
+  requeueExpiredLeases,
   workerId,
 } from "./queue";
 import { driveReleaseManagement } from "./release-management-driver";
@@ -249,6 +250,12 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   // Edge-triggered cost-limit notification (issue #22): fire once when the
   // daily budget gate first closes, not on every poll tick.
   void notifyCostLimitEdge(jobsAllowed(db).reason === "cost_limit", costLimitState, db);
+
+  // Reclaim leases that lapsed while the process was alive (e.g. a worker
+  // whose heartbeat stopped without crashing the process). Startup recovery
+  // uses requeueExpiredLeases({}) which requeues all working jobs; here we
+  // only reclaim leases whose expiry has actually passed mid-run.
+  requeueExpiredLeases({ expiredBefore: Math.floor(Date.now() / 1000) }, db);
 
   const max = getSettings(db).maxParallelJobs;
   const worker = workerId();

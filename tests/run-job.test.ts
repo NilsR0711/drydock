@@ -191,4 +191,27 @@ describe("runJob", () => {
     expect(result.errorMessage).toContain("push rejected");
     expect(removed.v).toBe(true);
   });
+
+  it("parks the job with a descriptive message when the agent CLI fails to spawn", async () => {
+    const removed = { v: false };
+    const spawnErr = Object.assign(new Error("spawn __noncli__: ENOENT"), { code: "ENOENT" });
+    const deps = baseDeps(removed, {
+      runSession: vi.fn(async () => ({
+        exitCode: 1,
+        spawnError: spawnErr,
+        costUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        timedOut: false,
+        costExceeded: false,
+      })),
+    });
+    const job = createJob({ repoId, issueNumber: 8 }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("needs_human");
+    expect(result.errorMessage).toMatch(/failed to start/i);
+    expect(result.errorMessage).toContain("ENOENT");
+    expect(deps.createPr).not.toHaveBeenCalled();
+    expect(removed.v).toBe(true);
+  });
 });

@@ -65,19 +65,34 @@ export function createDb(dbPath: string): DB {
     mkdirSync(dirname(dbPath), { recursive: true });
   }
   const sqlite = new Database(dbPath);
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
-  applyMigrations(sqlite);
-  return drizzle(sqlite, { schema });
+  try {
+    sqlite.pragma("journal_mode = WAL");
+    sqlite.pragma("foreign_keys = ON");
+    applyMigrations(sqlite);
+    return drizzle(sqlite, { schema });
+  } catch (err) {
+    // Close the handle on failure so we never leak a file descriptor.
+    sqlite.close();
+    throw err;
+  }
 }
 
 let singleton: DB | undefined;
+let singletonError: Error | undefined;
 
 /** Process-wide DB used by Server Actions / RSC. */
 export function getDb(): DB {
+  if (singletonError) throw singletonError;
   if (!singleton) {
     const path = process.env.DRYDOCK_DB ?? resolve(process.cwd(), "data/drydock.db");
-    singleton = createDb(path);
+    try {
+      singleton = createDb(path);
+    } catch (err) {
+      // Latch the error so subsequent calls fail fast without re-opening the DB
+      // (which would both leak a handle and re-run broken migrations each time).
+      singletonError = err instanceof Error ? err : new Error(String(err));
+      throw singletonError;
+    }
     // Bootstrap the orchestrator lazily here (node server runtime only) so that
     // instrumentation.ts stays free of node-only imports (ADR 006).
     void import("@/lib/orchestrator/singleton")

@@ -27,6 +27,10 @@ export function clearAbort(jobId: number): void {
 }
 
 const DEFAULT_ABORT_GRACE_MS = 5000;
+// Idle wait must exceed the SIGKILL grace so that a process dying exactly at
+// the SIGKILL deadline still has time to finish its worktree cleanup before
+// process.exit fires (issue #109, fix C).
+const IDLE_WAIT_MS = DEFAULT_ABORT_GRACE_MS + 3000;
 
 /**
  * Terminate the running agent subprocess for a single job by invoking its
@@ -70,10 +74,12 @@ export async function gracefulShutdown(): Promise<void> {
 
   // Signal every running subprocess to terminate first; this unblocks the
   // in-flight runJob() promises so their `finally` worktree cleanup can run.
-  abortAllJobs(5000);
+  abortAllJobs(DEFAULT_ABORT_GRACE_MS);
 
   // Wait for active jobs to settle (their cleanup + transitions) before exiting.
-  await waitForIdle(5000);
+  // IDLE_WAIT_MS is strictly longer than the SIGKILL grace so that a process
+  // that ignores SIGTERM and dies only at SIGKILL still completes its cleanup.
+  await waitForIdle(IDLE_WAIT_MS);
 
   // Anything still in an in-flight state (e.g. its runner did not exit within
   // the grace window) is marked interrupted via the state machine + event log,

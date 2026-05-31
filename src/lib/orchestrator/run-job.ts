@@ -207,6 +207,18 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         db,
       );
     }
+    // Spawn error (ENOENT etc.): the CLI binary was not found or not executable.
+    // Surface a clear diagnostic so operators know to install/configure the CLI,
+    // rather than seeing a generic "exited non-zero" message.
+    if (session.spawnError) {
+      if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
+      return transitionJob(
+        job.id,
+        "needs_human",
+        { errorMessage: `failed to start ${command}: ${session.spawnError.message}` },
+        db,
+      );
+    }
     if (session.exitCode !== 0) {
       if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
       return transitionJob(
