@@ -5,6 +5,12 @@ export interface StreamHandle {
   done: Promise<number>;
   /** Send SIGTERM, then SIGKILL after `graceMs` if still alive (SPEC §8). */
   abort: (graceMs?: number) => void;
+  /**
+   * Set to the OS error when the child process fails to spawn (e.g. ENOENT —
+   * the CLI binary is not installed or the path is wrong). Undefined on a
+   * normal exit. Readable only after `done` resolves.
+   */
+  spawnError?: Error;
 }
 
 export interface StreamCallbacks {
@@ -30,17 +36,28 @@ export const spawnStreamRunner: StreamRunner = (cmd, args, cwd, cb) => {
   child.stdout?.on("data", (d: string) => cb.onStdout(d));
   child.stderr?.on("data", (d: string) => cb.onStderr?.(d));
 
-  const done = new Promise<number>((resolve) => {
-    child.on("close", (code) => resolve(code ?? 0));
-    child.on("error", () => resolve(1));
-  });
+  // SIGKILL timer is stored here so the close listener — registered once at
+  // spawn time — can clear it when the process exits naturally before SIGKILL.
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
 
-  return {
-    done,
+  const handle: StreamHandle = {
+    done: new Promise<number>((resolve) => {
+      child.on("close", (code) => {
+        if (killTimer) clearTimeout(killTimer);
+        resolve(code ?? 0);
+      });
+      child.on("error", (err) => {
+        // Spawn failure (e.g. ENOENT): surface the error on the handle so
+        // callers can distinguish "CLI not found" from a real non-zero exit.
+        handle.spawnError = err;
+        resolve(1);
+      });
+    }),
     abort: (graceMs = 5000) => {
       child.kill("SIGTERM");
-      const timer = setTimeout(() => child.kill("SIGKILL"), graceMs);
-      child.on("close", () => clearTimeout(timer));
+      killTimer = setTimeout(() => child.kill("SIGKILL"), graceMs);
     },
   };
+
+  return handle;
 };

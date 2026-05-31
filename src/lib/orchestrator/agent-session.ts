@@ -51,6 +51,12 @@ export interface AgentSessionResult {
   timedOut: boolean;
   /** True when the session was aborted by the per-job cost ceiling (issue #57). */
   costExceeded: boolean;
+  /**
+   * Set when the child process failed to spawn (e.g. ENOENT — CLI not found).
+   * Distinguishes "binary missing" from a real non-zero agent exit so callers
+   * can surface a clear "failed to start <command>" diagnostic.
+   */
+  spawnError?: Error;
 }
 
 /** Sentinel exit code recorded when a session is killed by the wall-clock timeout. */
@@ -209,6 +215,9 @@ export async function spawnAgentSession(
     graceMs: deps.graceMs,
   });
   clearAbort(job.id);
+  // Spawn errors (ENOENT etc.) are readable after done settles; not applicable
+  // to the timeout/cost-exceeded paths where done may not have resolved yet.
+  const spawnError = !timedOut && !costExceeded ? handle.spawnError : undefined;
   if (timedOut) {
     broker.publish(job.id, {
       type: "error",
@@ -248,6 +257,7 @@ export async function spawnAgentSession(
     outputTokens: parser.totalOutputTokens,
     timedOut,
     costExceeded,
+    spawnError,
   };
 }
 
@@ -327,6 +337,7 @@ export async function resumeAgentSession(
     graceMs: deps.graceMs,
   });
   clearAbort(job.id);
+  const spawnError = !timedOut && !costExceeded ? handle.spawnError : undefined;
   if (timedOut) {
     broker.publish(job.id, {
       type: "error",
@@ -369,5 +380,6 @@ export async function resumeAgentSession(
     outputTokens: parser.totalOutputTokens,
     timedOut,
     costExceeded,
+    spawnError,
   };
 }
