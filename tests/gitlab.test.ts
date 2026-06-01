@@ -744,3 +744,37 @@ describe("GitlabForge 429 rate-limit backoff", () => {
     expect(sleptMs).toHaveLength(0);
   });
 });
+
+describe("GitlabForge SSRF guard (issue #110)", () => {
+  it("refuses to send the token to a private/loopback base URL", async () => {
+    const { http, calls } = fakeHttp([{ method: "GET", match: "/issues", response: {} }]);
+    const forge = new GitlabForge(
+      { cwd: "/repo", baseUrl: "http://127.0.0.1:9000", token: "glpat-secret" },
+      { http, run: fakeRun("https://gitlab.com/group/proj.git") },
+    );
+    await expect(forge.listAllIssues()).rejects.toBeInstanceOf(ForgeError);
+    // Guard fires before any network call is made, so the token never leaves.
+    expect(calls).toHaveLength(0);
+  });
+
+  it("refuses to reach the cloud metadata endpoint", async () => {
+    const { http } = fakeHttp([{ method: "GET", match: "/issues", response: {} }]);
+    const forge = new GitlabForge(
+      { cwd: "/repo", baseUrl: "http://169.254.169.254", token: "glpat-secret" },
+      { http, run: fakeRun("https://gitlab.com/group/proj.git") },
+    );
+    await expect(forge.listAllIssues()).rejects.toThrow(/private|loopback/i);
+  });
+
+  it("allows a private base URL when the operator opts in", async () => {
+    const { http, calls } = fakeHttp([
+      { method: "GET", match: "/issues", response: { body: "[]" } },
+    ]);
+    const forge = new GitlabForge(
+      { cwd: "/repo", baseUrl: "http://192.168.1.10", token: "glpat-secret" },
+      { http, run: fakeRun("https://gitlab.com/group/proj.git"), allowPrivateHost: true },
+    );
+    await expect(forge.listAllIssues()).resolves.toEqual([]);
+    expect(calls.length).toBeGreaterThan(0);
+  });
+});

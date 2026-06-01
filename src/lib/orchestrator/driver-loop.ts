@@ -12,6 +12,7 @@ import { RateLimitError } from "@/lib/github/rate-limit";
 import { evaluateIssue } from "@/lib/issues/evaluator";
 import { syncIssuesFromGh } from "@/lib/issues/service";
 import { type TriageResult, triageRepo } from "@/lib/issues/triage";
+import { logError } from "@/lib/log/logger";
 import { type EdgeState, notifyCostLimitEdge } from "@/lib/notify/lifecycle";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
@@ -242,7 +243,7 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
       if (err instanceof RateLimitError) {
         console.debug(`[driver] ${repo.name} sweep yielded: ${err.message}`);
       } else {
-        console.error(`[driver] issue sync failed for ${repo.name}`, err);
+        logError(`[driver] issue sync failed for ${repo.name}`, err);
       }
     }
   }
@@ -284,12 +285,12 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
       try {
         heartbeat(jobId, leaseToken, {}, db);
       } catch (err) {
-        console.error(`[driver] heartbeat failed for job ${jobId}`, err);
+        logError(`[driver] heartbeat failed for job ${jobId}`, err);
       }
     }, HEARTBEAT_MS);
     beat.unref?.();
     void runJob(jobId)
-      .catch((err) => console.error(`[driver] job ${jobId} failed`, err))
+      .catch((err) => logError(`[driver] job ${jobId} failed`, err))
       .finally(() => {
         clearInterval(beat);
         releaseLease(jobId, leaseToken, db);
@@ -304,7 +305,7 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   try {
     await withPriority("low", () => reviewFeedback(db));
   } catch (err) {
-    console.error("[driver] review-feedback sweep failed", err);
+    logError("[driver] review-feedback sweep failed", err);
   }
 
   // Drive opt-in post-merge deployment healing (issue #20) as another
@@ -315,7 +316,7 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   try {
     await withPriority("low", () => deploymentHealing(db));
   } catch (err) {
-    console.error("[driver] deployment-healing sweep failed", err);
+    logError("[driver] deployment-healing sweep failed", err);
   }
 
   // Drive opt-in release management (issue #59) as another low-priority
@@ -326,7 +327,7 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   try {
     await withPriority("low", () => releaseManagement(db));
   } catch (err) {
-    console.error("[driver] release-management sweep failed", err);
+    logError("[driver] release-management sweep failed", err);
   }
 }
 
@@ -360,7 +361,7 @@ export function startDriverLoop(opts: StartLoopOptions = {}): void {
       try {
         await tick();
       } catch (err) {
-        console.error("[driver] tick failed", err);
+        logError("[driver] tick failed", err);
       } finally {
         ticking = false;
       }

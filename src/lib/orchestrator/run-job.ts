@@ -7,6 +7,7 @@ import { getForge } from "@/lib/forge/registry";
 import { EmptyCommitError, type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { listIssues } from "@/lib/issues/service";
 import { listSubtasks } from "@/lib/issues/subtasks";
+import { logError } from "@/lib/log/logger";
 import type { NotificationEvent } from "@/lib/notify/events";
 import { dispatch } from "@/lib/notify/notifier";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
@@ -306,7 +307,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       try {
         await worktrees.remove(wt, repo.path);
       } catch (cleanupErr) {
-        console.error(`[run-job] worktree cleanup failed for job ${job.id}`, cleanupErr);
+        logError(`[run-job] worktree cleanup failed for job ${job.id}`, cleanupErr);
       }
     }
   }

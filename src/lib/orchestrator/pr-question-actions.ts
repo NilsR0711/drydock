@@ -7,6 +7,7 @@ import { getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import { getForge } from "@/lib/forge/registry";
 import { MAX_QUESTION_CHARS } from "@/lib/issues/pr-question";
+import { logError } from "@/lib/log/logger";
 import { commandForAgent } from "./agent-command";
 import { getJob } from "./jobs";
 import { runPrQuestion } from "./pr-question-driver";
@@ -52,7 +53,7 @@ export async function askPrQuestionAction(jobId: number, question: string) {
     command,
     model: job.model ?? repo.defaultModel,
   }).catch((err) => {
-    console.error(`[pr-question] background run failed for question ${record.id}`, err);
+    logError(`[pr-question] background run failed for question ${record.id}`, err);
   });
 
   revalidatePath(`/jobs/${jobId}`);

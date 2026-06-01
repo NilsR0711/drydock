@@ -31,6 +31,10 @@ export const fetchHttp: HttpClient = async (url, init) => {
     method: init?.method ?? "GET",
     headers: init?.headers,
     body: init?.body,
+    // Never auto-follow redirects: a 3xx to another host would otherwise replay
+    // the attached PRIVATE-TOKEN/Bearer credential to the redirect target
+    // (issue #110). Callers see the 3xx and stop.
+    redirect: "manual",
   });
   const body = await res.text();
   const headers: Record<string, string> = {};

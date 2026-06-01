@@ -235,6 +235,9 @@ not on `PATH`. **GitLab** repos need no extra CLI — they use the REST API with
 base URL + access token instead.
 For self-hosted instances behind a corporate CA or proxy, set `NODE_EXTRA_CA_CERTS` and/or
 `HTTPS_PROXY` in Drydock's environment (see [ADR 015](docs/adr/015-gitlab-forge-support.md)).
+A repo's GitLab base URL must be an absolute `http(s)` URL. As an SSRF safeguard, requests to
+private/loopback/link-local addresses are refused unless you opt in with
+`DRYDOCK_ALLOW_PRIVATE_FORGE=1` (needed when your self-hosted instance lives on a private network).
 
 ## Configuration
 
@@ -246,6 +249,7 @@ Drydock is configured at runtime from the **Settings** page and per-repo control
 | `DRYDOCK_DATA_DIR` | `~/.drydock` | Directory for the database and local state (packaged runs) |
 | `DRYDOCK_DB` | `<data dir>/drydock.db`¹ | SQLite file path (use `:memory:` for ephemeral runs); overrides the data dir |
 | `DRYDOCK_MIGRATIONS` | `./drizzle` | Folder of generated SQL migrations (set automatically by the `drydock` launcher) |
+| `DRYDOCK_ALLOW_PRIVATE_FORGE` | _unset_ | Set to `1` to allow a GitLab base URL on a private/loopback network (self-hosted); otherwise such targets are refused as an SSRF safeguard |
 
 ¹ A source checkout (`pnpm dev`/`pnpm start`) defaults `DRYDOCK_DB` to `data/drydock.db` in the
 project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.

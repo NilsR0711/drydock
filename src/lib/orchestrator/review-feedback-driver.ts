@@ -5,6 +5,7 @@ import type { Job, Repo } from "@/lib/db/schema";
 import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient, ReviewThread } from "@/lib/forge/types";
 import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
+import { logError } from "@/lib/log/logger";
 import { repoAutomation } from "@/lib/repos/automation";
 import { commandForAgent } from "./agent-command";
 import { spawnAgentSession } from "./agent-session";
@@ -57,11 +58,11 @@ export async function driveReviewFeedback(deps: DriveFeedbackDeps = {}): Promise
         try {
           await processJob(repo, job, forge);
         } catch (err) {
-          console.error(`[review-feedback] job ${job.id} failed for ${repo.name}`, err);
+          logError(`[review-feedback] job ${job.id} failed for ${repo.name}`, err);
         }
       }
     } catch (err) {
-      console.error(`[review-feedback] sweep failed for ${repo.name}`, err);
+      logError(`[review-feedback] sweep failed for ${repo.name}`, err);
     }
   }
 }
@@ -125,7 +126,7 @@ export function buildAgentApply(
       try {
         await deps.worktrees.remove(wt, deps.repo.path);
       } catch (err) {
-        console.error(`[review-feedback] worktree cleanup failed for job ${deps.job.id}`, err);
+        logError(`[review-feedback] worktree cleanup failed for job ${deps.job.id}`, err);
       }
     }
   };

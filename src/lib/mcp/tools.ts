@@ -11,6 +11,7 @@ import {
 import { isKnownModelId } from "@/lib/models";
 import { getJob, listJobs, transitionJob } from "@/lib/orchestrator/jobs";
 import { isDraining, setDrainMode } from "@/lib/orchestrator/runtime";
+import { isGitRepoPath } from "@/lib/repos/path";
 import { addRepo } from "@/lib/repos/service";
 import { getSettings, jobsAllowed, repoJobsAllowed, saveSettings } from "@/lib/settings/service";
 import { getBroker } from "@/lib/stream/broker";
@@ -73,7 +74,12 @@ const issueRefShape = {
 const jobIdShape = { jobId: z.number().int().positive() } satisfies ZodRawShape;
 
 const addRepoShape = {
-  path: z.string().min(1),
+  // A remote MCP host could otherwise register an arbitrary directory; require a
+  // real local git repository (a `.git` dir or worktree pointer) — issue #110.
+  path: z
+    .string()
+    .min(1)
+    .refine(isGitRepoPath, { message: "path must be an existing directory containing a .git" }),
   name: z.string().min(1),
   defaultBranch: z.string().min(1).optional(),
   platform: z.enum(["github", "gitlab"]).optional(),

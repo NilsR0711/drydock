@@ -4,6 +4,7 @@ import { listRepos } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
 import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient } from "@/lib/forge/types";
+import { logError } from "@/lib/log/logger";
 import { dispatch } from "@/lib/notify/notifier";
 import type { ReleaseEvaluationGenerator } from "@/lib/release/release";
 import { createReleaseRun } from "@/lib/release/release-service";
@@ -75,7 +76,7 @@ export async function driveReleaseManagement(deps: DriveReleaseManagementDeps = 
       const generate = deps.generatorFor?.(repo) ?? defaultGeneratorFor(repo, db);
       await processRepo(repo, forgeClient, forge, generate, { db, now, windowMs, notify });
     } catch (err) {
-      console.error(`[release] sweep failed for ${repo.name}`, err);
+      logError(`[release] sweep failed for ${repo.name}`, err);
     }
   }
 }
@@ -102,7 +103,7 @@ async function processRepo(
     try {
       await processMergedJob(repo, job, forgeClient, forge, generate, deps);
     } catch (err) {
-      console.error(`[release] job ${job.id} failed for ${repo.name}`, err);
+      logError(`[release] job ${job.id} failed for ${repo.name}`, err);
     }
   }
 }
