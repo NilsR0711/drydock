@@ -11,6 +11,7 @@ import { spawnRunner } from "@/lib/exec/runner";
 import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient } from "@/lib/forge/types";
 import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
+import { logError } from "@/lib/log/logger";
 import { repoAutomation } from "@/lib/repos/automation";
 import { commandForAgent } from "./agent-command";
 import { spawnAgentSession } from "./agent-session";
@@ -76,7 +77,7 @@ export async function driveDeploymentHealing(deps: DriveDeploymentHealingDeps = 
       const openFixPr = deps.openFixPr ?? defaultOpenFixPr;
       await monitorRepo(repo, forge, adapter, { db, now, budgets, openFixPr });
     } catch (err) {
-      console.error(`[deploy-heal] sweep failed for ${repo.name}`, err);
+      logError(`[deploy-heal] sweep failed for ${repo.name}`, err);
     }
   }
 }
@@ -106,7 +107,7 @@ async function monitorRepo(
     try {
       headSha = await forge.prHeadSha(job.prNumber);
     } catch (err) {
-      console.error(`[deploy-heal] head sha lookup failed for job ${job.id}`, err);
+      logError(`[deploy-heal] head sha lookup failed for job ${job.id}`, err);
       continue;
     }
     if (deploymentSessionExists(job.id, headSha, db)) continue;
@@ -125,7 +126,7 @@ async function monitorRepo(
     try {
       await advanceSession(repo, job, adapter, session, deps);
     } catch (err) {
-      console.error(`[deploy-heal] session ${session.id} failed for ${repo.name}`, err);
+      logError(`[deploy-heal] session ${session.id} failed for ${repo.name}`, err);
     }
   }
 }
@@ -177,7 +178,7 @@ async function advanceSession(
     const prNumber = await deps.openFixPr(repo, job, failed, logs);
     transitionDeploymentHealingSession(session.id, "repaired", { followupPrNumber: prNumber }, db);
   } catch (err) {
-    console.error(`[deploy-heal] fix PR failed for session ${session.id}`, err);
+    logError(`[deploy-heal] fix PR failed for session ${session.id}`, err);
     transitionDeploymentHealingSession(session.id, "escalated", {}, db);
   }
 }
@@ -236,7 +237,7 @@ async function defaultOpenFixPr(
     try {
       await worktrees.remove(wt, repo.path);
     } catch (err) {
-      console.error(`[deploy-heal] worktree cleanup failed for job ${job.id}`, err);
+      logError(`[deploy-heal] worktree cleanup failed for job ${job.id}`, err);
     }
   }
 }

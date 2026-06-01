@@ -5,6 +5,7 @@ import { listRepos } from "@/lib/db/queries";
 import { jobs } from "@/lib/db/schema";
 import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
 import { repoWorktreesDir } from "@/lib/git/worktree";
+import { logError } from "@/lib/log/logger";
 import { TERMINAL_STATES } from "./state-machine";
 
 /** Worktree directory name for a per-job worktree, e.g. `job-42`. */
@@ -85,7 +86,7 @@ export async function reapOrphanedWorktrees(deps: ReapDeps = {}): Promise<number
         rmSync(path, { recursive: true, force: true });
         reaped++;
       } catch (err) {
-        console.error(`[worktree-reaper] failed to remove ${path}`, err);
+        logError(`[worktree-reaper] failed to remove ${path}`, err);
       }
     }
   }

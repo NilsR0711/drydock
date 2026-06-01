@@ -1,3 +1,4 @@
+import { logError } from "@/lib/log/logger";
 import type { SubtaskStatus } from "@/lib/orchestrator/subtask-state";
 
 /**
@@ -98,7 +99,7 @@ export async function decompose(
       const titles = proposed.map((t) => t.trim()).filter(Boolean);
       if (titles.length >= MIN_SUBTASKS) return { titles, source: "agent" };
     } catch (err) {
-      console.error(`[decompose] agent fallback failed for issue #${input.number}`, err);
+      logError(`[decompose] agent fallback failed for issue #${input.number}`, err);
     }
   }
 

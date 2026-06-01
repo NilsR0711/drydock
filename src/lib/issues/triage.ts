@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { issues, type Repo } from "@/lib/db/schema";
 import type { GhIssue, IssueDetail } from "@/lib/github/gh";
+import { logError } from "@/lib/log/logger";
 import { authorAllowed, repoAutomation } from "@/lib/repos/automation";
 import { evaluateIssue } from "./evaluator";
 
@@ -184,7 +185,7 @@ export async function triageRepo(
     try {
       results.push(await triageIssue(repo, forge, listed, db));
     } catch (err) {
-      console.error(`[triage] issue #${listed.number} failed for ${repo.name}`, err);
+      logError(`[triage] issue #${listed.number} failed for ${repo.name}`, err);
     }
   }
   return results;

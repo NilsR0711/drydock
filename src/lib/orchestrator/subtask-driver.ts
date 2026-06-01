@@ -10,6 +10,7 @@ import {
   type SubtaskGenerator,
 } from "@/lib/issues/decompose";
 import { ensureSubtasks, listSubtasks, transitionSubtask } from "@/lib/issues/subtasks";
+import { logError } from "@/lib/log/logger";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
 import type { SubtaskStatus } from "./subtask-state";
 
@@ -127,7 +128,7 @@ export async function decomposeRepo(
         await forge.commentIssue(detail.number, `${SUBTASK_COMMENT_HEADER}\n\n${checklist}`);
       }
     } catch (err) {
-      console.error(`[subtasks] decomposition failed for ${repo.name}#${candidate.number}`, err);
+      logError(`[subtasks] decomposition failed for ${repo.name}#${candidate.number}`, err);
     }
   }
 }

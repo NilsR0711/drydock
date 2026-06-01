@@ -1,4 +1,5 @@
 import { syncRepoIssues } from "@/lib/issues/service";
+import { logError } from "@/lib/log/logger";
 import { emitDashboardChange } from "@/lib/stream/dashboard-bus";
 
 /**
@@ -34,7 +35,7 @@ export function triggerWebhookSync(repoId: number, delayMs = WEBHOOK_SYNC_DEBOUN
   const timer = setTimeout(() => {
     pending.delete(repoId);
     void runner(repoId).catch((err) => {
-      console.error(`[webhook] issue sync failed for repo ${repoId}`, err);
+      logError(`[webhook] issue sync failed for repo ${repoId}`, err);
     });
   }, delayMs);
   // A pending sync must not keep the Node process alive on its own.

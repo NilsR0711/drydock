@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { logError } from "@/lib/log/logger";
 import * as schema from "./schema";
 
 export type DB = ReturnType<typeof drizzle<typeof schema>>;
@@ -97,7 +98,7 @@ export function getDb(): DB {
     // instrumentation.ts stays free of node-only imports (ADR 006).
     void import("@/lib/orchestrator/singleton")
       .then((m) => m.startOrchestrator())
-      .catch((err) => console.error("[orchestrator] bootstrap failed", err));
+      .catch((err) => logError("[orchestrator] bootstrap failed", err));
   }
   return singleton;
 }

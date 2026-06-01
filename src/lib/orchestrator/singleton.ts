@@ -2,6 +2,7 @@ import { inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
 import { pruneOldData } from "@/lib/db/prune";
 import { jobs } from "@/lib/db/schema";
+import { logError } from "@/lib/log/logger";
 import { notifyDraining } from "@/lib/notify/lifecycle";
 import { recoverOnStartup } from "./driver";
 import { startDriverLoop, stopDriverLoop } from "./driver-loop";
@@ -70,7 +71,7 @@ export async function gracefulShutdown(): Promise<void> {
   setDrainMode(true);
   stopDriverLoop();
   // Best-effort drain notification (issue #22); never block shutdown on it.
-  await notifyDraining().catch((err) => console.error("[orchestrator] drain notify failed", err));
+  await notifyDraining().catch((err) => logError("[orchestrator] drain notify failed", err));
 
   // Signal every running subprocess to terminate first; this unblocks the
   // in-flight runJob() promises so their `finally` worktree cleanup can run.
@@ -95,11 +96,11 @@ export async function gracefulShutdown(): Promise<void> {
       try {
         transitionJob(job.id, "interrupted", {}, db);
       } catch (err) {
-        console.error(`[orchestrator] shutdown transition failed for job ${job.id}`, err);
+        logError(`[orchestrator] shutdown transition failed for job ${job.id}`, err);
       }
     }
   } catch (err) {
-    console.error("[orchestrator] shutdown DB update failed", err);
+    logError("[orchestrator] shutdown DB update failed", err);
   }
 }
 
@@ -117,7 +118,7 @@ function startPruneSweep(): void {
       if (jobEventsDeleted > 0)
         console.log(`[orchestrator] pruned ${jobEventsDeleted} job event(s)`);
     } catch (err) {
-      console.error("[orchestrator] prune sweep failed", err);
+      logError("[orchestrator] prune sweep failed", err);
     }
   };
   sweep();
@@ -139,7 +140,7 @@ export function startOrchestrator(): void {
       if (interrupted > 0)
         console.log(`[orchestrator] recovered ${interrupted} interrupted job(s)`);
     } catch (err) {
-      console.error("[orchestrator] recovery failed", err);
+      logError("[orchestrator] recovery failed", err);
     }
 
     if (acquireInstanceLock()) {
@@ -149,7 +150,7 @@ export function startOrchestrator(): void {
         .then((reaped) => {
           if (reaped > 0) console.log(`[orchestrator] reaped ${reaped} orphaned worktree(s)`);
         })
-        .catch((err) => console.error("[orchestrator] worktree reap failed", err));
+        .catch((err) => logError("[orchestrator] worktree reap failed", err));
       startDriverLoop();
       startPruneSweep();
     } else {

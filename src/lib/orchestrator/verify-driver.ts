@@ -14,6 +14,7 @@ import {
   type VerificationInput,
   type VerificationResult,
 } from "@/lib/issues/verify";
+import { logError } from "@/lib/log/logger";
 import { redactSecrets } from "@/lib/log/redact";
 import { recordEvent } from "./jobs";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
@@ -239,7 +240,7 @@ export async function runVerificationPass(
     );
     return result;
   } catch (err) {
-    console.error(`[verify] verification pass failed for ${repo.name}#${job.issueNumber}`, err);
+    logError(`[verify] verification pass failed for ${repo.name}#${job.issueNumber}`, err);
     return null;
   } finally {
     if (tmp) {
