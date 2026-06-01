@@ -1,5 +1,8 @@
 process.env.DRYDOCK_DB = ":memory:";
 
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type DB, getDb } from "@/lib/db/client";
 import { issues, jobEvents, jobs, repos, settings } from "@/lib/db/schema";
@@ -93,9 +96,28 @@ describe("MCP tool registry", () => {
   });
 
   it("add_repo inserts a repo through the service layer", async () => {
-    const result = (await run("add_repo", { path: "/p", name: "proj" }, db)) as { id: number };
-    expect(result.id).toBeGreaterThan(0);
-    expect(db.select().from(repos).all()).toHaveLength(1);
+    const dir = mkdtempSync(join(tmpdir(), "drydock-mcp-"));
+    mkdirSync(join(dir, ".git"));
+    try {
+      const result = (await run("add_repo", { path: dir, name: "proj" }, db)) as { id: number };
+      expect(result.id).toBeGreaterThan(0);
+      expect(db.select().from(repos).all()).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("add_repo rejects a non-existent / non-git path (issue #110)", async () => {
+    await expect(
+      run("add_repo", { path: join(tmpdir(), "drydock-nope-xyz"), name: "proj" }, db),
+    ).rejects.toThrow();
+    const dir = mkdtempSync(join(tmpdir(), "drydock-mcp-nogit-"));
+    try {
+      await expect(run("add_repo", { path: dir, name: "proj" }, db)).rejects.toThrow();
+      expect(db.select().from(repos).all()).toHaveLength(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("list_issues returns the cached issues for a repo", async () => {
