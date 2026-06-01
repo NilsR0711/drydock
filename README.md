@@ -95,7 +95,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 💸 **Cost tracking** — per-job and aggregate spend from the agent's reported `total_cost_usd` (or estimated from tokens), with a **daily cost limit** that gates the driver loop and an optional **per-job cost ceiling** that aborts a single runaway session mid-stream (global default + per-repo override; off when unset). Spend is **exportable** to CSV or JSON from the cost dashboard — per-job line items or aggregates by repo/model, scoped to a date range and repo, with totals that reconcile with the dashboard.
 
-⏯️ **Global pause & per-repo controls** — pause everything from the navbar, pick an agent and model per repo, toggle serial vs. parallel processing, and customize the queue label.
+⏯️ **Global pause & per-repo controls** — pause or resume the whole dock with one click from the navbar, pick an agent and model per repo, toggle serial vs. parallel processing, and customize the queue label.
 
 🪝 **Webhook-driven issue sync** — opt in per repo to receive issue events instead of waiting for the next poll. Set a secret on a repo and Drydock exposes a signature-verified receiver (`/api/webhooks/<id>`); a validated GitHub/GitLab issue event triggers a targeted, debounced sync so new issues surface near-instantly. Polling stays on as the default fallback and shares the same idempotent reconcile, so a change is never double-processed. Since Drydock binds `127.0.0.1`, expose the URL through a tunnel (e.g. `cloudflared`, `ngrok`). See [ADR 029](docs/adr/029-webhook-issue-sync.md).
 
@@ -262,8 +262,10 @@ project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 | Route | Screen |
 | --- | --- |
 | `/` | Dashboard — repos, status counts, recent activity |
-| `/repos/[id]` | Repo workspace — backlog/queue board, settings, activity, cost |
+| `/repos/[id]` | Repo workspace — backlog/queue board with multi-select bulk actions, settings, activity, cost |
+| `/jobs` | Job history — paginated, filterable, searchable |
 | `/jobs/[id]` | Job detail — live streaming log, cost & tokens |
+| `/analytics` | Analytics — merge rate, time-to-merge p50/p90, CI retries, throughput, cost-per-merge, sliceable by repo/date |
 | `/prompts` | Versioned prompt editor |
 | `/adrs` | ADR review queue |
 | `/costs` | Cost dashboard — daily, by model, top jobs, CSV/JSON export |

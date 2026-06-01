@@ -6,6 +6,9 @@ import { issues, repos } from "@/lib/db/schema";
 import { __setForgeFactory } from "@/lib/forge/registry";
 import {
   applyIssueLabels,
+  bulkApplyLabel,
+  bulkDequeueIssues,
+  bulkQueueIssues,
   dequeueIssue,
   listIssues,
   queueIssue,
@@ -104,5 +107,66 @@ describe("issue queue service (forge orchestration)", () => {
     expect(result).toHaveLength(1);
     expect(result[0]?.number).toBe(7);
     expect(listIssues(repoId)).toHaveLength(1);
+  });
+
+  it("bulkQueueIssues labels every issue and returns the refreshed list", async () => {
+    const repoId = seedRepo();
+    seedIssue(repoId, 3);
+    seedIssue(repoId, 4);
+
+    const result = await bulkQueueIssues(repoId, [3, 4]);
+
+    expect(gh.addLabels).toHaveBeenCalledWith(3, ["drydock:queue"]);
+    expect(gh.addLabels).toHaveBeenCalledWith(4, ["drydock:queue"]);
+    const byNumber = new Map(result.map((i) => [i.number, JSON.parse(i.labels)]));
+    expect(byNumber.get(3)).toContain("drydock:queue");
+    expect(byNumber.get(4)).toContain("drydock:queue");
+  });
+
+  it("bulkQueueIssues ensures the label once for the whole batch", async () => {
+    const repoId = seedRepo();
+    seedIssue(repoId, 3);
+    seedIssue(repoId, 4);
+
+    await bulkQueueIssues(repoId, [3, 4]);
+
+    expect(gh.ensureLabel).toHaveBeenCalledTimes(1);
+  });
+
+  it("bulkDequeueIssues removes the label from every issue", async () => {
+    const repoId = seedRepo();
+    for (const number of [3, 4]) {
+      getDb()
+        .insert(issues)
+        .values({ repoId, number, title: "seed", labels: '["drydock:queue"]', priority: 0 })
+        .run();
+    }
+
+    const result = await bulkDequeueIssues(repoId, [3, 4]);
+
+    expect(gh.removeLabels).toHaveBeenCalledWith(3, ["drydock:queue"]);
+    expect(gh.removeLabels).toHaveBeenCalledWith(4, ["drydock:queue"]);
+    for (const i of result) expect(JSON.parse(i.labels)).not.toContain("drydock:queue");
+  });
+
+  it("bulkApplyLabel applies one label across all selected issues", async () => {
+    const repoId = seedRepo();
+    seedIssue(repoId, 3);
+    seedIssue(repoId, 4);
+
+    await bulkApplyLabel(repoId, [3, 4], "enhancement");
+
+    expect(gh.addLabels).toHaveBeenCalledWith(3, ["enhancement"]);
+    expect(gh.addLabels).toHaveBeenCalledWith(4, ["enhancement"]);
+  });
+
+  it("bulk helpers are no-ops for an empty selection", async () => {
+    const repoId = seedRepo();
+    seedIssue(repoId, 3);
+
+    const result = await bulkQueueIssues(repoId, []);
+
+    expect(gh.addLabels).not.toHaveBeenCalled();
+    expect(result).toHaveLength(1);
   });
 });

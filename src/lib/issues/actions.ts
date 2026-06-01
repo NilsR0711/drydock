@@ -5,6 +5,9 @@ import { getRepo } from "@/lib/db/queries";
 import { getForge } from "@/lib/forge/registry";
 import {
   applyIssueLabels,
+  bulkApplyLabel,
+  bulkDequeueIssues,
+  bulkQueueIssues,
   dequeueIssue,
   queueIssue,
   reorderIssues,
@@ -58,6 +61,27 @@ export async function addToQueueAction(
 /** Remove the repo's queue label from an issue (GitHub + local cache). */
 export async function removeFromQueueAction(repoId: number, issueNumber: number) {
   const result = await dequeueIssue(repoId, issueNumber);
+  revalidatePath(`/repos/${repoId}`);
+  return result;
+}
+
+/** Add the queue label to several issues at once (issue #111). Returns issues. */
+export async function bulkAddToQueueAction(repoId: number, issueNumbers: number[]) {
+  const result = await bulkQueueIssues(repoId, issueNumbers);
+  revalidatePath(`/repos/${repoId}`);
+  return result;
+}
+
+/** Remove the queue label from several issues at once (issue #111). Returns issues. */
+export async function bulkRemoveFromQueueAction(repoId: number, issueNumbers: number[]) {
+  const result = await bulkDequeueIssues(repoId, issueNumbers);
+  revalidatePath(`/repos/${repoId}`);
+  return result;
+}
+
+/** Apply one label across several issues at once (issue #111). Returns issues. */
+export async function bulkApplyLabelAction(repoId: number, issueNumbers: number[], label: string) {
+  const result = await bulkApplyLabel(repoId, issueNumbers, label);
   revalidatePath(`/repos/${repoId}`);
   return result;
 }

@@ -8,6 +8,9 @@ import { Button } from "@/components/ui/button";
 import type { Issue } from "@/lib/db/schema";
 import {
   addToQueueAction,
+  bulkAddToQueueAction,
+  bulkApplyLabelAction,
+  bulkRemoveFromQueueAction,
   removeFromQueueAction,
   reorderIssuesAction,
   syncRepoIssuesAction,
@@ -42,6 +45,8 @@ export function IssueBoard({
   const [query, setQuery] = useState("");
   const [dragNumber, setDragNumber] = useState<number | null>(null);
   const [modalIssue, setModalIssue] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkLabel, setBulkLabel] = useState("");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -117,6 +122,45 @@ export function IssueBoard({
     });
   }
 
+  function toggleSelect(number: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(number)) next.delete(number);
+      else next.add(number);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  /** Run a bulk action over the current selection, refresh the board, and clear it. */
+  function runBulk(action: (numbers: number[]) => Promise<Issue[]>) {
+    const numbers = [...selected];
+    if (numbers.length === 0) return;
+    setError(null);
+    start(() => {
+      action(numbers)
+        .then((next) => {
+          setIssues(next);
+          clearSelection();
+        })
+        .catch((e) => setError(e.message));
+    });
+  }
+
+  function queueAllFiltered() {
+    const numbers = backlog.map((i) => i.number);
+    if (numbers.length === 0) return;
+    setError(null);
+    start(() => {
+      bulkAddToQueueAction(repoId, numbers)
+        .then(setIssues)
+        .catch((e) => setError(e.message));
+    });
+  }
+
   function Row({ issue, reorderable }: { issue: Issue; reorderable: boolean }) {
     const allQueue = issues.filter(inQueue);
     const fullIdx = allQueue.findIndex((i) => i.number === issue.number);
@@ -174,6 +218,14 @@ export function IssueBoard({
         }}
         className="issue-row flex items-center gap-3 rounded-xl border border-card-border bg-card p-3"
       >
+        <input
+          type="checkbox"
+          checked={selected.has(issue.number)}
+          onChange={() => toggleSelect(issue.number)}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Select #${issue.number} for bulk actions`}
+          className="h-4 w-4 shrink-0 cursor-pointer"
+        />
         {reorderable && (
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
             {fullIdx + 1}
@@ -279,17 +331,79 @@ export function IssueBoard({
         </Button>
       </div>
 
-      <input
-        aria-label="Search issues by title or label"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search by title or label…"
-        className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          aria-label="Search issues by title or label"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by title or label…"
+          className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={pending || backlog.length === 0}
+          onClick={queueAllFiltered}
+        >
+          Queue all (filtered)
+        </Button>
+      </div>
       {error && (
         <p role="alert" className="text-xs text-destructive">
           {error}
         </p>
+      )}
+
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-card-border bg-accent/40 p-2">
+          <span className="px-1 text-sm font-medium">{selected.size} selected</span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending}
+            onClick={() => runBulk((numbers) => bulkAddToQueueAction(repoId, numbers))}
+          >
+            Add to queue
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending}
+            onClick={() => runBulk((numbers) => bulkRemoveFromQueueAction(repoId, numbers))}
+          >
+            Remove from queue
+          </Button>
+          <span className="flex items-center gap-1">
+            <input
+              aria-label="Label to apply to selected issues"
+              value={bulkLabel}
+              onChange={(e) => setBulkLabel(e.target.value)}
+              placeholder="label…"
+              className="h-8 w-28 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending || bulkLabel.trim() === ""}
+              onClick={() => {
+                const label = bulkLabel.trim();
+                runBulk((numbers) => bulkApplyLabelAction(repoId, numbers, label));
+                setBulkLabel("");
+              }}
+            >
+              Apply label
+            </Button>
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-auto"
+            disabled={pending}
+            onClick={clearSelection}
+          >
+            Clear
+          </Button>
+        </div>
       )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

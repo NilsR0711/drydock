@@ -155,6 +155,57 @@ export async function dequeueIssue(
   return listIssues(repoId, db);
 }
 
+/**
+ * Queue several issues in one batch (issue #111). Ensures the queue label once
+ * for the whole batch, then labels each issue sequentially (forge + local
+ * cache) to avoid hammering the forge. Returns the refreshed issue list.
+ */
+export async function bulkQueueIssues(
+  repoId: number,
+  issueNumbers: number[],
+  db: DB = getDb(),
+): Promise<Issue[]> {
+  const repo = requireRepo(repoId, db);
+  if (issueNumbers.length === 0) return listIssues(repoId, db);
+  const gh = getForge(repo);
+  await gh.ensureLabel(repo.queueLabel, QUEUE_LABEL_OPTS);
+  for (const number of issueNumbers) {
+    await gh.addLabels(number, [repo.queueLabel]);
+    setQueueLabelLocal(repoId, number, repo.queueLabel, true, db);
+  }
+  return listIssues(repoId, db);
+}
+
+/** Dequeue several issues in one batch (issue #111); returns the refreshed list. */
+export async function bulkDequeueIssues(
+  repoId: number,
+  issueNumbers: number[],
+  db: DB = getDb(),
+): Promise<Issue[]> {
+  const repo = requireRepo(repoId, db);
+  if (issueNumbers.length === 0) return listIssues(repoId, db);
+  const gh = getForge(repo);
+  for (const number of issueNumbers) {
+    await gh.removeLabels(number, [repo.queueLabel]);
+    setQueueLabelLocal(repoId, number, repo.queueLabel, false, db);
+  }
+  return listIssues(repoId, db);
+}
+
+/** Apply one label across several issues in a batch (issue #111). */
+export async function bulkApplyLabel(
+  repoId: number,
+  issueNumbers: number[],
+  label: string,
+  db: DB = getDb(),
+): Promise<Issue[]> {
+  if (issueNumbers.length === 0) return listIssues(repoId, db);
+  for (const number of issueNumbers) {
+    await applyIssueLabels(repoId, number, [label], [], db);
+  }
+  return listIssues(repoId, db);
+}
+
 /** Add and/or remove labels on an issue (forge + local cache for the queue label). */
 export async function applyIssueLabels(
   repoId: number,

@@ -1,9 +1,10 @@
 "use client";
 
-import { Anchor, PauseCircle } from "lucide-react";
+import { Anchor } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { EmergencyStopButton } from "@/components/emergency-stop-button";
+import { PauseToggle } from "@/components/pause-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/update-banner";
 import { cn } from "@/lib/utils";
@@ -14,6 +15,7 @@ const NAV: { href: string; label: string }[] = [
   { href: "/", label: "Dashboard" },
   { href: "/needs-human", label: "Needs human" },
   { href: "/jobs", label: "Jobs" },
+  { href: "/analytics", label: "Analytics" },
   { href: "/prompts", label: "Prompts" },
   { href: "/adrs", label: "ADRs" },
   { href: "/costs", label: "Costs" },
@@ -87,16 +89,7 @@ export function AppShell({
           </nav>
           <div className="ml-auto flex items-center gap-2">
             {updateStatus && <UpdateBanner status={updateStatus} installKind={installKind} />}
-            {paused && (
-              <Link
-                href="/settings"
-                aria-label="Automation paused — open settings"
-                className="flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-muted px-2 py-1 text-xs font-medium text-warning-foreground"
-              >
-                <PauseCircle className="h-3.5 w-3.5" />
-                Paused
-              </Link>
-            )}
+            <PauseToggle paused={paused} />
             <EmergencyStopButton />
             <ThemeToggle />
           </div>

@@ -6,6 +6,9 @@ import { issues, repos } from "@/lib/db/schema";
 import { __setForgeFactory } from "@/lib/forge/registry";
 import {
   addToQueueAction,
+  bulkAddToQueueAction,
+  bulkApplyLabelAction,
+  bulkRemoveFromQueueAction,
   commentIssueAction,
   editIssueAction,
   removeFromQueueAction,
@@ -80,6 +83,34 @@ describe("issue server actions", () => {
     const repoId = seedRepoWithIssue(3);
     await removeFromQueueAction(repoId, 3);
     expect(gh.removeLabels).toHaveBeenCalledWith(3, ["drydock:queue"]);
+  });
+
+  it("bulkAddToQueueAction queues every selected issue", async () => {
+    const repoId = seedRepoWithIssue(3);
+    getDb()
+      .insert(issues)
+      .values({ repoId, number: 4, title: "seed", labels: "[]", priority: 1 })
+      .run();
+    await bulkAddToQueueAction(repoId, [3, 4]);
+    expect(gh.addLabels).toHaveBeenCalledWith(3, ["drydock:queue"]);
+    expect(gh.addLabels).toHaveBeenCalledWith(4, ["drydock:queue"]);
+  });
+
+  it("bulkRemoveFromQueueAction dequeues every selected issue", async () => {
+    const repoId = seedRepoWithIssue(3);
+    await bulkRemoveFromQueueAction(repoId, [3]);
+    expect(gh.removeLabels).toHaveBeenCalledWith(3, ["drydock:queue"]);
+  });
+
+  it("bulkApplyLabelAction applies the label to every selected issue", async () => {
+    const repoId = seedRepoWithIssue(3);
+    getDb()
+      .insert(issues)
+      .values({ repoId, number: 4, title: "seed", labels: "[]", priority: 1 })
+      .run();
+    await bulkApplyLabelAction(repoId, [3, 4], "enhancement");
+    expect(gh.addLabels).toHaveBeenCalledWith(3, ["enhancement"]);
+    expect(gh.addLabels).toHaveBeenCalledWith(4, ["enhancement"]);
   });
 
   it("viewIssueAction returns the detail from gh", async () => {
