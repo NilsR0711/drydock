@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.1.4](https://github.com/NilsR0711/drydock/compare/v0.1.3...v0.1.4) (2026-06-01)
+
+
+### Features
+
+* **cost:** track untracked one-shot agent spend (issue [#95](https://github.com/NilsR0711/drydock/issues/95)) ([#127](https://github.com/NilsR0711/drydock/issues/127)) ([e4c62cd](https://github.com/NilsR0711/drydock/commit/e4c62cdc569b69a637f3af5493c3778585be4170))
+* global job history view with search & filter (/jobs) ([#134](https://github.com/NilsR0711/drydock/issues/134)) ([e73a514](https://github.com/NilsR0711/drydock/commit/e73a5147a89ca553863b3a598c87b73352aae230))
+* **models:** add Claude Opus 4.8 as selectable model and make it the default ([#123](https://github.com/NilsR0711/drydock/issues/123)) ([e856ea7](https://github.com/NilsR0711/drydock/commit/e856ea7c4ebd6b64dabc7aed94cd25679488fdd5))
+* operator quick wins — navbar pause/resume, bulk queue actions, analytics ([#143](https://github.com/NilsR0711/drydock/issues/143)) ([8722004](https://github.com/NilsR0711/drydock/commit/8722004e8438ffb0eec34796de5b50f100dc3c9b))
+* per-job model/agent override when queuing an issue ([#101](https://github.com/NilsR0711/drydock/issues/101)) ([#133](https://github.com/NilsR0711/drydock/issues/133)) ([e5c433d](https://github.com/NilsR0711/drydock/commit/e5c433d6040169762f57c0e2e7d93a2b2802bdfc))
+* **prompts:** view, diff, and restore prompt versions ([#103](https://github.com/NilsR0711/drydock/issues/103)) ([1969484](https://github.com/NilsR0711/drydock/commit/1969484bb3c26bcd0e10b018664b44025f2136ed))
+
+
+### Bug Fixes
+
+* **a11y:** keyboard-operable queue actions on issue board ([#105](https://github.com/NilsR0711/drydock/issues/105)) ([#137](https://github.com/NilsR0711/drydock/issues/137)) ([cfe9d02](https://github.com/NilsR0711/drydock/commit/cfe9d024f78fce8aeec7b7771ebd07586f0831bc))
+* **a11y:** modal dialogs focus trap, focus restore, and accessible name ([#136](https://github.com/NilsR0711/drydock/issues/136)) ([bf19de8](https://github.com/NilsR0711/drydock/commit/bf19de881a2f0289eed55b303a2127cf1cdbea42))
+* **a11y:** status live regions, AA contrast, select labels & skip link ([#106](https://github.com/NilsR0711/drydock/issues/106)) ([#138](https://github.com/NilsR0711/drydock/issues/138)) ([e41943a](https://github.com/NilsR0711/drydock/commit/e41943ad6b6825ab5cbf1cdaf4ed11d2006bef25))
+* abort kills the agent subprocess; add Stop control and emergency stop ([#121](https://github.com/NilsR0711/drydock/issues/121)) ([a8e0ce1](https://github.com/NilsR0711/drydock/commit/a8e0ce161974a9ead52e22dd05e4b39972c8c28f)), closes [#89](https://github.com/NilsR0711/drydock/issues/89)
+* **agent-session:** drain grace-window stdout before finalising cost on force-abort ([#129](https://github.com/NilsR0711/drydock/issues/129)) ([d47827b](https://github.com/NilsR0711/drydock/commit/d47827b3dc7c6a8cbb42b08a7456dbe9523d4a98))
+* **cost:** treat result-event usage as authoritative session total ([#119](https://github.com/NilsR0711/drydock/issues/119)) ([27893b9](https://github.com/NilsR0711/drydock/commit/27893b9512e9cef66b46502943ce920dc251ec94)), closes [#87](https://github.com/NilsR0711/drydock/issues/87)
+* **cost:** UTC-vs-local daily window + CSV formula injection ([#107](https://github.com/NilsR0711/drydock/issues/107)) ([#139](https://github.com/NilsR0711/drydock/issues/139)) ([4875c61](https://github.com/NilsR0711/drydock/commit/4875c61a4d6166ab8d977c45927373336373465f))
+* defense-in-depth — GitLab SSRF guard, log redaction, MCP add_repo path check ([#142](https://github.com/NilsR0711/drydock/issues/142)) ([57a4680](https://github.com/NilsR0711/drydock/commit/57a4680ee0cf1d963ac19e6351d117de1a0480aa)), closes [#110](https://github.com/NilsR0711/drydock/issues/110)
+* enforce cumulative per-job cost cap across CI-fix resumes ([#126](https://github.com/NilsR0711/drydock/issues/126)) ([0724fe2](https://github.com/NilsR0711/drydock/commit/0724fe202ffb397c8a55f5068f59906078ca5a0b))
+* **gitlab:** back off on 429 respecting Retry-After/RateLimit-Reset ([#131](https://github.com/NilsR0711/drydock/issues/131)) ([461b2d8](https://github.com/NilsR0711/drydock/commit/461b2d8261651d65cdf584b95e3221b87169fe0e))
+* **gitlab:** remove deprecated merge param, use head_pipeline, log errors ([#108](https://github.com/NilsR0711/drydock/issues/108)) ([#140](https://github.com/NilsR0711/drydock/issues/140)) ([1380885](https://github.com/NilsR0711/drydock/commit/13808855c9fb9b817619d94e298bb561fa08a599))
+* **notify:** bound notification I/O so it can't hang shutdown or saves ([#122](https://github.com/NilsR0711/drydock/issues/122)) ([59e310a](https://github.com/NilsR0711/drydock/commit/59e310a350e5aa1173ead58501008602576d2cca)), closes [#90](https://github.com/NilsR0711/drydock/issues/90)
+* paginate issue listing so repos with &gt;100 open issues sync fully ([#120](https://github.com/NilsR0711/drydock/issues/120)) ([2b965da](https://github.com/NilsR0711/drydock/commit/2b965da099d322f13194c3a80f4e6424e244f850))
+* reliability hardening — spawn-error surfacing, lease reclaim, shutdown race, migration latch ([#141](https://github.com/NilsR0711/drydock/issues/141)) ([58235aa](https://github.com/NilsR0711/drydock/commit/58235aaa52a118dfd005b3c917bade60535a89cb))
+* **security:** confine directory picker to browse root (issue [#100](https://github.com/NilsR0711/drydock/issues/100)) ([#132](https://github.com/NilsR0711/drydock/issues/132)) ([6f81d45](https://github.com/NilsR0711/drydock/commit/6f81d455dfd0a3a94f3228ae3cee5b995baf3a33))
+* **security:** refuse non-loopback --host without DRYDOCK_ALLOW_REMOTE ([#124](https://github.com/NilsR0711/drydock/issues/124)) ([d37ce4e](https://github.com/NilsR0711/drydock/commit/d37ce4e88eac256e49d3d2a1bbec8d12320dbc3e)), closes [#91](https://github.com/NilsR0711/drydock/issues/91)
+* **subtasks:** park in-progress subtasks on every non-merge terminal outcome ([#128](https://github.com/NilsR0711/drydock/issues/128)) ([0668a4c](https://github.com/NilsR0711/drydock/commit/0668a4c5fbc77477085271604e92e6ab218412eb)), closes [#96](https://github.com/NilsR0711/drydock/issues/96)
+* validate model ids and stop silent cheap-pricing fallback ([#93](https://github.com/NilsR0711/drydock/issues/93)) ([4dbc010](https://github.com/NilsR0711/drydock/commit/4dbc0104adf95b7018824cc0a94cc0e07a4febff))
+* **worktree-reaper:** reap orphaned fb-*/dh-* worktrees on startup (issue [#98](https://github.com/NilsR0711/drydock/issues/98)) ([89c3070](https://github.com/NilsR0711/drydock/commit/89c30700b4434a04290d9a3849923839c124e9e1))
+
 ## [0.1.3](https://github.com/NilsR0711/drydock/compare/v0.1.2...v0.1.3) (2026-05-29)
 
 
