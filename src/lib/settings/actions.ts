@@ -15,6 +15,21 @@ export async function saveSettingsAction(patch: Partial<Settings>) {
   return merged;
 }
 
+/**
+ * One-click global pause/resume (issue #111). A dedicated, minimal action so the
+ * navbar can toggle automation without round-tripping the full settings form —
+ * which would also commit any other in-progress edits on that long form. Reuses
+ * the same resume→paused edge notification as {@link saveSettingsAction}.
+ */
+export async function togglePauseAction(paused: boolean): Promise<Settings> {
+  const before = getSettings();
+  const merged = saveSettings({ paused });
+  await notifyPauseTransition(before.paused, merged.paused);
+  revalidatePath("/settings");
+  revalidatePath("/");
+  return merged;
+}
+
 /** Send a test notification to every configured channel and report each result. */
 export async function sendTestNotificationAction(): Promise<TestResult[]> {
   return runSendTest();
