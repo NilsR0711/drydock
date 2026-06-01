@@ -49,6 +49,28 @@ describe("repos service", () => {
     expect(() => addRepo({ path: "/x", name: "x", platform: "bitbucket" } as never, db)).toThrow();
   });
 
+  it("rejects an apiBaseUrl that is not an absolute http(s) URL (issue #110)", () => {
+    expect(() =>
+      addRepo({ path: "/bad-url", name: "x", apiBaseUrl: "javascript:alert(1)" }, db),
+    ).toThrow();
+    expect(() =>
+      addRepo({ path: "/bad-url2", name: "x", apiBaseUrl: "gitlab.corp.local" }, db),
+    ).toThrow();
+    expect(() =>
+      addRepo({ path: "/bad-url3", name: "x", apiBaseUrl: "file:///etc/passwd" }, db),
+    ).toThrow();
+  });
+
+  it("accepts a valid absolute https apiBaseUrl and treats empty as unset (issue #110)", () => {
+    const repo = addRepo(
+      { path: "/ok-url", name: "x", apiBaseUrl: "https://gitlab.corp.local:8443" },
+      db,
+    );
+    expect(repo.apiBaseUrl).toBe("https://gitlab.corp.local:8443");
+    const empty = addRepo({ path: "/empty-url", name: "y", apiBaseUrl: "" }, db);
+    expect(empty.apiBaseUrl ?? "").toBe("");
+  });
+
   it("new repo defaults to the opus model (schema/service consistent)", () => {
     const repo = addRepo({ path: "/m", name: "m" }, db);
     expect(repo.defaultModel).toBe("claude-opus-4-8");

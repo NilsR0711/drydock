@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
+import { logError } from "@/lib/log/logger";
 import { fetchHttp, type HttpClient, type HttpResponse } from "./http";
 import {
   type ForgeClient,
@@ -9,6 +10,7 @@ import {
   type IssueDetail,
   type PrCheck,
 } from "./types";
+import { assertSafeForgeUrl, privateForgeAllowedFromEnv } from "./url-guard";
 
 /** Fallback backoff window for a GitLab 429 with no usable reset header (ms). */
 const DEFAULT_GITLAB_BACKOFF_MS = 60_000;
@@ -138,15 +140,22 @@ export class GitlabForge implements ForgeClient {
   private readonly http: HttpClient;
   private readonly run: CommandRunner;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly allowPrivateHost: boolean;
   private projectRef?: Promise<ProjectRef>;
 
   constructor(
     private readonly config: ForgeConfig,
-    deps: { http?: HttpClient; run?: CommandRunner; sleep?: (ms: number) => Promise<void> } = {},
+    deps: {
+      http?: HttpClient;
+      run?: CommandRunner;
+      sleep?: (ms: number) => Promise<void>;
+      allowPrivateHost?: boolean;
+    } = {},
   ) {
     this.http = deps.http ?? fetchHttp;
     this.run = deps.run ?? spawnRunner;
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.allowPrivateHost = deps.allowPrivateHost ?? privateForgeAllowedFromEnv();
   }
 
   private resolveProject(): Promise<ProjectRef> {
@@ -175,6 +184,9 @@ export class GitlabForge implements ForgeClient {
       const qs = new URLSearchParams(opts.query).toString();
       if (qs) url += `?${qs}`;
     }
+    // Refuse to attach the token to a private/loopback/metadata target unless
+    // the operator opted in for a self-hosted instance (issue #110 SSRF guard).
+    assertSafeForgeUrl(url, { allowPrivate: this.allowPrivateHost });
     const headers: Record<string, string> = {};
     if (this.config.token) headers["PRIVATE-TOKEN"] = this.config.token;
     let body: string | undefined;
@@ -328,7 +340,7 @@ export class GitlabForge implements ForgeClient {
         query: { per_page: "100" },
       });
       if (!jobsRes.ok) {
-        console.error(
+        logError(
           `GitLab failedRunLog: pipeline ${pipelineId} jobs request failed (${jobsRes.status})`,
         );
         return "";
@@ -339,14 +351,12 @@ export class GitlabForge implements ForgeClient {
       if (!failed) return "";
       const traceRes = await this.request("GET", `/jobs/${failed.id}/trace`);
       if (!traceRes.ok) {
-        console.error(
-          `GitLab failedRunLog: job ${failed.id} trace request failed (${traceRes.status})`,
-        );
+        logError(`GitLab failedRunLog: job ${failed.id} trace request failed (${traceRes.status})`);
         return "";
       }
       return traceRes.body.slice(-8000);
     } catch (err) {
-      console.error("GitLab failedRunLog error:", err);
+      logError("GitLab failedRunLog error:", err);
       return "";
     }
   }
@@ -357,7 +367,7 @@ export class GitlabForge implements ForgeClient {
         query: { per_page: "100" },
       });
       if (!res.ok) {
-        console.error(`GitLab prDiff: MR ${prNumber} diffs request failed (${res.status})`);
+        logError(`GitLab prDiff: MR ${prNumber} diffs request failed (${res.status})`);
         return "";
       }
       const parsed = z.array(gitlabDiffSchema).safeParse(safeJson(res.body, []));
@@ -366,7 +376,7 @@ export class GitlabForge implements ForgeClient {
         .map((d) => `--- a/${d.old_path}\n+++ b/${d.new_path}\n${d.diff}`)
         .join("\n");
     } catch (err) {
-      console.error("GitLab prDiff error:", err);
+      logError("GitLab prDiff error:", err);
       return "";
     }
   }

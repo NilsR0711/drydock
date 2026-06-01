@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { type DB, getDb } from "@/lib/db/client";
 import { type Repo, repos } from "@/lib/db/schema";
+import { isValidForgeBaseUrl } from "@/lib/forge/url-guard";
 import { isKnownModelId } from "@/lib/models";
 import { AGENT_INSTRUCTIONS_MAX_CHARS } from "@/lib/repos/agent-instructions";
 
@@ -31,7 +32,16 @@ export const repoInputSchema = z.object({
     .default("claude-opus-4-8"),
   agent: z.enum(["claude", "codex"]).default("claude"),
   platform: z.enum(["github", "gitlab"]).default("github"),
-  apiBaseUrl: z.string().nullish(),
+  // A self-hosted forge API base URL. Validated as an absolute http(s) URL so a
+  // bogus/attacker-influenced scheme (file:, javascript:, relative) can never be
+  // stored and later fetched server-side with a token attached (issue #110).
+  // Empty string is treated as "unset" alongside null/undefined.
+  apiBaseUrl: z
+    .string()
+    .refine((v) => v === "" || isValidForgeBaseUrl(v), {
+      message: "apiBaseUrl must be an absolute http(s) URL",
+    })
+    .nullish(),
   apiToken: z.string().nullish(),
   dailyCostLimitUsd: z.number().nonnegative().default(10),
   adrGating: z.boolean().default(false),
