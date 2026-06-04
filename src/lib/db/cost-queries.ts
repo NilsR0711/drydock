@@ -33,14 +33,15 @@ export function dailyCosts(db: DB = getDb(), repoId?: number): DailyCost[] {
     .all();
 }
 
-export function costByModel(db: DB = getDb(), repoId?: number): ModelCost[] {
+export function costByModel(db: DB = getDb(), repoId?: number, since?: number): ModelCost[] {
+  const sinceFilter = since === undefined ? undefined : sql`${jobs.startedAt} >= ${since}`;
   return db
     .select({
       model: sql<string>`coalesce(${jobs.model}, 'unknown')`,
       costUsd: sql<number>`coalesce(sum(${jobs.costUsd}), 0)`,
     })
     .from(jobs)
-    .where(repoFilter(repoId))
+    .where(and(repoFilter(repoId), sinceFilter))
     .groupBy(jobs.model)
     .all();
 }

@@ -127,6 +127,8 @@ export interface RepoDashboardRow {
   inFlight: InFlightJob[];
   lastActivityAt: number | null;
   todaySpend: number;
+  /** The repo's configured daily cost cap (USD), for the combined budget gauge. */
+  dailyLimitUsd: number;
   /** True when the repo has parked or failed work that wants a human. */
   attention: boolean;
 }
@@ -177,6 +179,7 @@ export function dashboardSnapshot(db: DB = getDb()): DashboardSnapshot {
       inFlight,
       lastActivityAt,
       todaySpend: todayCost(db, repo.id),
+      dailyLimitUsd: repo.dailyCostLimitUsd,
       attention: needsHuman > 0 || ciFailed > 0,
     };
   });

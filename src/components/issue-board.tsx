@@ -112,12 +112,14 @@ export function IssueBoard({
     setDragNumber(null);
     setOverNumber(null);
     if (!moved || inQueue(moved)) return;
-    setFlash(num);
-    setTimeout(() => setFlash((f) => (f === num ? null : f)), 1200);
-    success("Issue queued", `#${num} ${title ?? ""}`.trim());
     start(() => {
       addToQueueAction(repoId, num)
-        .then(setIssues)
+        .then((next) => {
+          setIssues(next);
+          setFlash(num);
+          setTimeout(() => setFlash((f) => (f === num ? null : f)), 1200);
+          success("Issue queued", `#${num} ${title ?? ""}`.trim());
+        })
         .catch((e) => setError(e.message));
     });
   }

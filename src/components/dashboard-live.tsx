@@ -25,7 +25,14 @@ const DEFAULT_DAILY_LIMIT = 10;
  * immediately, then subscribes to /api/sse/dashboard and swaps in fresh
  * snapshots as jobs move and spend accrues — no manual refresh.
  */
-export function DashboardLive({ initial }: { initial: DashboardSnapshot }) {
+export function DashboardLive({
+  initial,
+  spend7d,
+}: {
+  initial: DashboardSnapshot;
+  /** Real per-day spend (oldest → newest, today last) for the trend sparkline. */
+  spend7d?: number[];
+}) {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState(initial);
   const [showAdd, setShowAdd] = useState(false);
@@ -45,17 +52,21 @@ export function DashboardLive({ initial }: { initial: DashboardSnapshot }) {
   const { repos, summary } = snapshot;
   const empty = repos.length === 0;
 
-  // Combined spend today against the summed per-repo daily limits; always keep
-  // the ceiling above today's spend so the gauge stays meaningful.
+  // Combined spend today against the SUM of each repo's configured daily limit
+  // (matching the tooltip); fall back to the schema default for unset limits and
+  // always keep the ceiling above today's spend so the gauge stays meaningful.
   const limit = Math.max(
-    repos.length * DEFAULT_DAILY_LIMIT,
+    repos.reduce((sum, r) => sum + (r.dailyLimitUsd || DEFAULT_DAILY_LIMIT), 0),
     summary.spendToday,
     DEFAULT_DAILY_LIMIT,
   );
 
-  // The snapshot carries only today's spend, so the trend baselines on it and
-  // surfaces the live value as the leading point.
-  const spendSeries = [0, 0, 0, 0, 0, 0, summary.spendToday];
+  // Real 7-day spend trend from the server, with the live value as the last
+  // point; fall back to a today-only series if no history was provided.
+  const spendSeries =
+    spend7d && spend7d.length > 0
+      ? [...spend7d.slice(0, -1), summary.spendToday]
+      : [summary.spendToday];
 
   return (
     <div className="dd-fade-up">

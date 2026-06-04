@@ -296,8 +296,7 @@ export function LogViewer({ jobId, initial = [] }: { jobId: number; initial?: Lo
   function copy() {
     const text = lines
       .map((l) => {
-        const ts = field(l.payload, "ts");
-        const clock = ts ? `[${fmtClock(Number(ts))}] ` : "";
+        const clock = l.ts ? `[${fmtClock(l.ts)}] ` : "";
         const body = typeof l.payload === "string" ? l.payload : JSON.stringify(l.payload);
         return `${clock}${l.type}\t${body}`;
       })

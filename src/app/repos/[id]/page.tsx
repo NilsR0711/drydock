@@ -33,7 +33,7 @@ import { listAdrs } from "@/lib/adr/service";
 import { getDb } from "@/lib/db/client";
 import { dailyCosts, todayCost } from "@/lib/db/cost-queries";
 import { getRepoWorkspace } from "@/lib/db/queries";
-import { jobEvents } from "@/lib/db/schema";
+import { jobEvents, jobs } from "@/lib/db/schema";
 import { recentHealingSessions } from "@/lib/orchestrator/ci-healing";
 import { recentDeploymentHealingSessions } from "@/lib/orchestrator/deployment-healing";
 import { recentReleaseRuns } from "@/lib/release/release-service";
@@ -67,7 +67,8 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
     : [];
 
   // Per-repo stat counts. Issue-side counts come from the labelled issues; job
-  // status counts come from the recent jobs the workspace already loaded.
+  // status counts come from ALL of the repo's jobs (not just the recent slice,
+  // which would under-count active/merged/needs-human work).
   const queueLabel = ws.repo.queueLabel;
   const queuedCount = ws.issues.filter((i) => {
     try {
@@ -77,8 +78,9 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
       return false;
     }
   }).length;
+  const repoJobs = db.select().from(jobs).where(eq(jobs.repoId, ws.repo.id)).all();
   const jobCount = (statuses: string[]) =>
-    ws.recentJobs.filter((j) => statuses.includes(j.status)).length;
+    repoJobs.filter((j) => statuses.includes(j.status)).length;
   const workingCount = jobCount(["working", "ci_running", "retrying"]);
   const ciRunningCount = jobCount(["ci_running"]);
   const mergedCount = jobCount(["merged"]);

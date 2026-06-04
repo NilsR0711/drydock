@@ -27,7 +27,7 @@ export default async function AnalyticsPage({
 
   const repos = listRepos().map((r) => ({ id: r.id, name: r.name }));
   const summary = analyticsSummary({ repoId, since });
-  const byModel = costByModel(undefined, repoId);
+  const byModel = costByModel(undefined, repoId, since);
 
   return (
     <div className="dd-fade-up">
