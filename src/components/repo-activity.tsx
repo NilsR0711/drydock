@@ -49,7 +49,11 @@ export function RepoActivity({
                 Tokens: {activeJob.totalInputTokens} in / {activeJob.totalOutputTokens} out
               </div>
             </dl>
-            <LogViewer jobId={activeJob.id} initial={initialLog} />
+            <LogViewer
+              jobId={activeJob.id}
+              initial={initialLog}
+              active={["working", "ci_running", "retrying"].includes(activeJob.status)}
+            />
           </div>
         ) : (
           <EmptyState

@@ -59,7 +59,9 @@ export function dailyCosts(db: DB = getDb(), repoId?: number): DailyCost[] {
 }
 
 export function costByModel(db: DB = getDb(), repoId?: number, since?: number): ModelCost[] {
-  const sinceFilter = since === undefined ? undefined : sql`${jobs.startedAt} >= ${since}`;
+  // Filter on createdAt to match analyticsSummary's date window, so "spend by
+  // model" agrees with the rest of the analytics panel for the same range.
+  const sinceFilter = since === undefined ? undefined : sql`${jobs.createdAt} >= ${since}`;
   return db
     .select({
       model: sql<string>`coalesce(${jobs.model}, 'unknown')`,
