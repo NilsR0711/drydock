@@ -83,6 +83,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
       <LogViewer
         jobId={job.id}
+        active={inFlight}
         initial={events.map((e) => ({
           id: e.id,
           type: e.type,

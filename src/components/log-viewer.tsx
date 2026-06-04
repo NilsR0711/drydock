@@ -245,13 +245,24 @@ function LogRow({ line }: { line: LogLine }) {
  * exposes a per-event-type filter, an autoscroll toggle (controls Virtuoso's
  * followOutput), and a copy-to-clipboard action.
  */
-export function LogViewer({ jobId, initial = [] }: { jobId: number; initial?: LogLine[] }) {
+export function LogViewer({
+  jobId,
+  initial = [],
+  active = true,
+}: {
+  jobId: number;
+  initial?: LogLine[];
+  /** Whether the job is still running (from the server's job status). Jobs that
+   *  end via a status transition (needs_human, aborted, ci_failed) never emit a
+   *  `result`/`claude_exit` event, so event types alone can't decide completion. */
+  active?: boolean;
+}) {
   const [lines, setLines] = useState<LogLine[]>(initial);
-  // A job whose initial replay already contains a terminal event is finished —
-  // seed completeness from it so the seen-Set dedupe of replayed SSE events can't
-  // leave a long-done job stuck showing the "live" badge + streaming spinner.
-  const [complete, setComplete] = useState(() =>
-    initial.some((l) => l.type === "result" || l.type === "claude_exit"),
+  // Finished when the server says the job is no longer active, or when the
+  // initial replay already carries a terminal event. Seeding this prevents a
+  // done job from being stuck on the "live" badge + streaming spinner.
+  const [complete, setComplete] = useState(
+    () => !active || initial.some((l) => l.type === "result" || l.type === "claude_exit"),
   );
   const [autoscroll, setAutoscroll] = useState(true);
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
@@ -260,6 +271,8 @@ export function LogViewer({ jobId, initial = [] }: { jobId: number; initial?: Lo
   const { success, error } = useToast();
 
   useEffect(() => {
+    // A finished job has all its events in `initial` — don't open a stream.
+    if (!active) return;
     const es = new EventSource(`/api/sse/jobs/${jobId}`);
     const handler = (type: string) => (ev: MessageEvent) => {
       const id = ev.lastEventId ? Number(ev.lastEventId) : Date.now();
@@ -278,7 +291,7 @@ export function LogViewer({ jobId, initial = [] }: { jobId: number; initial?: Lo
     };
     for (const t of EVENT_TYPES) es.addEventListener(t, handler(t));
     return () => es.close();
-  }, [jobId]);
+  }, [jobId, active]);
 
   const visible = useMemo(() => lines.filter((l) => !hidden.has(l.type)), [lines, hidden]);
   const running = !complete;
