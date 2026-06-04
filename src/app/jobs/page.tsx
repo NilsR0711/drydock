@@ -64,7 +64,7 @@ export default async function JobsIndexPage({
             <span className="text-right">Model</span>
             <span className="text-right">Cost</span>
             <span className="text-right">Duration</span>
-            <span className="text-right">Started</span>
+            <span className="text-right">Created</span>
           </div>
           <ul>
             {result.rows.map((row) => {
@@ -97,7 +97,7 @@ export default async function JobsIndexPage({
                       {durationSec !== null ? formatDuration(durationSec) : "—"}
                     </span>
                     <span className="hidden text-right text-xs text-muted-foreground sm:block">
-                      {row.startedAt ? relativeTime(row.startedAt) : "—"}
+                      {relativeTime(row.createdAt)}
                     </span>
                   </Link>
                 </li>
