@@ -17,7 +17,11 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import type { Repo } from "@/lib/db/schema";
-import { loadTemplateAction, saveTemplateAction } from "@/lib/prompts/actions";
+import {
+  deleteTemplateAction,
+  loadTemplateAction,
+  saveTemplateAction,
+} from "@/lib/prompts/actions";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { cn } from "@/lib/utils";
 
@@ -109,10 +113,23 @@ function RepoPromptCard({ repo, stage }: { repo: Repo; stage: StageDef }) {
   }
 
   function changeMode(next: string) {
-    setMode(next as "standard" | "custom");
-    if (next === "standard") {
-      setDraft(resolved);
+    if (next === "custom") {
+      setMode("custom");
+      return;
     }
+    // Switching to Standard must remove the repo override row — otherwise the
+    // runtime keeps resolving the saved override and the "inherits the global
+    // default" copy would be a lie. After deletion, render the true default.
+    start(async () => {
+      try {
+        const res = await deleteTemplateAction(repo.id, stage.name);
+        setResolved(res.content);
+        setDraft(res.content);
+        setMode("standard");
+      } catch (e) {
+        error("Failed to revert to standard", e instanceof Error ? e.message : String(e));
+      }
+    });
   }
 
   return (
@@ -135,6 +152,7 @@ function RepoPromptCard({ repo, stage }: { repo: Repo; stage: StageDef }) {
         <SegmentedControl
           value={mode}
           onChange={changeMode}
+          disabled={!loaded || pending}
           options={[
             { value: "standard", label: "Standard" },
             { value: "custom", label: "Custom" },
@@ -170,7 +188,7 @@ function RepoPromptCard({ repo, stage }: { repo: Repo; stage: StageDef }) {
               disabled={!dirty || pending}
               onClick={() => setDraft(resolved)}
             >
-              Reset to standard
+              Discard changes
             </Button>
             <Button size="sm" disabled={!dirty || pending} onClick={save}>
               Save override

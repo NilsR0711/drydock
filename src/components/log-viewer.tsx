@@ -116,9 +116,26 @@ function PayloadView({ type, payload }: { type: string; payload: unknown }) {
     );
   }
   if (type === "status") {
+    // Orchestrator status events carry { from, to, reason } (some only a
+    // reason); a plain `message` is the legacy shape. Render the transition so
+    // state changes don't collapse to blank lines.
+    const from = field(payload, "from");
+    const to = field(payload, "to");
+    const reason = field(payload, "reason");
+    if (from || to) {
+      return (
+        <span className="text-muted-foreground">
+          {from ?? "?"} <span className="text-muted-foreground/60">→</span>{" "}
+          <span className="text-foreground">{to ?? "?"}</span>
+          {reason && <> · {reason}</>}
+        </span>
+      );
+    }
     return (
       <span className="text-muted-foreground">
-        {field(payload, "message") ?? (typeof payload === "string" ? payload : "")}
+        {field(payload, "message") ??
+          reason ??
+          (typeof payload === "string" ? payload : JSON.stringify(payload))}
       </span>
     );
   }

@@ -37,6 +37,17 @@ export function resolveTemplateContent(repoId: number, name: string, db: DB = ge
   );
 }
 
+/**
+ * Remove every version row for a repo+name, so the runtime resolves the
+ * code-level default again. Used when a repo prompt stage is switched back to
+ * "Standard" — a local UI toggle alone would not change what the agent runs.
+ */
+export function deleteTemplate(repoId: number, name: string, db: DB = getDb()): void {
+  db.delete(promptTemplates)
+    .where(and(eq(promptTemplates.repoId, repoId), eq(promptTemplates.name, name)))
+    .run();
+}
+
 /** A specific version of a named template for a repo, including its full content. */
 export function getVersion(
   repoId: number,

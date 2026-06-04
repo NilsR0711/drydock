@@ -10,6 +10,7 @@ export interface SegmentedControlProps {
   onChange: (value: string) => void;
   options: SegmentedControlOption[];
   size?: "default" | "sm";
+  disabled?: boolean;
 }
 
 export function SegmentedControl({
@@ -17,6 +18,7 @@ export function SegmentedControl({
   onChange,
   options,
   size = "default",
+  disabled = false,
 }: SegmentedControlProps) {
   return (
     <div
@@ -29,9 +31,11 @@ export function SegmentedControl({
         <button
           key={o.value}
           type="button"
+          disabled={disabled}
           onClick={() => onChange(o.value)}
           className={cn(
             "rounded-md px-2.5 py-1 text-xs font-medium transition-colors focus-ring",
+            "disabled:cursor-not-allowed disabled:opacity-50",
             value === o.value
               ? "bg-card text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",

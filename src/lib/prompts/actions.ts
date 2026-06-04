@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import {
+  deleteTemplate,
   getActiveTemplate,
   getVersion,
   listVersions,
@@ -14,6 +15,16 @@ export async function saveTemplateAction(input: TemplateInput) {
   const row = saveTemplate(input);
   revalidatePath("/prompts");
   return row;
+}
+
+/**
+ * Remove a repo's override for a stage, reverting it to the global default.
+ * Returns the now-effective (default) content so the caller can render it.
+ */
+export async function deleteTemplateAction(repoId: number, name: string) {
+  deleteTemplate(repoId, name);
+  revalidatePath("/prompts");
+  return { content: resolveTemplateContent(repoId, name) };
 }
 
 /** Load a repo+name template's effective content (with default fallback) and versions. */
