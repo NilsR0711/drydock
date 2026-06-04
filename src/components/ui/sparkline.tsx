@@ -1,3 +1,6 @@
+"use client";
+
+import { useId } from "react";
 import { toneVar } from "./chart-utils";
 
 export interface SparklineProps {
@@ -18,6 +21,10 @@ export function Sparkline({
   fill = true,
   strokeWidth = 1.75,
 }: SparklineProps) {
+  // Unique per instance so two sparklines can't share a gradient <defs> id
+  // (SVG ids are document-global; a data-derived id collides on equal series).
+  // Declared before any early return to satisfy the Rules of Hooks.
+  const id = `sp${useId().replace(/:/g, "")}`;
   if (data.length === 0) return null;
   const min = Math.min(...data);
   const max = Math.max(...data);
@@ -29,7 +36,6 @@ export function Sparkline({
   const line = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
   const area = `${line} L${width} ${height} L0 ${height} Z`;
   const color = toneVar(tone);
-  const id = `sp${Math.round(width + height + data.length + (data[0] ?? 0))}`;
   const last = pts[pts.length - 1] ?? ([0, height - 3] as const);
   return (
     <svg

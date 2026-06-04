@@ -56,7 +56,7 @@ export function DashboardLive({
   // (matching the tooltip); fall back to the schema default for unset limits and
   // always keep the ceiling above today's spend so the gauge stays meaningful.
   const limit = Math.max(
-    repos.reduce((sum, r) => sum + (r.dailyLimitUsd || DEFAULT_DAILY_LIMIT), 0),
+    repos.reduce((sum, r) => sum + (r.dailyLimitUsd ?? DEFAULT_DAILY_LIMIT), 0),
     summary.spendToday,
     DEFAULT_DAILY_LIMIT,
   );

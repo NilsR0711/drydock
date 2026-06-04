@@ -68,7 +68,6 @@ export default async function JobsIndexPage({
           </div>
           <ul>
             {result.rows.map((row) => {
-              const startedAt = row.startedAt ?? row.createdAt;
               // Active runs have no finish time yet — measure to "now" like the
               // job detail page, so in-flight jobs still show an elapsed duration.
               const isActive = ["working", "ci_running", "retrying"].includes(row.status);
@@ -98,7 +97,7 @@ export default async function JobsIndexPage({
                       {durationSec !== null ? formatDuration(durationSec) : "—"}
                     </span>
                     <span className="hidden text-right text-xs text-muted-foreground sm:block">
-                      {relativeTime(startedAt)}
+                      {row.startedAt ? relativeTime(row.startedAt) : "—"}
                     </span>
                   </Link>
                 </li>

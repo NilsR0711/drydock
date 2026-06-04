@@ -3,6 +3,22 @@ import { BudgetMeter } from "@/components/ui/budget-gauge";
 import { Sparkline } from "@/components/ui/sparkline";
 import { formatUsd } from "@/lib/utils";
 
+/** The last 7 calendar days (local time), oldest → newest, as YYYY-MM-DD. */
+function last7Days(): string[] {
+  const out: string[] = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+    out.push(
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+        d.getDate(),
+      ).padStart(2, "0")}`,
+    );
+  }
+  return out;
+}
+
 export function RepoCostPanel({
   todayUsd,
   limitUsd,
@@ -12,10 +28,13 @@ export function RepoCostPanel({
   limitUsd: number;
   daily: { day: string; costUsd: number }[];
 }) {
-  const week = daily.slice(0, 7);
+  // Zero-fill 7 calendar days so quiet days appear and the window matches the
+  // "Last 7 days" label (oldest → newest; the list renders newest first).
+  const byDay = new Map(daily.map((d) => [d.day, d.costUsd]));
+  const days = last7Days();
+  const week = [...days].reverse().map((day) => ({ day, costUsd: byDay.get(day) ?? 0 }));
   const weekTotal = week.reduce((a, d) => a + d.costUsd, 0);
-  // Oldest → newest so the sparkline trends left-to-right toward today.
-  const series = [...week].reverse().map((d) => d.costUsd);
+  const series = days.map((day) => byDay.get(day) ?? 0);
 
   return (
     <div className="flex flex-col gap-4">
@@ -25,7 +44,7 @@ export function RepoCostPanel({
 
       <BudgetMeter value={todayUsd} limit={limitUsd} />
 
-      {daily.length === 0 ? (
+      {daily.length === 0 && todayUsd === 0 ? (
         <p className="text-sm text-muted-foreground">No spend recorded yet.</p>
       ) : (
         <>

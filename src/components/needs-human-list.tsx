@@ -33,28 +33,39 @@ export interface NeedsHumanRow {
 
 export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
   const router = useRouter();
-  const [pending, start] = useTransition();
+  const [, start] = useTransition();
+  // Disable only the acted-on row, not every row, while its action is in flight.
+  const [busyId, setBusyId] = useState<number | null>(null);
   const [confirmAbort, setConfirmAbort] = useState<NeedsHumanRow | null>(null);
   const { success, error } = useToast();
 
   function requeue(job: NeedsHumanRow) {
+    setBusyId(job.id);
     start(async () => {
       try {
         await requeueJobAction(job.id);
         success("Job requeued", `${job.repoName} #${job.issueNumber}`);
+        // The job leaves the needs-human set — re-query so the list reflects it.
+        router.refresh();
       } catch (e) {
         error("Failed to requeue job", e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusyId(null);
       }
     });
   }
 
   function abort(job: NeedsHumanRow) {
+    setBusyId(job.id);
     start(async () => {
       try {
         await abortJobAction(job.id);
         success("Job aborted", `${job.repoName} #${job.issueNumber}`);
+        router.refresh();
       } catch (e) {
         error("Failed to abort job", e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusyId(null);
       }
     });
   }
@@ -122,7 +133,7 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={pending}
+                    disabled={busyId === job.id}
                     onClick={() => requeue(job)}
                   >
                     <RotateCcw className="h-3.5 w-3.5" /> Requeue
@@ -130,7 +141,7 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
                   <Button
                     variant="destructive"
                     size="sm"
-                    disabled={pending}
+                    disabled={busyId === job.id}
                     onClick={() => setConfirmAbort(job)}
                   >
                     <Ban className="h-3.5 w-3.5" /> Abort
@@ -155,7 +166,7 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
         confirmLabel="Abort"
         variant="destructive"
         icon={Ban}
-        pending={pending}
+        pending={busyId !== null}
       />
     </div>
   );

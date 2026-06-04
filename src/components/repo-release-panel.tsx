@@ -36,7 +36,7 @@ export function RepoReleasePanel({
   const [runs, setRuns] = useState(initialRuns);
   const [preview, setPreview] = useState<ReleasePreview | null>(null);
   const [pending, start] = useTransition();
-  const { error, success } = useToast();
+  const { error, success, info } = useToast();
 
   function onPreview() {
     start(async () => {
@@ -54,7 +54,18 @@ export function RepoReleasePanel({
         const updated = await publishReleaseAction(repoId);
         setRuns(updated);
         setPreview(null);
-        success("Release published", "A release run was cut from the latest changes.");
+        // The action resolves even when the run is skipped or errors — reflect the
+        // actual outcome (newest run first) instead of always claiming success.
+        const latest = updated[0];
+        if (latest?.status === "published") {
+          success("Release published", latest.tag ? `Cut ${latest.tag}.` : "A release was cut.");
+        } else if (latest?.status === "skipped") {
+          info("No release cut", "No release was recommended for the latest changes.");
+        } else if (latest?.status === "error") {
+          error("Publish failed", latest.errorMessage ?? "The release run did not complete.");
+        } else {
+          info("Release started", `Run is ${latest?.status ?? "in progress"}.`);
+        }
       } catch (e) {
         error("Publish failed", e instanceof Error ? e.message : String(e));
       }
