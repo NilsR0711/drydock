@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { useToast } from "@/components/ui/toast";
 import type { CostExportFormat, CostReport } from "@/lib/db/cost-export";
 
 const REPORTS: { value: CostReport; label: string }[] = [
@@ -38,8 +39,15 @@ export function CostExportControls({ repos }: { repos: { id: number; name: strin
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [repoId, setRepoId] = useState("");
+  const { error } = useToast();
 
   const download = (format: CostExportFormat) => {
+    // YYYY-MM-DD strings compare lexically — reject an inverted range up front so
+    // the operator isn't handed a silently-empty report.
+    if (from && to && from > to) {
+      error("Invalid date range", "The “From” date must be on or before the “To” date.");
+      return;
+    }
     const href = buildHref({ report, format, from, to, repoId });
     const a = document.createElement("a");
     a.href = href;

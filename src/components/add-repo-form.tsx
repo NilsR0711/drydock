@@ -1,11 +1,14 @@
 "use client";
 
+import { FolderGit2, Plus } from "lucide-react";
 import { useState, useTransition } from "react";
 import { DirectoryPicker } from "@/components/directory-picker";
 import { ForgeSelect } from "@/components/forge-select";
 import { ModelSelect } from "@/components/model-select";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import type { ForgeId } from "@/lib/forge/types";
 import { DEFAULT_MODEL } from "@/lib/models";
 import { addRepoAction } from "@/lib/repos/actions";
@@ -26,75 +29,101 @@ export function AddRepoForm({ onDone }: { onDone: () => void }) {
   const [picking, setPicking] = useState(false);
 
   return (
-    <Card>
-      <CardContent className="pt-4">
-        <form
-          className="grid gap-2 sm:grid-cols-2"
-          action={() => {
-            start(async () => {
-              await addRepoAction({
-                path,
-                name,
-                defaultModel: model,
-                platform,
-                apiBaseUrl: platform === "gitlab" ? apiBaseUrl.trim() || null : null,
-                apiToken: platform === "gitlab" ? apiToken.trim() || null : null,
-              });
-              onDone();
+    <Card className="dd-fade-up p-5">
+      <form
+        className="grid gap-4 sm:grid-cols-2"
+        action={() => {
+          start(async () => {
+            await addRepoAction({
+              path,
+              name,
+              defaultModel: model,
+              platform,
+              apiBaseUrl: platform === "gitlab" ? apiBaseUrl.trim() || null : null,
+              apiToken: platform === "gitlab" ? apiToken.trim() || null : null,
             });
-          }}
-        >
-          <input
+            onDone();
+          });
+        }}
+      >
+        <Field label="Name" htmlFor="repo-name">
+          <Input
+            id="repo-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Name"
+            placeholder="my-project"
             required
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
           />
+        </Field>
+
+        <Field
+          label="Local path"
+          htmlFor="repo-path"
+          hint="Drydock watches this working copy and runs the agent in an isolated worktree."
+        >
           <div className="flex gap-2">
-            <input
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              placeholder="/abs/path/to/repo"
-              required
-              className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-            />
+            <div className="relative flex-1">
+              <FolderGit2 className="pointer-events-none absolute left-3 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="repo-path"
+                value={path}
+                onChange={(e) => setPath(e.target.value)}
+                placeholder="/abs/path/to/repo"
+                required
+                className="pl-9 font-mono"
+              />
+            </div>
             <Button type="button" variant="outline" size="sm" onClick={() => setPicking(true)}>
               Browse…
             </Button>
           </div>
-          {/* biome-ignore lint/a11y/noLabelWithoutControl: the control is the ModelSelect child */}
-          <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <span className="text-muted-foreground">Model:</span>
-            <ModelSelect value={model} onChange={setModel} />
-          </label>
-          {/* biome-ignore lint/a11y/noLabelWithoutControl: the control is the ForgeSelect child */}
-          <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <span className="text-muted-foreground">Platform:</span>
-            <ForgeSelect value={platform} onChange={setPlatform} />
-          </label>
-          {platform === "gitlab" && (
-            <>
-              <input
+        </Field>
+
+        <Field label="Default model" htmlFor="repo-model">
+          <ModelSelect id="repo-model" value={model} onChange={setModel} />
+        </Field>
+
+        <Field label="Forge" htmlFor="repo-platform">
+          <ForgeSelect id="repo-platform" value={platform} onChange={setPlatform} />
+        </Field>
+
+        {platform === "gitlab" && (
+          <>
+            <Field label="API base URL" htmlFor="repo-api-url" className="sm:col-span-2">
+              <Input
+                id="repo-api-url"
                 value={apiBaseUrl}
                 onChange={(e) => setApiBaseUrl(e.target.value)}
-                placeholder="API base URL (e.g. https://gitlab.com)"
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:col-span-2"
+                placeholder="https://gitlab.com"
               />
-              <input
+            </Field>
+            <Field
+              label="Access token"
+              htmlFor="repo-api-token"
+              hint="Stored locally on this machine."
+              className="sm:col-span-2"
+            >
+              <Input
+                id="repo-api-token"
                 value={apiToken}
                 onChange={(e) => setApiToken(e.target.value)}
                 type="password"
-                placeholder="Access token (stored locally)"
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:col-span-2"
+                placeholder="Access token"
               />
-            </>
-          )}
-          <Button type="submit" disabled={pending || !path} className="sm:col-span-2">
-            Save
+            </Field>
+          </>
+        )}
+
+        <div className="flex items-center gap-2 sm:col-span-2">
+          <Button type="submit" disabled={pending || !path}>
+            <Plus className="h-[15px] w-[15px]" /> Add repository
           </Button>
-        </form>
-      </CardContent>
+          <Button type="button" variant="ghost" onClick={onDone}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+
       {picking && (
         <DirectoryPicker
           onClose={() => setPicking(false)}

@@ -2,6 +2,7 @@
 
 import { ArrowUpCircle, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import type { InstallKind } from "@/lib/version/current";
 import type { UpdateStatus } from "@/lib/version/update-check";
 import { shouldShowUpdateNotice } from "@/lib/version/update-notice";
@@ -47,14 +48,14 @@ export function UpdateBanner({
   };
 
   return (
-    <div className="flex items-center gap-1.5 rounded-md border border-success-border bg-success-muted px-2 py-1 text-xs font-medium text-success-foreground">
+    <Badge tone="success" className="h-8 gap-1.5 px-2.5">
       <ArrowUpCircle className="h-3.5 w-3.5 shrink-0" />
       {status.releaseUrl ? (
         <a
           href={status.releaseUrl}
           target="_blank"
           rel="noreferrer"
-          className="hover:underline"
+          className="rounded-sm hover:underline focus-ring"
           title={
             installKind === "global"
               ? "Run `drydock update` to upgrade"
@@ -73,10 +74,10 @@ export function UpdateBanner({
         type="button"
         onClick={dismiss}
         aria-label="Dismiss update notice"
-        className="rounded p-0.5 hover-elevate"
+        className="-mr-1 rounded p-0.5 hover-elevate focus-ring"
       >
         <X className="h-3 w-3" />
       </button>
-    </div>
+    </Badge>
   );
 }

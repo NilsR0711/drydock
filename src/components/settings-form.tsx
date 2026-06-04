@@ -1,28 +1,36 @@
 "use client";
 
+import { Archive, Bell, OctagonAlert, Send, Terminal, Zap } from "lucide-react";
 import { useState, useTransition } from "react";
 import { AgentSelect } from "@/components/agent-select";
 import { ModelSelect } from "@/components/model-select";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
 import type { AgentId } from "@/lib/agents/types";
 import { NOTIFICATION_EVENT_LABELS, NOTIFICATION_EVENTS } from "@/lib/notify/events";
-import { saveSettingsAction, sendTestNotificationAction } from "@/lib/settings/actions";
+import {
+  saveSettingsAction,
+  sendTestNotificationAction,
+  togglePauseAction,
+} from "@/lib/settings/actions";
 import type { Settings } from "@/lib/settings/service";
-
-const INPUT_CLASS =
-  "h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background";
 
 export function SettingsForm({ initial }: { initial: Settings }) {
   const [s, setS] = useState(initial);
   const [pending, start] = useTransition();
   const [testing, startTest] = useTransition();
-  const [saved, setSaved] = useState(false);
-  const { success, error } = useToast();
+  const [pausing, startPause] = useTransition();
+  const { success, error, info } = useToast();
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => {
     setS((prev) => ({ ...prev, [k]: v }));
-    setSaved(false);
   };
 
   const toggleEvent = (event: Settings["notifyEvents"][number], on: boolean) =>
@@ -31,13 +39,39 @@ export function SettingsForm({ initial }: { initial: Settings }) {
       on ? [...s.notifyEvents, event] : s.notifyEvents.filter((e) => e !== event),
     );
 
+  // The kill-switch toggles automation immediately via the dedicated action so
+  // the operator gets instant feedback without committing other in-progress
+  // edits on this long form. Keeps the on-screen state in sync so a later Save
+  // persists a consistent value.
+  const togglePause = (paused: boolean) => {
+    set("paused", paused);
+    startPause(async () => {
+      try {
+        await togglePauseAction(paused);
+        info(paused ? "Automation suspended" : "Automation resumed");
+      } catch (e) {
+        set("paused", !paused);
+        error("Failed to toggle automation", e instanceof Error ? e.message : String(e));
+      }
+    });
+  };
+
+  const save = () =>
+    start(async () => {
+      try {
+        await saveSettingsAction(s);
+        success("Settings saved");
+      } catch (e) {
+        error("Failed to save settings", e instanceof Error ? e.message : String(e));
+      }
+    });
+
   const sendTest = () =>
     startTest(async () => {
       try {
         // Persist the on-screen config first so the test reflects what the user
         // sees, then probe every configured channel.
         await saveSettingsAction(s);
-        setSaved(true);
         const results = await sendTestNotificationAction();
         if (results.length === 0) {
           error("No channels configured", "Save a channel before sending a test.");
@@ -58,250 +92,310 @@ export function SettingsForm({ initial }: { initial: Settings }) {
     });
 
   return (
-    <form
-      className="max-w-md space-y-3"
-      action={() =>
-        start(async () => {
-          try {
-            await saveSettingsAction(s);
-            setSaved(true);
-            success("Settings saved");
-          } catch (e) {
-            error("Failed to save settings", e instanceof Error ? e.message : String(e));
-          }
-        })
-      }
-    >
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={s.paused}
-          onChange={(e) => set("paused", e.target.checked)}
-        />
-        Global pause
-      </label>
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={s.releaseManagementEnabled}
-          onChange={(e) => set("releaseManagementEnabled", e.target.checked)}
-        />
-        Enable release management (kill-switch)
-      </label>
-      <Field label="Daily cost limit (USD)">
-        <input
-          type="number"
-          step="0.5"
-          value={s.dailyCostLimitUsd}
-          onChange={(e) => set("dailyCostLimitUsd", Number(e.target.value))}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-      </Field>
-      <Field label="Poll interval (sec)">
-        <input
-          type="number"
-          value={s.pollIntervalSec}
-          onChange={(e) => set("pollIntervalSec", Number(e.target.value))}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-      </Field>
-      <Field label="Max turns">
-        <input
-          type="number"
-          value={s.maxTurns}
-          onChange={(e) => set("maxTurns", Number(e.target.value))}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-      </Field>
-      <Field label="Max job minutes">
-        <input
-          type="number"
-          value={s.maxJobMinutes}
-          onChange={(e) => set("maxJobMinutes", Number(e.target.value))}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-      </Field>
-      <Field label="Max CI wait minutes">
-        <input
-          type="number"
-          value={s.maxCiWaitMinutes}
-          onChange={(e) => set("maxCiWaitMinutes", Number(e.target.value))}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-      </Field>
-      <Field label="Max job cost (USD, 0 = off)">
-        <input
-          type="number"
-          min="0"
-          step="0.01"
-          value={s.maxJobCostUsd}
-          onChange={(e) => set("maxJobCostUsd", Number(e.target.value))}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-      </Field>
-      <Field label="Default agent">
-        <AgentSelect value={s.defaultAgent} onChange={(v: AgentId) => set("defaultAgent", v)} />
-      </Field>
-      <Field label="Default model">
-        <ModelSelect
-          value={s.defaultModel}
-          onChange={(v) => set("defaultModel", v)}
-          agent={s.defaultAgent as AgentId}
-        />
-      </Field>
-      <Field label="claude CLI path">
-        <input
-          value={s.claudePath}
-          onChange={(e) => set("claudePath", e.target.value)}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-      </Field>
-      <Field label="codex CLI path">
-        <input
-          value={s.codexPath}
-          onChange={(e) => set("codexPath", e.target.value)}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-      </Field>
-      <Field label="gh CLI path">
-        <input
-          value={s.ghPath}
-          onChange={(e) => set("ghPath", e.target.value)}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-      </Field>
-      <Field label="Max parallel jobs">
-        <input
-          type="number"
-          value={s.maxParallelJobs}
-          onChange={(e) => set("maxParallelJobs", Number(e.target.value))}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-      </Field>
-      <Field label="Log retention (days)">
-        <input
-          type="number"
-          value={s.retentionDays}
-          onChange={(e) => set("retentionDays", Number(e.target.value))}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-      </Field>
-      <Field label="Telegram bot token">
-        <input
-          value={s.telegramBotToken}
-          onChange={(e) => set("telegramBotToken", e.target.value)}
-          placeholder="leave empty to disable notifications"
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-      </Field>
-      <Field label="Telegram chat ID">
-        <input
-          value={s.telegramChatId}
-          onChange={(e) => set("telegramChatId", e.target.value)}
-          className={INPUT_CLASS}
-        />
-      </Field>
+    <div className="flex flex-col gap-4">
+      {s.paused && (
+        <Alert tone="warning" icon={OctagonAlert} title="Global kill-switch is on">
+          All automation is suspended across every repository. Manual runs still work.
+        </Alert>
+      )}
 
-      <fieldset className="space-y-3 border-t border-border pt-3">
-        <legend className="text-sm font-medium text-muted-foreground">Slack</legend>
-        <Field label="Incoming webhook URL">
-          <input
-            value={s.slackWebhookUrl}
-            onChange={(e) => set("slackWebhookUrl", e.target.value)}
-            placeholder="leave empty to disable Slack"
-            className={INPUT_CLASS}
-          />
-        </Field>
-      </fieldset>
+      {/* Automation & limits */}
+      <Card pad="lg">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Zap className="h-4 w-4" />
+          </span>
+          <div>
+            <h3 className="text-base font-semibold">Automation &amp; limits</h3>
+            <p className="text-sm text-muted-foreground">
+              One switch to halt everything, plus how aggressively the dock works.
+            </p>
+          </div>
+        </div>
 
-      <fieldset className="space-y-3 border-t border-border pt-3">
-        <legend className="text-sm font-medium text-muted-foreground">Email (SMTP)</legend>
-        <Field label="SMTP host">
-          <input
-            value={s.smtpHost}
-            onChange={(e) => set("smtpHost", e.target.value)}
-            placeholder="leave empty to disable email"
-            className={INPUT_CLASS}
-          />
-        </Field>
-        <Field label="SMTP port">
-          <input
-            type="number"
-            value={s.smtpPort}
-            onChange={(e) => set("smtpPort", Number(e.target.value))}
-            className={INPUT_CLASS}
-          />
-        </Field>
-        <Field label="SMTP username">
-          <input
-            value={s.smtpUser}
-            onChange={(e) => set("smtpUser", e.target.value)}
-            autoComplete="off"
-            className={INPUT_CLASS}
-          />
-        </Field>
-        <Field label="SMTP password">
-          <input
-            type="password"
-            value={s.smtpPass}
-            onChange={(e) => set("smtpPass", e.target.value)}
-            autoComplete="new-password"
-            className={INPUT_CLASS}
-          />
-        </Field>
-        <Field label="From address">
-          <input
-            type="email"
-            value={s.emailFrom}
-            onChange={(e) => set("emailFrom", e.target.value)}
-            placeholder="drydock@example.com"
-            className={INPUT_CLASS}
-          />
-        </Field>
-        <Field label="To address">
-          <input
-            type="email"
-            value={s.emailTo}
-            onChange={(e) => set("emailTo", e.target.value)}
-            placeholder="you@example.com"
-            className={INPUT_CLASS}
-          />
-        </Field>
-      </fieldset>
-
-      <fieldset className="space-y-2 border-t border-border pt-3">
-        <legend className="text-sm font-medium text-muted-foreground">Notify me about</legend>
-        {NOTIFICATION_EVENTS.map((event) => (
-          <label key={event} className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={s.notifyEvents.includes(event)}
-              onChange={(e) => toggleEvent(event, e.target.checked)}
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">Global kill-switch</p>
+              <p className="text-xs text-muted-foreground">
+                Immediately pause all triage, processing, healing and releases.
+              </p>
+            </div>
+            <Switch
+              checked={s.paused}
+              disabled={pausing}
+              onChange={togglePause}
+              aria-label="Global kill-switch"
             />
-            {NOTIFICATION_EVENT_LABELS[event]}
-          </label>
-        ))}
-      </fieldset>
+          </div>
 
-      <div className="flex items-center gap-2 border-t border-border pt-3">
-        <Button type="submit" disabled={pending}>
-          Save settings
-        </Button>
-        <Button type="button" variant="outline" onClick={sendTest} disabled={testing}>
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">Release management</p>
+              <p className="text-xs text-muted-foreground">
+                Let the dock tag and publish releases automatically.
+              </p>
+            </div>
+            <Switch
+              checked={s.releaseManagementEnabled}
+              onChange={(v) => set("releaseManagementEnabled", v)}
+              aria-label="Release management"
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label="Poll interval (s)" hint="How often to check for new issues.">
+              <Input
+                type="number"
+                value={s.pollIntervalSec}
+                onChange={(e) => set("pollIntervalSec", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Concurrent jobs" hint="Max runs in flight at once.">
+              <Input
+                type="number"
+                value={s.maxParallelJobs}
+                onChange={(e) => set("maxParallelJobs", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Daily cost limit (USD)" hint="Stops new runs once reached today.">
+              <Input
+                type="number"
+                step="0.5"
+                value={s.dailyCostLimitUsd}
+                onChange={(e) => set("dailyCostLimitUsd", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Max turns" hint="Hard cap on agent turns per job.">
+              <Input
+                type="number"
+                value={s.maxTurns}
+                onChange={(e) => set("maxTurns", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Max job minutes" hint="Abort a run after this wall-clock time.">
+              <Input
+                type="number"
+                value={s.maxJobMinutes}
+                onChange={(e) => set("maxJobMinutes", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Max CI wait (min)" hint="How long to wait for CI before giving up.">
+              <Input
+                type="number"
+                value={s.maxCiWaitMinutes}
+                onChange={(e) => set("maxCiWaitMinutes", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Max job cost (USD)" hint="0 disables the per-job cost cap.">
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={s.maxJobCostUsd}
+                onChange={(e) => set("maxJobCostUsd", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Default agent" hint="Used when a repo has none set.">
+              <AgentSelect
+                value={s.defaultAgent}
+                onChange={(v: AgentId) => set("defaultAgent", v)}
+              />
+            </Field>
+            <Field label="Default model" hint="Used when a repo has none set.">
+              <ModelSelect
+                value={s.defaultModel}
+                onChange={(v) => set("defaultModel", v)}
+                agent={s.defaultAgent as AgentId}
+              />
+            </Field>
+          </div>
+        </div>
+      </Card>
+
+      {/* Execution paths */}
+      <Card pad="lg">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-muted-foreground">
+            <Terminal className="h-4 w-4" />
+          </span>
+          <div>
+            <h3 className="text-base font-semibold">Execution paths</h3>
+            <p className="text-sm text-muted-foreground">
+              Where to find the CLIs the dock shells out to.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field label="claude CLI path">
+            <Input
+              value={s.claudePath}
+              onChange={(e) => set("claudePath", e.target.value)}
+              spellCheck={false}
+            />
+          </Field>
+          <Field label="codex CLI path">
+            <Input
+              value={s.codexPath}
+              onChange={(e) => set("codexPath", e.target.value)}
+              spellCheck={false}
+            />
+          </Field>
+          <Field label="gh CLI path">
+            <Input
+              value={s.ghPath}
+              onChange={(e) => set("ghPath", e.target.value)}
+              spellCheck={false}
+            />
+          </Field>
+        </div>
+      </Card>
+
+      {/* Notification channels */}
+      <Card pad="lg">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Bell className="h-4 w-4" />
+          </span>
+          <div>
+            <h3 className="text-base font-semibold">Notification channels</h3>
+            <p className="text-sm text-muted-foreground">
+              Configure one or more channels, then send yourself a test.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Telegram bot token" hint="Leave empty to disable Telegram.">
+              <Input
+                value={s.telegramBotToken}
+                onChange={(e) => set("telegramBotToken", e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </Field>
+            <Field label="Telegram chat ID">
+              <Input
+                value={s.telegramChatId}
+                onChange={(e) => set("telegramChatId", e.target.value)}
+                spellCheck={false}
+              />
+            </Field>
+          </div>
+
+          <div className="grid gap-4">
+            <Field label="Slack incoming webhook URL" hint="Leave empty to disable Slack.">
+              <Input
+                value={s.slackWebhookUrl}
+                onChange={(e) => set("slackWebhookUrl", e.target.value)}
+                spellCheck={false}
+              />
+            </Field>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="SMTP host" hint="Leave empty to disable email.">
+              <Input value={s.smtpHost} onChange={(e) => set("smtpHost", e.target.value)} />
+            </Field>
+            <Field label="SMTP port">
+              <Input
+                type="number"
+                value={s.smtpPort}
+                onChange={(e) => set("smtpPort", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="SMTP username">
+              <Input
+                value={s.smtpUser}
+                onChange={(e) => set("smtpUser", e.target.value)}
+                autoComplete="off"
+              />
+            </Field>
+            <Field label="SMTP password">
+              <Input
+                type="password"
+                value={s.smtpPass}
+                onChange={(e) => set("smtpPass", e.target.value)}
+                autoComplete="new-password"
+              />
+            </Field>
+            <Field label="From address">
+              <Input
+                type="email"
+                value={s.emailFrom}
+                onChange={(e) => set("emailFrom", e.target.value)}
+                placeholder="drydock@example.com"
+              />
+            </Field>
+            <Field label="To address">
+              <Input
+                type="email"
+                value={s.emailTo}
+                onChange={(e) => set("emailTo", e.target.value)}
+                placeholder="you@example.com"
+              />
+            </Field>
+          </div>
+
+          <Field label="Notify me about">
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              {NOTIFICATION_EVENTS.map((event) => (
+                <label
+                  key={event}
+                  htmlFor={`notify-${event}`}
+                  className="flex cursor-pointer items-center gap-2.5 text-sm text-foreground"
+                >
+                  <Checkbox
+                    id={`notify-${event}`}
+                    checked={s.notifyEvents.includes(event)}
+                    onChange={(on) => toggleEvent(event, on)}
+                    aria-label={NOTIFICATION_EVENT_LABELS[event]}
+                  />
+                  {NOTIFICATION_EVENT_LABELS[event]}
+                </label>
+              ))}
+            </div>
+          </Field>
+        </div>
+      </Card>
+
+      {/* Retention */}
+      <Card pad="lg">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-muted-foreground">
+            <Archive className="h-4 w-4" />
+          </span>
+          <div>
+            <h3 className="text-base font-semibold">Retention</h3>
+            <p className="text-sm text-muted-foreground">
+              How long to keep job logs before they are pruned.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field label="Log retention (days)" hint="Older job logs are deleted automatically.">
+            <Input
+              type="number"
+              value={s.retentionDays}
+              onChange={(e) => set("retentionDays", Number(e.target.value))}
+            />
+          </Field>
+        </div>
+      </Card>
+
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button variant="outline" onClick={sendTest} disabled={testing}>
+          {testing ? <Spinner size={16} /> : <Send className="h-4 w-4" />}
           {testing ? "Sending…" : "Send test notification"}
         </Button>
-        {saved && <span className="text-xs text-success-foreground">Saved</span>}
+        <Button onClick={save} disabled={pending}>
+          {pending && <Spinner size={16} />}
+          {pending ? "Saving…" : "Save changes"}
+        </Button>
       </div>
-    </form>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    // biome-ignore lint/a11y/noLabelWithoutControl: the form control is provided via children
-    <label className="flex flex-col gap-1 text-sm">
-      <span>{label}</span>
-      {children}
-    </label>
+    </div>
   );
 }

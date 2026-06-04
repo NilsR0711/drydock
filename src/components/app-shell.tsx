@@ -1,6 +1,18 @@
 "use client";
 
-import { Anchor } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+  Anchor,
+  BookText,
+  ChartNoAxesColumn,
+  DollarSign,
+  FileText,
+  LayoutDashboard,
+  ListChecks,
+  Pause,
+  Settings,
+  TriangleAlert,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { EmergencyStopButton } from "@/components/emergency-stop-button";
@@ -11,15 +23,15 @@ import { cn } from "@/lib/utils";
 import type { InstallKind } from "@/lib/version/current";
 import type { UpdateStatus } from "@/lib/version/update-check";
 
-const NAV: { href: string; label: string }[] = [
-  { href: "/", label: "Dashboard" },
-  { href: "/needs-human", label: "Needs human" },
-  { href: "/jobs", label: "Jobs" },
-  { href: "/analytics", label: "Analytics" },
-  { href: "/prompts", label: "Prompts" },
-  { href: "/adrs", label: "ADRs" },
-  { href: "/costs", label: "Costs" },
-  { href: "/settings", label: "Settings" },
+const NAV: { href: string; label: string; icon: LucideIcon }[] = [
+  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/needs-human", label: "Needs human", icon: TriangleAlert },
+  { href: "/jobs", label: "Jobs", icon: ListChecks },
+  { href: "/analytics", label: "Analytics", icon: ChartNoAxesColumn },
+  { href: "/prompts", label: "Prompts", icon: FileText },
+  { href: "/adrs", label: "ADRs", icon: BookText },
+  { href: "/costs", label: "Costs", icon: DollarSign },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function isActive(pathname: string, href: string): boolean {
@@ -50,52 +62,62 @@ export function AppShell({
       >
         Skip to main content
       </a>
-      <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur">
-        <div className="mx-auto flex h-12 max-w-7xl items-center gap-1 px-4">
-          <Link href="/" className="mr-3 flex items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <Anchor className="h-3.5 w-3.5" />
+      <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-4">
+          <Link href="/" className="mr-2 flex shrink-0 items-center gap-2 rounded-md focus-ring">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+              <Anchor className="h-4 w-4" />
             </span>
-            <span className="text-sm font-semibold tracking-tight">Drydock</span>
+            <span className="text-base font-bold tracking-tight">Drydock</span>
           </Link>
-          <nav className="flex items-center gap-0.5">
+          <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-none">
             {NAV.map((item) => {
               const active = isActive(pathname, item.href);
+              const Icon = item.icon;
+              const badge =
+                item.href === "/needs-human" ? needsHuman : item.href === "/adrs" ? adrPending : 0;
               return (
                 <Link
                   key={item.href}
                   href={item.href}
+                  aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors hover-elevate",
-                    active
-                      ? "bg-accent font-medium text-accent-foreground"
-                      : "text-muted-foreground",
+                    "relative flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors hover-elevate",
+                    active ? "font-medium text-foreground" : "text-muted-foreground",
                   )}
                 >
+                  <Icon className={cn("h-[15px] w-[15px]", active && "text-primary")} />
                   {item.label}
-                  {item.href === "/adrs" && adrPending > 0 && (
-                    <span className="rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-destructive-foreground">
-                      {adrPending}
+                  {badge > 0 && (
+                    <span className="ml-0.5 rounded-full bg-destructive px-1.5 text-[10px] font-semibold leading-4 text-destructive-foreground tnum">
+                      {badge}
                     </span>
                   )}
-                  {item.href === "/needs-human" && needsHuman > 0 && (
-                    <span className="rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-destructive-foreground">
-                      {needsHuman}
-                    </span>
+                  {active && (
+                    <span className="absolute inset-x-2 -bottom-[7px] h-0.5 rounded-full bg-primary" />
                   )}
                 </Link>
               );
             })}
           </nav>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
             {updateStatus && <UpdateBanner status={updateStatus} installKind={installKind} />}
             <PauseToggle paused={paused} />
             <EmergencyStopButton />
+            <div className="mx-1 h-5 w-px bg-border" />
             <ThemeToggle />
           </div>
         </div>
+        {paused && (
+          <div className="border-t border-warning-border bg-warning-muted">
+            <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-1.5 text-xs text-warning-foreground">
+              <Pause className="h-[13px] w-[13px]" /> Automation is paused globally. No new jobs
+              will start.
+            </div>
+          </div>
+        )}
       </header>
-      <main id="main" className="mx-auto max-w-7xl px-4 py-6">
+      <main id="main" className="mx-auto max-w-7xl px-4 py-6 sm:py-8">
         {children}
       </main>
     </div>

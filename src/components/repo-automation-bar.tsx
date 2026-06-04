@@ -1,10 +1,28 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import {
+  GitPullRequestArrow,
+  HeartPulse,
+  type LucideIcon,
+  MessageSquare,
+  ShieldCheck,
+  Tag,
+  Wand2,
+} from "lucide-react";
+import { type ReactNode, useState, useTransition } from "react";
+import { Alert } from "@/components/ui/alert";
+import type { Tone } from "@/components/ui/badge";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { HelpTip } from "@/components/ui/tooltip";
 import type { Repo } from "@/lib/db/schema";
 import { updateRepoAction } from "@/lib/repos/actions";
 import { AGENT_INSTRUCTIONS_MAX_CHARS } from "@/lib/repos/agent-instructions";
+import { cn } from "@/lib/utils";
 
 function parseList(raw: string): string[] {
   try {
@@ -27,10 +45,109 @@ function splitInput(value: string): string[] {
   ];
 }
 
+const FIELDSET_CHIP: Record<Tone, string> = {
+  neutral: "bg-secondary text-muted-foreground",
+  primary: "bg-primary/10 text-primary",
+  success: "bg-success-muted text-success",
+  warning: "bg-warning-muted text-warning",
+  destructive: "bg-destructive/10 text-destructive",
+};
+
+function Fieldset({
+  icon: Icon,
+  legend,
+  description,
+  tone = "neutral",
+  children,
+}: {
+  icon: LucideIcon;
+  legend: string;
+  description?: string;
+  tone?: Tone;
+  children: ReactNode;
+}) {
+  return (
+    <fieldset className="rounded-lg border border-border p-4">
+      <legend className="flex items-center gap-2 px-1">
+        <span
+          className={cn("flex h-6 w-6 items-center justify-center rounded-md", FIELDSET_CHIP[tone])}
+        >
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+        <span className="text-sm font-semibold">{legend}</span>
+      </legend>
+      {description && <p className="mb-3 mt-1 text-xs text-muted-foreground">{description}</p>}
+      <div className="flex flex-col gap-3">{children}</div>
+    </fieldset>
+  );
+}
+
+function AutoToggle({
+  label,
+  help,
+  checked,
+  onChange,
+  children,
+}: {
+  label: string;
+  help?: ReactNode;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  children?: ReactNode;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-2.5">
+        <Switch checked={checked} onChange={onChange} aria-label={label} />
+        <span className="text-sm">{label}</span>
+        {help && <HelpTip content={help} />}
+      </div>
+      {checked && children && (
+        <div className="dd-fade-up mt-3 grid gap-3 border-l-2 border-border pl-4 sm:grid-cols-2">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TagField({
+  label,
+  value,
+  onChange,
+  onBlur,
+  help,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  onBlur: () => void;
+  help?: ReactNode;
+}) {
+  return (
+    <Field
+      label={
+        <span className="inline-flex items-center gap-1.5">
+          {label}
+          {help && <HelpTip content={help} />}
+        </span>
+      }
+    >
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+        placeholder="comma-separated"
+        className="h-8 font-mono text-xs"
+      />
+    </Field>
+  );
+}
+
 /**
- * Opt-in automation controls for a repo: auto-triage and auto-processing
- * toggles plus the label/author lists that gate them. Both stages consume paid
- * agent usage, so the panel is explicit about being off by default.
+ * Opt-in automation controls for a repo, grouped into labelled stages. Every
+ * stage is off by default and consumes paid agent usage; Drydock never
+ * auto-merges. List fields persist on blur; toggles/selects persist immediately.
  */
 export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoTriage, setAutoTriage] = useState(repo.autoTriageEnabled);
@@ -70,265 +187,264 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
     });
   }
 
-  const labelField = (
-    id: string,
-    label: string,
-    value: string,
-    setter: (v: string) => void,
-    key:
-      | "readyLabels"
-      | "blockingLabels"
-      | "autoLabelWhitelist"
-      | "priorityAuthors"
-      | "trustedReviewers"
-      | "ignoredBots",
-  ) => (
-    <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor={id}>
-      {label}
-      <input
-        id={id}
-        value={value}
-        onChange={(e) => setter(e.target.value)}
-        onBlur={() => persist({ [key]: splitInput(value) })}
-        placeholder="comma-separated"
-        className="rounded border border-card-border bg-background px-2 py-1 text-sm text-foreground"
-      />
-    </label>
-  );
-
   return (
-    <div className="space-y-3 rounded-xl border border-card-border bg-card p-3 text-sm">
-      <div className="flex flex-wrap items-center gap-4">
-        <span className="text-sm font-semibold">Automation</span>
-        <label className="flex items-center gap-1.5 text-muted-foreground">
-          <input
-            type="checkbox"
+    <div className="flex flex-col gap-4">
+      <Alert tone="info" icon={ShieldCheck} title="Opt-in & bounded">
+        Every stage is off by default and consumes paid agent usage. Drydock never auto-merges — a
+        human always reviews the PR.
+      </Alert>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Fieldset
+          icon={Wand2}
+          legend="Triage"
+          tone="primary"
+          description="Classify and label brand-new issues."
+        >
+          <AutoToggle
+            label="Auto-triage new issues"
             checked={autoTriage}
-            onChange={(e) => {
-              setAutoTriage(e.target.checked);
-              persist({ autoTriageEnabled: e.target.checked });
+            onChange={(v) => {
+              setAutoTriage(v);
+              persist({ autoTriageEnabled: v });
             }}
-          />
-          Auto-triage new issues
-        </label>
-        <label className="flex items-center gap-1.5 text-muted-foreground">
-          <input
-            type="checkbox"
+            help="Reads each new issue and applies whitelisted labels. Never processes — only classifies."
+          >
+            <TagField
+              label="Auto-label whitelist"
+              value={whitelist}
+              onChange={setWhitelist}
+              onBlur={() => persist({ autoLabelWhitelist: splitInput(whitelist) })}
+              help="Triage may only apply labels from this list."
+            />
+            <Field
+              label={
+                <span className="inline-flex items-center gap-1.5">
+                  Act on authors
+                  <HelpTip content="Restrict automation to issues from trusted authors." />
+                </span>
+              }
+            >
+              <Select
+                value={minAssoc}
+                onChange={(e) => {
+                  const v = e.target.value as "approved" | "any";
+                  setMinAssoc(v);
+                  persist({ minAuthorAssociation: v });
+                }}
+                className="h-8 text-xs"
+              >
+                <option value="approved">Owners / members / collaborators</option>
+                <option value="any">Anyone (public participation)</option>
+              </Select>
+            </Field>
+          </AutoToggle>
+        </Fieldset>
+
+        <Fieldset
+          icon={GitPullRequestArrow}
+          legend="Processing"
+          tone="primary"
+          description="Turn ready issues into pull requests."
+        >
+          <AutoToggle
+            label="Auto-process ready issues"
             checked={autoProcess}
-            onChange={(e) => {
-              setAutoProcess(e.target.checked);
-              persist({ autoProcessEnabled: e.target.checked });
+            onChange={(v) => {
+              setAutoProcess(v);
+              persist({ autoProcessEnabled: v });
             }}
-          />
-          Auto-process ready issues
-        </label>
-        <label className="flex items-center gap-1.5 text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={autoHeal}
-            onChange={(e) => {
-              setAutoHeal(e.target.checked);
-              persist({ autoHealCi: e.target.checked });
-            }}
-          />
-          Auto-heal failing CI
-        </label>
-        <label className="flex items-center gap-1.5 text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={autoFeedback}
-            onChange={(e) => {
-              setAutoFeedback(e.target.checked);
-              persist({ autoReviewFeedback: e.target.checked });
-            }}
-          />
-          Address PR review feedback
-        </label>
-        <label className="flex items-center gap-1.5 text-muted-foreground">
-          <input
-            type="checkbox"
+            help="Works issues that are ready and not blocked, opening a PR for each."
+          >
+            <TagField
+              label="Ready labels"
+              value={ready}
+              onChange={setReady}
+              onBlur={() => persist({ readyLabels: splitInput(ready) })}
+              help="Only issues carrying one of these labels are eligible."
+            />
+            <TagField
+              label="Blocking labels"
+              value={blocking}
+              onChange={setBlocking}
+              onBlur={() => persist({ blockingLabels: splitInput(blocking) })}
+              help="Any of these labels holds an issue back."
+            />
+            <TagField
+              label="Priority authors"
+              value={authors}
+              onChange={setAuthors}
+              onBlur={() => persist({ priorityAuthors: splitInput(authors) })}
+              help="Issues from these authors jump the queue."
+            />
+            <Field label="Max attempts">
+              <Input
+                type="number"
+                min={1}
+                value={maxAttempts}
+                onChange={(e) => setMaxAttempts(Number(e.target.value))}
+                onBlur={() => persist({ maxAttempts })}
+                className="h-8 w-24 text-xs"
+              />
+            </Field>
+          </AutoToggle>
+          <AutoToggle
+            label="Decompose large issues"
             checked={autoDecompose}
-            onChange={(e) => {
-              setAutoDecompose(e.target.checked);
-              persist({ autoDecompose: e.target.checked });
+            onChange={(v) => {
+              setAutoDecompose(v);
+              persist({ autoDecompose: v });
             }}
+            help="Splits big issues into ordered, tracked subtasks before working them."
           />
-          Decompose large issues
-        </label>
-        <label className="flex items-center gap-1.5 text-muted-foreground">
-          <input
-            type="checkbox"
+          <AutoToggle
+            label="Verify PR satisfies issue"
             checked={verifyPr}
-            onChange={(e) => {
-              setVerifyPr(e.target.checked);
-              persist({ verifyPr: e.target.checked });
+            onChange={(v) => {
+              setVerifyPr(v);
+              persist({ verifyPr: v });
             }}
+            help="A read-only pass after the PR opens that checks the diff against the issue and flags gaps. Never changes state on failure."
           />
-          Verify PR satisfies issue
-        </label>
-        <label className="flex items-center gap-1.5 text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={autoHealDeploy}
-            onChange={(e) => {
-              setAutoHealDeploy(e.target.checked);
-              persist({ autoHealDeployments: e.target.checked });
+          <AutoToggle
+            label="Address PR review feedback"
+            checked={autoFeedback}
+            onChange={(v) => {
+              setAutoFeedback(v);
+              persist({ autoReviewFeedback: v });
             }}
-          />
-          Heal failed deployments
-        </label>
-        <label className="flex items-center gap-1.5 text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={releaseEnabled}
-            onChange={(e) => {
-              setReleaseEnabled(e.target.checked);
-              persist({ releaseEnabled: e.target.checked });
-            }}
-          />
-          Manage releases
-        </label>
-        {pending && <span className="text-xs text-muted-foreground">Saving…</span>}
-        {saved && <span className="text-xs text-success-foreground">Saved</span>}
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        Opt-in. All stages are off by default and consume paid agent usage. Triage may only apply
-        whitelisted labels; auto-processing works issues that are <em>ready</em> and not blocked;
-        auto-heal attempts bounded, verified fixes for failing CI (never external or AI-review
-        checks). PR review feedback is applied only for trusted reviewers (bots ignored) and runs
-        the mechanical iteration for you. Decomposing large issues splits them into ordered, tracked
-        subtasks (checklist/heading heuristics, with an agent fallback for prose). Verifying a PR
-        runs a read-only pass after it opens that checks whether the diff actually satisfies the
-        issue and its subtasks, flags what remains, and never changes state on failure. Deployment
-        healing monitors a merged PR's deployment and, on failure, opens a follow-up fix PR with the
-        captured logs. Managing releases evaluates merged PRs since the last tag, decides the semver
-        bump, and publishes a release — gated by a global kill-switch and fully previewable. Drydock
-        never auto-merges — a human always reviews the PR.
-      </p>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {labelField("ready-labels", "Ready labels", ready, setReady, "readyLabels")}
-        {labelField("blocking-labels", "Blocking labels", blocking, setBlocking, "blockingLabels")}
-        {labelField(
-          "whitelist",
-          "Auto-label whitelist",
-          whitelist,
-          setWhitelist,
-          "autoLabelWhitelist",
-        )}
-        {labelField("priority-authors", "Priority authors", authors, setAuthors, "priorityAuthors")}
-        {labelField(
-          "trusted-reviewers",
-          "Trusted reviewers (feedback)",
-          reviewers,
-          setReviewers,
-          "trustedReviewers",
-        )}
-        {labelField("ignored-bots", "Ignored bots (feedback)", bots, setBots, "ignoredBots")}
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="min-assoc">
-          Act on authors
-          <select
-            id="min-assoc"
-            value={minAssoc}
-            onChange={(e) => {
-              setMinAssoc(e.target.value);
-              persist({ minAuthorAssociation: e.target.value as "approved" | "any" });
-            }}
-            className="rounded border border-card-border bg-background px-2 py-1 text-sm text-foreground"
+            help="Runs the mechanical iteration for trusted reviewers (bots ignored)."
           >
-            <option value="approved">Owners / members / collaborators</option>
-            <option value="any">Anyone (public participation)</option>
-          </select>
-        </label>
-        <label
-          className="flex items-center gap-1.5 text-xs text-muted-foreground"
-          htmlFor="resolve-conflicts"
-        >
-          <input
-            id="resolve-conflicts"
-            type="checkbox"
+            <TagField
+              label="Trusted reviewers"
+              value={reviewers}
+              onChange={setReviewers}
+              onBlur={() => persist({ trustedReviewers: splitInput(reviewers) })}
+              help="Only feedback from these reviewers is acted on."
+            />
+            <TagField
+              label="Ignored bots"
+              value={bots}
+              onChange={setBots}
+              onBlur={() => persist({ ignoredBots: splitInput(bots) })}
+              help="Review comments from these bots are skipped."
+            />
+          </AutoToggle>
+          <AutoToggle
+            label="Repair trivial merge conflicts"
             checked={resolveConflicts}
-            onChange={(e) => {
-              setResolveConflicts(e.target.checked);
-              persist({ autoResolveMergeConflicts: e.target.checked });
+            onChange={(v) => {
+              setResolveConflicts(v);
+              persist({ autoResolveMergeConflicts: v });
             }}
+            help="Rebases and resolves mechanical conflicts; complex ones still escalate."
           />
-          Repair trivial merge conflicts
-        </label>
-        <label
-          className="flex items-center gap-1.5 text-xs text-muted-foreground"
-          htmlFor="progress-replies"
+        </Fieldset>
+
+        <Fieldset
+          icon={HeartPulse}
+          legend="CI & deploy healing"
+          tone="warning"
+          description="Keep checks and deployments green."
         >
-          <input
-            id="progress-replies"
-            type="checkbox"
-            checked={progressReplies}
-            onChange={(e) => {
-              setProgressReplies(e.target.checked);
-              persist({ includeProgressReplies: e.target.checked });
+          <AutoToggle
+            label="Auto-heal failing CI"
+            checked={autoHeal}
+            onChange={(v) => {
+              setAutoHeal(v);
+              persist({ autoHealCi: v });
             }}
+            help="Attempts bounded, verified fixes for failing CI. Never touches external or AI-review checks."
           />
-          Post progress replies
-        </label>
-        <label
-          className="flex flex-col gap-1 text-xs text-muted-foreground"
-          htmlFor="deploy-platform"
-        >
-          Deployment platform (healing)
-          <select
-            id="deploy-platform"
-            value={deployPlatform}
-            onChange={(e) => {
-              setDeployPlatform(e.target.value);
-              persist({
-                deploymentPlatform: e.target.value
-                  ? (e.target.value as "vercel" | "railway")
-                  : null,
-              });
+          <AutoToggle
+            label="Heal failed deployments"
+            checked={autoHealDeploy}
+            onChange={(v) => {
+              setAutoHealDeploy(v);
+              persist({ autoHealDeployments: v });
             }}
-            className="rounded border border-card-border bg-background px-2 py-1 text-sm text-foreground"
+            help="Monitors a merged PR's deployment and, on failure, opens a follow-up fix PR with the captured logs."
           >
-            <option value="">Auto-detect</option>
-            <option value="vercel">Vercel</option>
-            <option value="railway">Railway</option>
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="max-attempts">
-          Max attempts
-          <input
-            id="max-attempts"
-            type="number"
-            min={1}
-            step={1}
-            value={maxAttempts}
-            onChange={(e) => setMaxAttempts(Number(e.target.value))}
-            onBlur={() => persist({ maxAttempts })}
-            className="w-24 rounded border border-card-border bg-background px-2 py-1 text-sm text-foreground"
-          />
-        </label>
+            <Field label="Deployment platform">
+              <Select
+                value={deployPlatform}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setDeployPlatform(v);
+                  persist({
+                    deploymentPlatform: v ? (v as "vercel" | "railway") : null,
+                  });
+                }}
+                className="h-8 text-xs"
+              >
+                <option value="">Auto-detect</option>
+                <option value="vercel">Vercel</option>
+                <option value="railway">Railway</option>
+              </Select>
+            </Field>
+          </AutoToggle>
+        </Fieldset>
+
+        <div className="flex flex-col gap-4">
+          <Fieldset
+            icon={Tag}
+            legend="Releases"
+            tone="success"
+            description="Cut releases from merged work."
+          >
+            <AutoToggle
+              label="Manage releases"
+              checked={releaseEnabled}
+              onChange={(v) => {
+                setReleaseEnabled(v);
+                persist({ releaseEnabled: v });
+              }}
+              help="Evaluates merged PRs since the last tag, picks the semver bump, and publishes — gated by a global kill-switch and fully previewable."
+            />
+          </Fieldset>
+          <Fieldset
+            icon={MessageSquare}
+            legend="Notifications"
+            description="How Drydock talks back on the issue."
+          >
+            <AutoToggle
+              label="Post progress replies"
+              checked={progressReplies}
+              onChange={(v) => {
+                setProgressReplies(v);
+                persist({ includeProgressReplies: v });
+              }}
+              help="Comments status updates on the issue as the job advances."
+            />
+          </Fieldset>
+        </div>
       </div>
 
-      <label
-        className="flex flex-col gap-1 text-xs text-muted-foreground"
-        htmlFor="agent-instructions"
+      <Field
+        label="Agent instructions"
+        hint={
+          <>
+            Optional. Appended to the work prompt as a dedicated section — coding conventions,
+            &ldquo;always run pnpm test&rdquo;, &ldquo;don&rsquo;t touch legacy/&rdquo;, preferred
+            PR style. Max {AGENT_INSTRUCTIONS_MAX_CHARS} characters; empty leaves the prompt
+            unchanged.
+          </>
+        }
       >
-        Agent instructions
-        <textarea
-          id="agent-instructions"
+        <Textarea
           value={agentInstructions}
           maxLength={AGENT_INSTRUCTIONS_MAX_CHARS}
-          rows={4}
+          rows={3}
           onChange={(e) => setAgentInstructions(e.target.value)}
           onBlur={() => persist({ agentInstructions: agentInstructions.trim() || null })}
-          placeholder="Per-repo guidance injected into the work prompt — e.g. coding conventions, &quot;always run pnpm test&quot;, &quot;don't touch legacy/&quot;, preferred PR style."
-          className="rounded border border-card-border bg-background px-2 py-1 font-mono text-sm text-foreground"
+          placeholder="Per-repo guidance injected into the work prompt…"
+          className="font-mono text-xs"
         />
-        <span className="text-[11px] text-muted-foreground">
-          Optional. Appended to the work prompt as a dedicated section. Max{" "}
-          {AGENT_INSTRUCTIONS_MAX_CHARS} characters; empty leaves the prompt unchanged.
-        </span>
-      </label>
+      </Field>
+
+      <div aria-live="polite" className="h-4 text-xs text-muted-foreground">
+        {pending ? "Saving…" : saved ? "Saved" : ""}
+      </div>
     </div>
   );
 }

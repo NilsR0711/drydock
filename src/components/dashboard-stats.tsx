@@ -1,59 +1,52 @@
+"use client";
+
+import { DollarSign, FolderGit2, GitMerge, Inbox, Loader, TriangleAlert } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { StatCard } from "@/components/ui/stat-card";
 import type { DashboardSummary } from "@/lib/db/queries";
-import { cn } from "@/lib/utils";
+import { formatUsd } from "@/lib/utils";
 
-type Tone = "neutral" | "primary" | "success" | "destructive";
-
-const TONE_TEXT: Record<Tone, string> = {
-  neutral: "text-foreground",
-  primary: "text-primary",
-  success: "text-success",
-  destructive: "text-destructive",
-};
-
-function StatCard({
-  label,
-  value,
-  display,
-  tone = "neutral",
-}: {
-  label: string;
-  value: number;
-  /** Pre-formatted value (e.g. a currency string); falls back to `value`. */
-  display?: string;
-  tone?: Tone;
-}) {
-  // Zero values stay muted; a non-zero count lights up in its tone.
-  const active = value > 0 && tone !== "neutral";
-  return (
-    <div className="rounded-xl border border-card-border bg-card px-4 py-3 shadow-sm">
-      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "mt-1 text-2xl font-semibold tabular-nums",
-          active ? TONE_TEXT[tone] : "text-foreground",
-        )}
-      >
-        {display ?? value}
-      </div>
-    </div>
-  );
-}
-
+/**
+ * Six at-a-glance stat tiles for the dashboard: repositories, queued, running,
+ * merged, needs-human, and today's spend. Tiles light up in their tone when the
+ * count is non-zero; "Needs human" navigates to the review queue.
+ */
 export function DashboardStats({ summary }: { summary: DashboardSummary }) {
+  const router = useRouter();
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-      <StatCard label="Repos" value={summary.repos} />
-      <StatCard label="Queued" value={summary.queued} />
-      <StatCard label="Running" value={summary.running} tone="primary" />
-      <StatCard label="Merged" value={summary.merged} tone="success" />
-      <StatCard label="Needs human" value={summary.needsHuman} tone="destructive" />
+      <StatCard icon={FolderGit2} label="Repositories" value={summary.repos} />
       <StatCard
-        label="Spend today"
-        value={summary.spendToday}
-        display={`$${summary.spendToday.toFixed(2)}`}
+        icon={Inbox}
+        label="Queued"
+        value={summary.queued}
         tone="primary"
+        active={summary.queued > 0}
+      />
+      <StatCard
+        icon={Loader}
+        label="Running"
+        value={summary.running}
+        tone="primary"
+        active={summary.running > 0}
+      />
+      <StatCard icon={GitMerge} label="Merged" value={summary.merged} tone="success" active />
+      <StatCard
+        icon={TriangleAlert}
+        label="Needs human"
+        value={summary.needsHuman}
+        tone="destructive"
+        active={summary.needsHuman > 0}
+        onClick={() => router.push("/needs-human")}
+        hint="Jobs that hit a guardrail and paused for review."
+      />
+      <StatCard
+        icon={DollarSign}
+        label="Spend today"
+        value={formatUsd(summary.spendToday)}
+        tone="primary"
+        active
+        sub="across all repos"
       />
     </div>
   );

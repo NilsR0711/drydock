@@ -2,7 +2,6 @@
 
 import { OctagonX } from "lucide-react";
 import { useState, useTransition } from "react";
-import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import { emergencyStopAction } from "@/lib/orchestrator/job-actions";
@@ -35,16 +34,16 @@ export function EmergencyStopButton() {
 
   return (
     <>
-      <Button
-        variant="destructive"
-        size="sm"
+      <button
+        type="button"
         disabled={pending}
         onClick={() => setConfirm(true)}
         aria-label="Emergency stop — pause automation and abort all running jobs"
+        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-destructive/30 px-2.5 text-xs font-medium text-destructive hover-elevate focus-ring disabled:opacity-60"
       >
         <OctagonX className="h-3.5 w-3.5" />
-        Stop all
-      </Button>
+        <span className="hidden sm:inline">Stop all</span>
+      </button>
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}

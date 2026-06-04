@@ -1,4 +1,8 @@
+import { FileText } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 import { PromptEditor } from "@/components/prompt-editor";
+import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { listRepos } from "@/lib/db/queries";
 import { DEFAULT_TEMPLATES, TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { getActiveTemplate, listVersions } from "@/lib/prompts/templates";
@@ -18,10 +22,20 @@ export default function PromptsPage() {
     : [];
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Prompts</h1>
+    <div className="dd-fade-up">
+      <PageHeader
+        title="Prompts"
+        subtitle="The instructions Drydock hands the agent at each stage."
+        icon={FileText}
+      />
       {repos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Add a repo first.</p>
+        <Card>
+          <EmptyState
+            icon={FileText}
+            title="Add a repo first"
+            description="Connect a repository to edit the prompt templates Drydock uses for that repo."
+          />
+        </Card>
       ) : (
         <PromptEditor
           repos={repos}

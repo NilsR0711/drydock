@@ -29,7 +29,7 @@ export function JobStopButton({ jobId }: { jobId: number }) {
 
   return (
     <>
-      <Button variant="destructive" disabled={pending} onClick={() => setConfirm(true)}>
+      <Button variant="destructive" size="sm" disabled={pending} onClick={() => setConfirm(true)}>
         <Square className="h-3.5 w-3.5" />
         Stop
       </Button>
@@ -37,6 +37,7 @@ export function JobStopButton({ jobId }: { jobId: number }) {
         open={confirm}
         onOpenChange={setConfirm}
         onConfirm={stop}
+        icon={Square}
         title="Stop job?"
         description={`This terminates the running agent for job #${jobId} and marks it aborted.`}
         confirmLabel="Stop"

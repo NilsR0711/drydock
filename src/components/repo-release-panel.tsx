@@ -1,8 +1,10 @@
 "use client";
 
+import { Tag } from "lucide-react";
 import { useState, useTransition } from "react";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import type { ReleasePreview } from "@/lib/orchestrator/release-driver";
 import { previewReleaseAction, publishReleaseAction } from "@/lib/release/actions";
@@ -34,7 +36,7 @@ export function RepoReleasePanel({
   const [runs, setRuns] = useState(initialRuns);
   const [preview, setPreview] = useState<ReleasePreview | null>(null);
   const [pending, start] = useTransition();
-  const { error, success } = useToast();
+  const { error, success, info } = useToast();
 
   function onPreview() {
     start(async () => {
@@ -52,7 +54,18 @@ export function RepoReleasePanel({
         const updated = await publishReleaseAction(repoId);
         setRuns(updated);
         setPreview(null);
-        success("Release published", "A release run was cut from the latest changes.");
+        // The action resolves even when the run is skipped or errors — reflect the
+        // actual outcome (newest run first) instead of always claiming success.
+        const latest = updated[0];
+        if (latest?.status === "published") {
+          success("Release published", latest.tag ? `Cut ${latest.tag}.` : "A release was cut.");
+        } else if (latest?.status === "skipped") {
+          info("No release cut", "No release was recommended for the latest changes.");
+        } else if (latest?.status === "error") {
+          error("Publish failed", latest.errorMessage ?? "The release run did not complete.");
+        } else {
+          info("Release started", `Run is ${latest?.status ?? "in progress"}.`);
+        }
       } catch (e) {
         error("Publish failed", e instanceof Error ? e.message : String(e));
       }
@@ -60,11 +73,11 @@ export function RepoReleasePanel({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Releases
-        </h2>
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          <Tag className="h-3.5 w-3.5 text-muted-foreground" /> Releases
+        </h3>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={onPreview} disabled={pending}>
             Preview
@@ -76,8 +89,8 @@ export function RepoReleasePanel({
       </div>
 
       {preview && (
-        <div className="space-y-1 rounded-lg border border-card-border bg-card p-3 text-sm">
-          <div className="flex items-center gap-2">
+        <div className="space-y-2 rounded-lg border border-card-border bg-secondary/30 p-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium">Proposed:</span>
             <Badge tone="primary">{preview.candidateTag}</Badge>
             <span className="text-xs text-muted-foreground">
@@ -85,10 +98,10 @@ export function RepoReleasePanel({
               {preview.shouldRelease ? "release recommended" : "no release recommended"}
             </span>
           </div>
-          <ul className="text-xs text-muted-foreground">
+          <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
             {preview.prs.map((p) => (
-              <li key={p.number}>
-                #{p.number} {p.title}
+              <li key={p.number} className="truncate">
+                <span className="font-mono">#{p.number}</span> {p.title}
               </li>
             ))}
             {preview.prs.length === 0 && <li>No unreleased pull requests.</li>}
@@ -96,26 +109,40 @@ export function RepoReleasePanel({
         </div>
       )}
 
-      <ul className="space-y-1">
-        {runs.map((r) => (
-          <li key={r.id} className="flex items-center gap-2 text-sm">
-            <span className="text-xs text-muted-foreground">{r.mode}</span>
-            {r.tag && <span className="font-medium">{r.tag}</span>}
-            {r.triggerPrNumber != null && (
-              <span className="text-xs text-muted-foreground">PR #{r.triggerPrNumber}</span>
-            )}
-            <Badge tone={STATUS_TONE[r.status] ?? "neutral"}>{r.status}</Badge>
-            {r.errorMessage && (
-              <span className="ml-auto truncate text-xs text-destructive" title={r.errorMessage}>
-                {r.errorMessage}
-              </span>
-            )}
-          </li>
-        ))}
-        {runs.length === 0 && (
-          <li className="text-sm text-muted-foreground">No release runs yet.</li>
-        )}
-      </ul>
+      {runs.length === 0 ? (
+        <EmptyState
+          compact
+          icon={Tag}
+          title="No release runs yet"
+          description="Preview or publish a release to cut one from your merged work."
+        />
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {runs.map((r) => (
+            <li key={r.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
+              <Tag className="h-3.5 w-3.5 shrink-0 text-success" />
+              {r.tag ? (
+                <span className="font-mono text-sm font-semibold">{r.tag}</span>
+              ) : (
+                <span className="text-xs text-muted-foreground">{r.mode}</span>
+              )}
+              {r.tag && <span className="text-xs text-muted-foreground">{r.mode}</span>}
+              {r.triggerPrNumber != null && (
+                <span className="text-xs text-muted-foreground">PR #{r.triggerPrNumber}</span>
+              )}
+              <Badge tone={STATUS_TONE[r.status] ?? "neutral"}>{r.status}</Badge>
+              {r.errorMessage && (
+                <span
+                  className="ml-auto max-w-[40%] truncate text-xs text-destructive"
+                  title={r.errorMessage}
+                >
+                  {r.errorMessage}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { AgentSelect } from "@/components/agent-select";
 import { ModelSelect } from "@/components/model-select";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
 import type { AgentId } from "@/lib/agents/types";
 import type { Repo } from "@/lib/db/schema";
@@ -66,44 +68,68 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-card-border bg-card p-3 text-sm">
-      <span className="text-muted-foreground">Queue label:</span>
-      <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{repo.queueLabel}</code>
-      <span className="ml-auto text-muted-foreground">Daily limit $</span>
-      <input
-        type="number"
-        min={0}
-        step={1}
-        value={limit}
-        onChange={(e) => changeLimit(Number(e.target.value))}
-        className="w-20 rounded border border-card-border bg-background px-2 py-1 text-sm"
-      />
-      <label className="flex items-center gap-1.5 text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={adrGating}
-          onChange={(e) => changeGating(e.target.checked)}
-        />
-        ADR gate
-      </label>
-      <label className="flex items-center gap-1.5 text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={sequential}
-          onChange={(e) => changeSequential(e.target.checked)}
-        />
-        Sequential (wait for merge)
-      </label>
-      <label htmlFor="agent-select" className="text-muted-foreground">
-        Agent:
-      </label>
-      <AgentSelect id="agent-select" value={agent} onChange={changeAgent} />
-      <label htmlFor="model-select" className="text-muted-foreground">
-        Model:
-      </label>
-      <ModelSelect id="model-select" value={model} onChange={change} agent={agent} />
-      {pending && <span className="text-xs text-muted-foreground">Saving…</span>}
-      {saved && <span className="text-xs text-success-foreground">Saved</span>}
+    <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Queue label</span>
+          <code className="inline-flex h-9 w-fit max-w-full items-center truncate rounded-lg bg-secondary px-3 font-mono text-xs text-muted-foreground">
+            {repo.queueLabel}
+          </code>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="repo-daily-limit" className="text-xs font-medium text-muted-foreground">
+            Daily limit ($)
+          </label>
+          <Input
+            id="repo-daily-limit"
+            type="number"
+            min={0}
+            step={1}
+            value={limit}
+            onChange={(e) => changeLimit(Number(e.target.value))}
+            className="w-28"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="repo-agent-select" className="text-xs font-medium text-muted-foreground">
+            Agent
+          </label>
+          <AgentSelect id="repo-agent-select" value={agent} onChange={changeAgent} />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="repo-model-select" className="text-xs font-medium text-muted-foreground">
+            Model
+          </label>
+          <ModelSelect id="repo-model-select" value={model} onChange={change} agent={agent} />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+        <label htmlFor="repo-adr-gate" className="flex items-center gap-2 text-sm">
+          <Switch
+            id="repo-adr-gate"
+            checked={adrGating}
+            onChange={changeGating}
+            aria-label="ADR gate"
+          />
+          ADR gate
+        </label>
+        <label htmlFor="repo-sequential" className="flex items-center gap-2 text-sm">
+          <Switch
+            id="repo-sequential"
+            checked={sequential}
+            onChange={changeSequential}
+            aria-label="Sequential (wait for merge)"
+          />
+          Sequential (wait for merge)
+        </label>
+        <span aria-live="polite" className="ml-auto text-xs text-muted-foreground">
+          {pending ? "Saving…" : saved ? "Saved" : ""}
+        </span>
+      </div>
     </div>
   );
 }

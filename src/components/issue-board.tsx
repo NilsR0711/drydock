@@ -1,10 +1,25 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  GripVertical,
+  Inbox,
+  Plus,
+  RefreshCw,
+  Search,
+  Tag,
+  Wand2,
+  X,
+} from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 import { IssueDetailModal } from "@/components/issue-detail-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/components/ui/toast";
+import { Tooltip } from "@/components/ui/tooltip";
 import type { Issue } from "@/lib/db/schema";
 import {
   addToQueueAction,
@@ -16,6 +31,7 @@ import {
   syncRepoIssuesAction,
 } from "@/lib/issues/actions";
 import { moveIssueDown, moveIssueUp } from "@/lib/issues/order";
+import { cn } from "@/lib/utils";
 
 function parseLabels(raw: string): string[] {
   try {
@@ -44,11 +60,14 @@ export function IssueBoard({
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [query, setQuery] = useState("");
   const [dragNumber, setDragNumber] = useState<number | null>(null);
+  const [overNumber, setOverNumber] = useState<number | null>(null);
+  const [flash, setFlash] = useState<number | null>(null);
   const [modalIssue, setModalIssue] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkLabel, setBulkLabel] = useState("");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const { success } = useToast();
 
   useEffect(() => setIssues(initialIssues), [initialIssues]);
 
@@ -88,11 +107,19 @@ export function IssueBoard({
   function dropToQueue() {
     if (dragNumber === null) return;
     const moved = issues.find((i) => i.number === dragNumber);
+    const num = dragNumber;
+    const title = moved?.title;
     setDragNumber(null);
+    setOverNumber(null);
     if (!moved || inQueue(moved)) return;
     start(() => {
-      addToQueueAction(repoId, moved.number)
-        .then(setIssues)
+      addToQueueAction(repoId, num)
+        .then((next) => {
+          setIssues(next);
+          setFlash(num);
+          setTimeout(() => setFlash((f) => (f === num ? null : f)), 1200);
+          success("Issue queued", `#${num} ${title ?? ""}`.trim());
+        })
         .catch((e) => setError(e.message));
     });
   }
@@ -101,6 +128,7 @@ export function IssueBoard({
     if (dragNumber === null) return;
     const moved = issues.find((i) => i.number === dragNumber);
     setDragNumber(null);
+    setOverNumber(null);
     if (!moved || !inQueue(moved)) return;
     start(() => {
       removeFromQueueAction(repoId, moved.number)
@@ -117,6 +145,7 @@ export function IssueBoard({
     const targetIdx = order.indexOf(targetNumber);
     order.splice(targetIdx, 0, dragNumber);
     setDragNumber(null);
+    setOverNumber(null);
     start(() => {
       reorderIssuesAction(repoId, order).catch((e) => setError(e.message));
     });
@@ -166,9 +195,14 @@ export function IssueBoard({
     const fullIdx = allQueue.findIndex((i) => i.number === issue.number);
     const isFirst = fullIdx === 0;
     const isLast = fullIdx === allQueue.length - 1;
+    const labels = parseLabels(issue.labels).filter((l) => l !== queueLabel);
+    const isDragging = dragNumber === issue.number;
+    const isOver =
+      overNumber === issue.number && dragNumber !== null && dragNumber !== issue.number;
+    const isFlash = flash === issue.number;
+    const selectId = `issue-select-${issue.number}`;
 
-    function handleAddToQueue(e: React.MouseEvent) {
-      e.stopPropagation();
+    function handleAddToQueue() {
       start(() => {
         addToQueueAction(repoId, issue.number)
           .then(setIssues)
@@ -176,8 +210,7 @@ export function IssueBoard({
       });
     }
 
-    function handleRemoveFromQueue(e: React.MouseEvent) {
-      e.stopPropagation();
+    function handleRemoveFromQueue() {
       start(() => {
         removeFromQueueAction(repoId, issue.number)
           .then(setIssues)
@@ -185,8 +218,7 @@ export function IssueBoard({
       });
     }
 
-    function handleMoveUp(e: React.MouseEvent) {
-      e.stopPropagation();
+    function handleMoveUp() {
       const newOrder = moveIssueUp(
         allQueue.map((i) => i.number),
         issue.number,
@@ -196,8 +228,7 @@ export function IssueBoard({
       });
     }
 
-    function handleMoveDown(e: React.MouseEvent) {
-      e.stopPropagation();
+    function handleMoveDown() {
       const newOrder = moveIssueDown(
         allQueue.map((i) => i.number),
         issue.number,
@@ -208,59 +239,78 @@ export function IssueBoard({
     }
 
     return (
-      <li
+      // biome-ignore lint/a11y/noStaticElementInteractions: draggable issue row; the keyboard path is the per-row action buttons (open, +, up/down, remove) and the checkbox
+      <div
         draggable
-        onDragStart={() => setDragNumber(issue.number)}
+        onDragStart={(e) => {
+          setDragNumber(issue.number);
+          e.dataTransfer.effectAllowed = "move";
+          try {
+            e.dataTransfer.setData("text/plain", String(issue.number));
+          } catch {}
+        }}
+        onDragEnter={() => setOverNumber(issue.number)}
         onDragOver={(e) => e.preventDefault()}
+        onDragEnd={() => {
+          setDragNumber(null);
+          setOverNumber(null);
+        }}
         onDrop={(e) => {
           e.stopPropagation();
           if (reorderable) reorderWithinQueue(issue.number);
         }}
-        className="issue-row flex items-center gap-3 rounded-xl border border-card-border bg-card p-3"
+        className={cn(
+          "issue-row group flex items-center gap-3 rounded-lg border border-transparent bg-card px-3 py-2.5 hover-elevate",
+          isDragging && "opacity-40",
+          isOver && "ring-1 ring-primary/70",
+          isFlash && "bg-success/[0.06] ring-1 ring-success/70",
+        )}
       >
-        <input
-          type="checkbox"
+        <GripVertical
+          aria-hidden
+          className="h-[15px] w-[15px] shrink-0 cursor-grab text-muted-foreground/40 group-hover:text-muted-foreground active:cursor-grabbing"
+        />
+        <Checkbox
+          id={selectId}
           checked={selected.has(issue.number)}
           onChange={() => toggleSelect(issue.number)}
-          onClick={(e) => e.stopPropagation()}
           aria-label={`Select #${issue.number} for bulk actions`}
-          className="h-4 w-4 shrink-0 cursor-pointer"
+          className="shrink-0"
         />
         {reorderable && (
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-semibold tabular-nums text-primary-foreground">
             {fullIdx + 1}
           </span>
         )}
         <button
           type="button"
-          className="min-w-0 flex-1 cursor-pointer rounded-sm text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           onClick={() => setModalIssue(issue.number)}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left focus-ring"
         >
-          <p className="truncate text-sm font-medium">
-            #{issue.number} {issue.title}
-          </p>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {issue.triagedAt && (
-              <Badge
-                tone="primary"
-                title="Labels applied by auto-triage — see the issue comment for reasons"
-              >
-                auto-triaged
-              </Badge>
-            )}
-            {parseLabels(issue.labels)
-              .filter((l) => l !== queueLabel)
-              .map((l) => (
-                <Badge key={l}>{l}</Badge>
-              ))}
-          </div>
+          <span className="shrink-0 font-mono text-xs text-muted-foreground">#{issue.number}</span>
+          <span className="truncate text-sm group-hover:text-foreground">{issue.title}</span>
         </button>
+        <div className="hidden shrink-0 items-center gap-1.5 md:flex">
+          {issue.triagedAt && (
+            <Tooltip content="Labels applied by auto-triage — see the issue comment for reasons">
+              <Badge tone="primary">auto-triaged</Badge>
+            </Tooltip>
+          )}
+          {labels.slice(0, 2).map((l) => (
+            <span
+              key={l}
+              className="rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground"
+            >
+              {l}
+            </span>
+          ))}
+        </div>
         <div className="flex shrink-0 items-center gap-0.5">
           {reorderable ? (
             <>
               <Button
                 type="button"
-                size="icon"
+                size="icon-sm"
                 variant="ghost"
                 aria-label={`Move #${issue.number} up in queue`}
                 disabled={isFirst || pending}
@@ -271,7 +321,7 @@ export function IssueBoard({
               </Button>
               <Button
                 type="button"
-                size="icon"
+                size="icon-sm"
                 variant="ghost"
                 aria-label={`Move #${issue.number} down in queue`}
                 disabled={isLast || pending}
@@ -282,7 +332,7 @@ export function IssueBoard({
               </Button>
               <Button
                 type="button"
-                size="icon"
+                size="icon-sm"
                 variant="ghost"
                 aria-label={`Remove #${issue.number} from queue`}
                 disabled={pending}
@@ -295,7 +345,7 @@ export function IssueBoard({
           ) : (
             <Button
               type="button"
-              size="icon"
+              size="icon-sm"
               variant="ghost"
               aria-label={`Add #${issue.number} to queue`}
               disabled={pending}
@@ -306,48 +356,107 @@ export function IssueBoard({
             </Button>
           )}
         </div>
-        <span aria-hidden className="cursor-grab text-muted-foreground" title="Drag to reorder">
-          ⠿
-        </span>
-      </li>
+      </div>
+    );
+  }
+
+  const dropping = dragNumber !== null;
+
+  function Zone({
+    zone,
+    icon: ZoneIcon,
+    title,
+    count,
+    hint,
+    empty,
+    emptyDrop,
+    onDrop,
+    children,
+    isEmpty,
+  }: {
+    zone: "queue" | "backlog";
+    icon: typeof Inbox;
+    title: string;
+    count: number;
+    hint: string;
+    empty: string;
+    emptyDrop: string;
+    onDrop: () => void;
+    children: React.ReactNode;
+    isEmpty: boolean;
+  }) {
+    return (
+      // biome-ignore lint/a11y/noStaticElementInteractions: drop zone for drag-and-drop; the keyboard path is the per-row action buttons (+, up/down, remove)
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (e.currentTarget === e.target) setOverNumber(null);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          onDrop();
+        }}
+        data-zone={zone}
+        className={cn(
+          "rounded-xl border p-2 transition-colors",
+          dropping ? "border-dashed border-primary/45 bg-primary/[0.03]" : "border-card-border",
+        )}
+      >
+        <div className="flex items-center gap-2 px-2 py-1.5">
+          <ZoneIcon className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-sm font-semibold">{title}</span>
+          <Badge tone="neutral">{count}</Badge>
+          <span className="ml-auto hidden text-xs text-muted-foreground sm:block">{hint}</span>
+        </div>
+        {isEmpty ? (
+          <div
+            className={cn(
+              "m-1 rounded-lg border border-dashed px-3 py-6 text-center text-xs transition-colors",
+              dropping ? "border-primary/50 text-primary" : "border-border text-muted-foreground",
+            )}
+          >
+            {dropping ? emptyDrop : empty}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-0.5 p-1">{children}</div>
+        )}
+      </div>
     );
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Issues
-        </h2>
-        <span className="text-xs text-muted-foreground">({issues.length})</span>
-        <Button
-          size="sm"
-          variant="outline"
-          className="ml-auto"
-          disabled={pending}
-          onClick={manualSync}
-        >
-          {pending ? "Syncing…" : "Refresh"}
-        </Button>
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <GripVertical className="h-3.5 w-3.5" /> Drag to set priority, or drop an issue into the
+          queue to schedule it.
+        </p>
+        <div className="flex items-center gap-2">
+          <div className="relative w-full sm:w-56">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              aria-label="Search issues by title or label"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter issues"
+              className="h-8 pl-8 text-xs"
+            />
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending || backlog.length === 0}
+            onClick={queueAllFiltered}
+          >
+            <Inbox className="h-3.5 w-3.5" /> Queue all
+          </Button>
+          <Button size="sm" variant="outline" disabled={pending} onClick={manualSync}>
+            <RefreshCw className={cn("h-3.5 w-3.5", pending && "dd-spin")} />
+            {pending ? "Syncing…" : "Refresh"}
+          </Button>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          aria-label="Search issues by title or label"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by title or label…"
-          className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={pending || backlog.length === 0}
-          onClick={queueAllFiltered}
-        >
-          Queue all (filtered)
-        </Button>
-      </div>
       {error && (
         <p role="alert" className="text-xs text-destructive">
           {error}
@@ -355,7 +464,7 @@ export function IssueBoard({
       )}
 
       {selected.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-card-border bg-accent/40 p-2">
+        <div className="dd-fade-up flex flex-wrap items-center gap-2 rounded-xl border border-primary/40 bg-primary/[0.04] p-2">
           <span className="px-1 text-sm font-medium">{selected.size} selected</span>
           <Button
             size="sm"
@@ -363,7 +472,7 @@ export function IssueBoard({
             disabled={pending}
             onClick={() => runBulk((numbers) => bulkAddToQueueAction(repoId, numbers))}
           >
-            Add to queue
+            <Inbox className="h-3.5 w-3.5" /> Add to queue
           </Button>
           <Button
             size="sm"
@@ -371,15 +480,15 @@ export function IssueBoard({
             disabled={pending}
             onClick={() => runBulk((numbers) => bulkRemoveFromQueueAction(repoId, numbers))}
           >
-            Remove from queue
+            <X className="h-3.5 w-3.5" /> Remove from queue
           </Button>
-          <span className="flex items-center gap-1">
-            <input
+          <span className="flex items-center gap-1.5">
+            <Input
               aria-label="Label to apply to selected issues"
               value={bulkLabel}
               onChange={(e) => setBulkLabel(e.target.value)}
               placeholder="label…"
-              className="h-8 w-28 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-8 w-28 text-xs"
             />
             <Button
               size="sm"
@@ -391,7 +500,7 @@ export function IssueBoard({
                 setBulkLabel("");
               }}
             >
-              Apply label
+              <Tag className="h-3.5 w-3.5" /> Apply label
             </Button>
           </span>
           <Button
@@ -406,47 +515,37 @@ export function IssueBoard({
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for drag-and-drop; keyboard path is via the action buttons on each row */}
-        <div
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={dropToBacklog}
-          className="space-y-2 rounded-xl border border-dashed border-card-border p-2"
-        >
-          <p className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Backlog ({backlog.length})
-          </p>
-          <ul className="space-y-2">
-            {backlog.map((issue) => (
-              <Row key={issue.number} issue={issue} reorderable={false} />
-            ))}
-            {backlog.length === 0 && (
-              <li className="px-1 text-sm text-muted-foreground">No backlog issues.</li>
-            )}
-          </ul>
-        </div>
+      <Zone
+        zone="queue"
+        icon={Inbox}
+        title="Queue"
+        count={queue.length}
+        hint="top = next to run"
+        empty="Nothing queued. Drag an issue up from the backlog, or use the + button."
+        emptyDrop="Drop here"
+        onDrop={dropToQueue}
+        isEmpty={queue.length === 0}
+      >
+        {queue.map((issue) => (
+          <Row key={issue.number} issue={issue} reorderable />
+        ))}
+      </Zone>
 
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for drag-and-drop; keyboard path is via the action buttons on each row */}
-        <div
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={dropToQueue}
-          className="space-y-2 rounded-xl border border-dashed border-card-border p-2"
-        >
-          <p className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Queue ({queue.length})
-          </p>
-          <ul className="space-y-2">
-            {queue.map((issue) => (
-              <Row key={issue.number} issue={issue} reorderable={true} />
-            ))}
-            {queue.length === 0 && (
-              <li className="px-1 text-sm text-muted-foreground">
-                Drag issues here to queue them, or use the + button.
-              </li>
-            )}
-          </ul>
-        </div>
-      </div>
+      <Zone
+        zone="backlog"
+        icon={Wand2}
+        title="Backlog · triage"
+        count={backlog.length}
+        hint="drag up to schedule"
+        empty="Backlog is empty."
+        emptyDrop="Drop here"
+        onDrop={dropToBacklog}
+        isEmpty={backlog.length === 0}
+      >
+        {backlog.map((issue) => (
+          <Row key={issue.number} issue={issue} reorderable={false} />
+        ))}
+      </Zone>
 
       <IssueDetailModal
         repoId={repoId}

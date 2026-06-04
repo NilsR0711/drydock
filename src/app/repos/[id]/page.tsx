@@ -1,21 +1,39 @@
 import { eq } from "drizzle-orm";
-import Link from "next/link";
+import {
+  ChartNoAxesColumn,
+  Cpu,
+  DollarSign,
+  FileText,
+  GitMerge,
+  GitPullRequestArrow,
+  Inbox,
+  ListChecks,
+  Loader,
+  Settings,
+  Tag,
+  TriangleAlert,
+} from "lucide-react";
 import { notFound } from "next/navigation";
 import { IssueBoard } from "@/components/issue-board";
+import { PageHeader } from "@/components/page-header";
 import { RepoActivity } from "@/components/repo-activity";
 import { RepoAdrPanel } from "@/components/repo-adr-panel";
 import { RepoAutomationBar } from "@/components/repo-automation-bar";
 import { RepoCostPanel } from "@/components/repo-cost-panel";
 import { RepoDeploymentHealingPanel } from "@/components/repo-deployment-healing-panel";
 import { RepoHealingPanel } from "@/components/repo-healing-panel";
+import { RepoPromptsSection } from "@/components/repo-prompts-section";
 import { RepoReleasePanel } from "@/components/repo-release-panel";
 import { RepoSettingsBar } from "@/components/repo-settings-bar";
 import { RepoWebhookPanel } from "@/components/repo-webhook-panel";
+import { Badge } from "@/components/ui/badge";
+import { Section } from "@/components/ui/section";
+import { StatCard } from "@/components/ui/stat-card";
 import { listAdrs } from "@/lib/adr/service";
 import { getDb } from "@/lib/db/client";
 import { dailyCosts, todayCost } from "@/lib/db/cost-queries";
 import { getRepoWorkspace } from "@/lib/db/queries";
-import { jobEvents } from "@/lib/db/schema";
+import { jobEvents, jobs } from "@/lib/db/schema";
 import { recentHealingSessions } from "@/lib/orchestrator/ci-healing";
 import { recentDeploymentHealingSessions } from "@/lib/orchestrator/deployment-healing";
 import { recentReleaseRuns } from "@/lib/release/release-service";
@@ -45,48 +63,163 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
         .from(jobEvents)
         .where(eq(jobEvents.jobId, ws.activeJob.id))
         .all()
-        .map((e) => ({ id: e.id, type: e.type, payload: JSON.parse(e.payload) }))
+        .map((e) => ({ id: e.id, type: e.type, payload: JSON.parse(e.payload), ts: e.ts }))
     : [];
 
+  // Per-repo stat counts. Issue-side counts come from the labelled issues; job
+  // status counts come from ALL of the repo's jobs (not just the recent slice,
+  // which would under-count active/merged/needs-human work).
+  const queueLabel = ws.repo.queueLabel;
+  const queuedCount = ws.issues.filter((i) => {
+    try {
+      const labels = JSON.parse(i.labels) as unknown;
+      return Array.isArray(labels) && labels.includes(queueLabel);
+    } catch {
+      return false;
+    }
+  }).length;
+  const repoJobs = db.select().from(jobs).where(eq(jobs.repoId, ws.repo.id)).all();
+  const jobCount = (statuses: string[]) =>
+    repoJobs.filter((j) => statuses.includes(j.status)).length;
+  // Keep Working and CI-running as non-overlapping buckets (matching
+  // dashboardSnapshot), so the two tiles don't double-count ci_running jobs.
+  const workingCount = jobCount(["working", "retrying"]);
+  const ciRunningCount = jobCount(["ci_running"]);
+  const mergedCount = jobCount(["merged"]);
+  const needsHumanCount = jobCount(["needs_human"]);
+
   return (
-    <div className="space-y-6">
-      <div>
-        <Link href="/" className="text-xs text-muted-foreground hover:underline">
-          ← Dashboard
-        </Link>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">{ws.repo.name}</h1>
-        <p className="text-sm text-muted-foreground">{ws.repo.path}</p>
-      </div>
-
-      <RepoSettingsBar repo={ws.repo} />
-      <RepoAutomationBar repo={ws.repo} />
-      <RepoWebhookPanel repo={ws.repo} />
-
-      <IssueBoard
-        repoId={ws.repo.id}
-        queueLabel={ws.repo.queueLabel}
-        initialIssues={ws.issues}
-        pollIntervalSec={settings.pollIntervalSec}
-        defaultModel={ws.repo.defaultModel}
-        defaultAgent={ws.repo.agent}
+    <div className="dd-fade-up">
+      <PageHeader
+        breadcrumb={[{ label: "Dashboard", href: "/" }, { label: ws.repo.name }]}
+        title={<span className="font-mono">{ws.repo.name}</span>}
+        subtitle={ws.repo.path}
+        actions={
+          <Badge tone="neutral" className="capitalize">
+            {ws.repo.platform}
+          </Badge>
+        }
       />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <RepoActivity
-          activeJob={ws.activeJob}
-          recentJobs={ws.recentJobs}
-          initialLog={initialLog}
-          repoId={ws.repo.id}
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <StatCard
+          icon={Inbox}
+          label="Queued"
+          value={queuedCount}
+          tone="primary"
+          active={queuedCount > 0}
         />
-        <RepoCostPanel todayUsd={todayUsd} limitUsd={ws.repo.dailyCostLimitUsd} daily={daily} />
-        <RepoAdrPanel adrs={repoAdrs} />
-        {ws.repo.autoHealCi && <RepoHealingPanel sessions={healingSessions} />}
-        {ws.repo.autoHealDeployments && (
-          <RepoDeploymentHealingPanel sessions={deploymentSessions} />
-        )}
-        {ws.repo.releaseEnabled && (
-          <RepoReleasePanel repoId={ws.repo.id} initialRuns={releaseRuns} />
-        )}
+        <StatCard
+          icon={Loader}
+          label="Working"
+          value={workingCount}
+          tone="primary"
+          active={workingCount > 0}
+        />
+        <StatCard
+          icon={GitPullRequestArrow}
+          label="CI running"
+          value={ciRunningCount}
+          tone="warning"
+          active={ciRunningCount > 0}
+        />
+        <StatCard icon={GitMerge} label="Merged" value={mergedCount} tone="success" active />
+        <StatCard
+          icon={TriangleAlert}
+          label="Needs human"
+          value={needsHumanCount}
+          tone="destructive"
+          active={needsHumanCount > 0}
+        />
+        <StatCard
+          icon={DollarSign}
+          label="Spend today"
+          value={`$${todayUsd.toFixed(2)}`}
+          tone="primary"
+          active
+          sub={`of $${ws.repo.dailyCostLimitUsd} limit`}
+        />
+      </div>
+
+      <div className="flex flex-col gap-4">
+        <Section
+          icon={ListChecks}
+          title="Issues"
+          description="The work queue for this repository — drag to reorder, filter to focus."
+          tone="primary"
+          right={<Badge tone="neutral">{ws.issues.length} total</Badge>}
+        >
+          <IssueBoard
+            repoId={ws.repo.id}
+            queueLabel={ws.repo.queueLabel}
+            initialIssues={ws.issues}
+            pollIntervalSec={settings.pollIntervalSec}
+            defaultModel={ws.repo.defaultModel}
+            defaultAgent={ws.repo.agent}
+          />
+        </Section>
+
+        <Section
+          icon={Cpu}
+          title="Automation"
+          description="What Drydock is allowed to do here, grouped by stage. All opt-in."
+          defaultOpen={false}
+        >
+          <div className="flex flex-col gap-6">
+            <div>
+              <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                <Settings className="h-3.5 w-3.5 text-muted-foreground" /> Repository settings
+              </h3>
+              <RepoSettingsBar repo={ws.repo} />
+            </div>
+            <RepoAutomationBar repo={ws.repo} />
+            <RepoWebhookPanel repo={ws.repo} />
+          </div>
+        </Section>
+
+        <Section
+          icon={FileText}
+          title="Prompts"
+          description="Instructions handed to the agent for this repo — use the global standard or override per stage."
+          defaultOpen={false}
+          right={<Badge tone="neutral">3 stages</Badge>}
+        >
+          <RepoPromptsSection repo={ws.repo} />
+        </Section>
+
+        <Section
+          icon={ChartNoAxesColumn}
+          title="Activity & costs"
+          description="Live work, recent jobs, and spend against the daily limit."
+        >
+          <div className="grid gap-6 lg:grid-cols-2">
+            <RepoActivity
+              activeJob={ws.activeJob}
+              recentJobs={ws.recentJobs}
+              initialLog={initialLog}
+              repoId={ws.repo.id}
+            />
+            <RepoCostPanel todayUsd={todayUsd} limitUsd={ws.repo.dailyCostLimitUsd} daily={daily} />
+          </div>
+        </Section>
+
+        <Section
+          icon={Tag}
+          title="Releases"
+          description="Published releases, CI healing, deployments, and ADRs."
+          defaultOpen={false}
+        >
+          <div className="grid gap-6 lg:grid-cols-2">
+            {ws.repo.releaseEnabled && (
+              <RepoReleasePanel repoId={ws.repo.id} initialRuns={releaseRuns} />
+            )}
+            {ws.repo.autoHealCi && <RepoHealingPanel sessions={healingSessions} />}
+            {ws.repo.autoHealDeployments && (
+              <RepoDeploymentHealingPanel sessions={deploymentSessions} />
+            )}
+            <RepoAdrPanel adrs={repoAdrs} />
+          </div>
+        </Section>
       </div>
     </div>
   );

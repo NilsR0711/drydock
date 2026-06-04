@@ -1,7 +1,11 @@
+import { ChartNoAxesColumn } from "lucide-react";
 import { Suspense } from "react";
 import { AnalyticsFilters } from "@/components/analytics-filters";
 import { AnalyticsPanel } from "@/components/analytics-panel";
+import { AnalyticsRangeSelect } from "@/components/analytics-range-select";
+import { PageHeader } from "@/components/page-header";
 import { analyticsSummary } from "@/lib/db/analytics-queries";
+import { costByModel } from "@/lib/db/cost-queries";
 import { listRepos } from "@/lib/db/queries";
 
 export const dynamic = "force-dynamic";
@@ -23,21 +27,28 @@ export default async function AnalyticsPage({
 
   const repos = listRepos().map((r) => ({ id: r.id, name: r.name }));
   const summary = analyticsSummary({ repoId, since });
+  const byModel = costByModel(undefined, repoId, since);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
-        <p className="text-sm text-muted-foreground">
-          Outcome, throughput, and cost-efficiency of your autonomous runs.
-        </p>
+    <div className="dd-fade-up">
+      <PageHeader
+        icon={ChartNoAxesColumn}
+        title="Analytics"
+        subtitle="Outcome, throughput, and cost-efficiency across all repositories."
+        actions={
+          <Suspense>
+            <AnalyticsRangeSelect />
+          </Suspense>
+        }
+      />
+
+      <div className="mb-4">
+        <Suspense>
+          <AnalyticsFilters repos={repos} />
+        </Suspense>
       </div>
 
-      <Suspense>
-        <AnalyticsFilters repos={repos} />
-      </Suspense>
-
-      <AnalyticsPanel summary={summary} />
+      <AnalyticsPanel summary={summary} costByModel={byModel} />
     </div>
   );
 }

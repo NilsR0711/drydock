@@ -1,6 +1,11 @@
 "use client";
 
+import { Webhook } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import type { Repo } from "@/lib/db/schema";
 import { updateRepoAction } from "@/lib/repos/actions";
@@ -49,24 +54,19 @@ export function RepoWebhookPanel({ repo }: { repo: Repo }) {
   }
 
   return (
-    <div className="space-y-3 rounded-xl border border-card-border bg-card p-3 text-sm">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-semibold">Webhook sync</span>
-        <span
-          className={`rounded px-1.5 py-0.5 text-xs ${
-            enabled ? "bg-success/15 text-success-foreground" : "bg-muted text-muted-foreground"
-          }`}
-        >
-          {enabled ? "On" : "Off"}
-        </span>
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          <Webhook className="h-3.5 w-3.5 text-muted-foreground" /> Webhook sync
+        </h3>
+        <Badge tone={enabled ? "success" : "neutral"}>{enabled ? "On" : "Off"}</Badge>
         {pending && <span className="text-xs text-muted-foreground">Saving…</span>}
-        {saved && <span className="text-xs text-success-foreground">Saved</span>}
+        {saved && <span className="text-xs text-success">Saved</span>}
       </div>
 
-      <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="webhook-secret">
-        Shared secret
+      <Field label="Shared secret" htmlFor="webhook-secret">
         <div className="flex items-center gap-2">
-          <input
+          <Input
             id="webhook-secret"
             type={reveal ? "text" : "password"}
             value={secret}
@@ -75,54 +75,51 @@ export function RepoWebhookPanel({ repo }: { repo: Repo }) {
               if ((secret.trim() || null) !== (repo.webhookSecret ?? null)) persist(secret);
             }}
             placeholder="Set a secret to enable webhook delivery"
-            className="min-w-0 flex-1 rounded border border-card-border bg-background px-2 py-1 font-mono text-sm text-foreground"
+            className="min-w-0 flex-1 font-mono"
           />
-          <button
-            type="button"
-            onClick={() => setReveal((r) => !r)}
-            className="rounded border border-card-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
-          >
+          <Button type="button" variant="outline" size="sm" onClick={() => setReveal((r) => !r)}>
             {reveal ? "Hide" : "Show"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => {
               const next = generateSecret();
               setSecret(next);
               setReveal(true);
               persist(next);
             }}
-            className="rounded border border-card-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
           >
             Generate
-          </button>
+          </Button>
           {enabled && (
-            <button
+            <Button
               type="button"
+              variant="destructive"
+              size="sm"
               onClick={() => {
                 setSecret("");
                 persist("");
               }}
-              className="rounded border border-card-border px-2 py-1 text-xs text-destructive hover:bg-muted"
             >
               Disable
-            </button>
+            </Button>
           )}
         </div>
-      </label>
+      </Field>
 
-      <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="webhook-url">
-        Payload URL
-        <input
+      <Field label="Payload URL" htmlFor="webhook-url">
+        <Input
           id="webhook-url"
           readOnly
           value={path}
           onFocus={(e) => e.currentTarget.select()}
-          className="rounded border border-card-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+          className="font-mono text-xs"
         />
-      </label>
+      </Field>
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs leading-relaxed text-muted-foreground">
         Opt-in. Polling stays on as the default and continues unchanged whether or not webhooks are
         configured — the two paths share the same idempotent sync, so a change is never
         double-processed. Point a {isGitlab ? "GitLab" : "GitHub"} webhook for{" "}

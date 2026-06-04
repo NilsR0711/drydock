@@ -38,6 +38,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const updateStatus = peekUpdateStatus();
   const installKind = getInstallKind();
   return (
+    // next-themes owns the theme class (defaults to dark via its pre-paint
+    // script); hardcoding `dark` here would fight it when switching to light.
     <html
       lang="en"
       className={`${inter.variable} ${jetbrainsMono.variable}`}

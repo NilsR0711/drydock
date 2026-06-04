@@ -10,15 +10,9 @@ export default function NeedsHumanPage() {
     repoName: j.repoName,
     issueNumber: j.issueNumber,
     errorMessage: j.errorMessage,
+    attempts: j.attempts,
+    parkedAt: j.finishedAt ?? j.startedAt ?? j.createdAt,
   }));
 
-  return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Needs human</h1>
-      <p className="text-sm text-muted-foreground">
-        Jobs paused for review. Requeue to retry, or abort to close them out.
-      </p>
-      <NeedsHumanList jobs={jobs} />
-    </div>
-  );
+  return <NeedsHumanList jobs={jobs} />;
 }

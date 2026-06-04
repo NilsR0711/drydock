@@ -1,41 +1,89 @@
 "use client";
 
+import { BookText } from "lucide-react";
 import { useState, useTransition } from "react";
 import Markdown from "react-markdown";
+import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { approveAdrAction, rejectAdrAction } from "@/lib/adr/actions";
+import { relativeTime } from "@/lib/utils";
 
 export interface AdrItem {
   id: number;
   title: string;
   filePath: string;
   content: string;
+  status: string;
+  createdAt: number;
+}
+
+/** Derive a short mono label (e.g. "ADR-007") from the ADR filename. */
+function adrNumber(filePath: string): string {
+  const name = filePath.split("/").pop() ?? filePath;
+  const num = name.match(/^(\d{1,4})/)?.[1];
+  return num ? `ADR-${num.padStart(3, "0")}` : name.replace(/\.mdx?$/, "");
 }
 
 export function AdrReview({ items }: { items: AdrItem[] }) {
-  if (items.length === 0) return <p className="text-sm text-muted-foreground">No pending ADRs.</p>;
+  // Track cards resolved in this session so the header count stays in sync with
+  // the per-card badges before the next navigation refresh.
+  const [resolvedIds, setResolvedIds] = useState<Set<number>>(() => new Set());
+  const markResolved = (id: number) => setResolvedIds((prev) => new Set(prev).add(id));
+  const pendingCount = items.filter(
+    (a) => a.status === "pending_review" && !resolvedIds.has(a.id),
+  ).length;
+
   return (
-    <div className="space-y-4">
-      {items.map((adr) => (
-        <AdrCard key={adr.id} adr={adr} />
-      ))}
+    <div className="dd-fade-up max-w-3xl">
+      <PageHeader
+        title="ADRs"
+        subtitle="Architecture decisions the agent recorded — review before they harden."
+        icon={BookText}
+        actions={
+          pendingCount > 0 ? <Badge tone="destructive">{pendingCount} pending</Badge> : undefined
+        }
+      />
+      {items.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={BookText}
+            title="No decisions yet"
+            description="When the agent makes a notable architectural call, it'll log an ADR here for you to review."
+          />
+        </Card>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {items.map((adr) => (
+            <AdrCard key={adr.id} adr={adr} onResolved={() => markResolved(adr.id)} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function AdrCard({ adr }: { adr: AdrItem }) {
+function AdrCard({ adr, onResolved }: { adr: AdrItem; onResolved: () => void }) {
   const [pending, start] = useTransition();
   const [comment, setComment] = useState("");
   const [confirmReject, setConfirmReject] = useState(false);
+  const [resolved, setResolved] = useState<"approved" | "rejected" | null>(null);
   const { success, error } = useToast();
+
+  const isPending = adr.status === "pending_review" && resolved === null;
+  const number = adrNumber(adr.filePath);
 
   function approve() {
     start(async () => {
       try {
         await approveAdrAction(adr.id);
+        setResolved("approved");
+        onResolved();
         success("ADR approved", adr.title);
       } catch (e) {
         error("Failed to approve ADR", e instanceof Error ? e.message : String(e));
@@ -47,6 +95,8 @@ function AdrCard({ adr }: { adr: AdrItem }) {
     start(async () => {
       try {
         await rejectAdrAction(adr.id, comment);
+        setResolved("rejected");
+        onResolved();
         success("ADR rejected", adr.title);
       } catch (e) {
         error("Failed to reject ADR", e instanceof Error ? e.message : String(e));
@@ -55,31 +105,47 @@ function AdrCard({ adr }: { adr: AdrItem }) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{adr.title}</CardTitle>
-        <p className="text-xs text-muted-foreground">{adr.filePath}</p>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="prose prose-sm max-w-none rounded border border-card-border p-3">
-          <Markdown>{adr.content}</Markdown>
+    <Card pad="default" className="flex flex-col gap-4">
+      <div className="flex flex-row items-center gap-4">
+        <span className="font-mono text-sm font-semibold text-muted-foreground">{number}</span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium">{adr.title}</p>
+          <p className="text-xs text-muted-foreground">{relativeTime(adr.createdAt)}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button disabled={pending} onClick={approve}>
-            Approve
-          </Button>
-          <input
-            aria-label="Rejection comment"
-            className="flex-1 rounded border border-card-border bg-background px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-            placeholder="Rejection comment"
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-          />
-          <Button variant="destructive" disabled={pending} onClick={() => setConfirmReject(true)}>
-            Reject
-          </Button>
-        </div>
-      </CardContent>
+        {isPending ? (
+          <div className="flex shrink-0 gap-2">
+            <Button size="sm" variant="outline" disabled={pending} onClick={approve}>
+              Accept
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={pending}
+              onClick={() => setConfirmReject(true)}
+            >
+              Reject
+            </Button>
+          </div>
+        ) : (
+          <Badge tone={resolved === "rejected" ? "neutral" : "success"}>
+            {resolved === "rejected" ? "rejected" : "accepted"}
+          </Badge>
+        )}
+      </div>
+
+      <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-card-border bg-secondary/40 p-4 [&_pre]:bg-card">
+        <Markdown>{adr.content}</Markdown>
+      </div>
+
+      {isPending && (
+        <Input
+          aria-label="Rejection comment"
+          placeholder="Optional rejection comment"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+        />
+      )}
+
       <ConfirmDialog
         open={confirmReject}
         onOpenChange={setConfirmReject}

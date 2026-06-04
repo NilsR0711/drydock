@@ -13,13 +13,15 @@ export default function AdrsPage() {
     } catch {
       // file moved/removed since registration
     }
-    return { id: a.id, title: a.title, filePath: a.filePath, content };
+    return {
+      id: a.id,
+      title: a.title,
+      filePath: a.filePath,
+      content,
+      status: a.status,
+      createdAt: a.createdAt,
+    };
   });
 
-  return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">ADR Review ({items.length})</h1>
-      <AdrReview items={items} />
-    </div>
-  );
+  return <AdrReview items={items} />;
 }
