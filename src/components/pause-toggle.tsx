@@ -1,6 +1,6 @@
 "use client";
 
-import { PauseCircle, PlayCircle } from "lucide-react";
+import { Pause, Play } from "lucide-react";
 import { useState, useTransition } from "react";
 import { useToast } from "@/components/ui/toast";
 import { togglePauseAction } from "@/lib/settings/actions";
@@ -39,23 +39,12 @@ export function PauseToggle({ paused }: { paused: boolean }) {
       aria-pressed={isPaused}
       aria-label={isPaused ? "Resume automation" : "Pause automation"}
       className={cn(
-        "flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-60",
-        isPaused
-          ? "border-warning-border bg-warning-muted text-warning-foreground hover-elevate"
-          : "border-border bg-background text-muted-foreground hover-elevate",
+        "inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium hover-elevate focus-ring disabled:opacity-60",
+        isPaused ? "text-warning" : "text-muted-foreground",
       )}
     >
-      {isPaused ? (
-        <>
-          <PlayCircle className="h-3.5 w-3.5" />
-          Resume
-        </>
-      ) : (
-        <>
-          <PauseCircle className="h-3.5 w-3.5" />
-          Pause
-        </>
-      )}
+      {isPaused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+      <span className="hidden sm:inline">{isPaused ? "Resume" : "Pause"}</span>
     </button>
   );
 }

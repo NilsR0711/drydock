@@ -34,28 +34,20 @@ export function AnalyticsFilters({ repos }: { repos: RepoOption[] }) {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Select
-        value={searchParams.get("repo") ?? ""}
-        onChange={(e) => update("repo", e.target.value)}
-      >
-        <option value="">All repos</option>
-        {repos.map((r) => (
-          <option key={r.id} value={String(r.id)}>
-            {r.name}
-          </option>
-        ))}
-      </Select>
-
-      <Select
-        value={searchParams.get("range") ?? "30"}
-        onChange={(e) => update("range", e.target.value)}
-      >
-        {ANALYTICS_RANGES.map((r) => (
-          <option key={r.value} value={r.value}>
-            {r.label}
-          </option>
-        ))}
-      </Select>
+      <div className="w-56">
+        <Select
+          value={searchParams.get("repo") ?? ""}
+          onChange={(e) => update("repo", e.target.value)}
+          aria-label="Repository"
+        >
+          <option value="">All repositories</option>
+          {repos.map((r) => (
+            <option key={r.id} value={String(r.id)}>
+              {r.name}
+            </option>
+          ))}
+        </Select>
+      </div>
     </div>
   );
 }

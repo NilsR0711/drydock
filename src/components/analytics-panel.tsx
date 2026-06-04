@@ -1,21 +1,33 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  ChartNoAxesColumn,
+  DollarSign,
+  Gauge,
+  GitMerge,
+  ListChecks,
+  RefreshCw,
+  Timer,
+} from "lucide-react";
+import { BarList, type BarListItem } from "@/components/ui/bar-list";
+import { Card } from "@/components/ui/card";
+import { toneVar } from "@/components/ui/chart-utils";
+import { ColumnChart } from "@/components/ui/column-chart";
+import { EmptyState } from "@/components/ui/empty-state";
+import { StatCard } from "@/components/ui/stat-card";
 import type { AnalyticsSummary } from "@/lib/db/analytics-queries";
+import type { ModelCost } from "@/lib/db/cost-queries";
 import { formatDurationSec } from "@/lib/format/duration";
 
-function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-xl border border-card-border bg-card px-4 py-3 shadow-sm">
-      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
-    </div>
-  );
-}
+/** Chart tones cycled across spend-by-model bars, in order. */
+const MODEL_TONES = ["chart-1", "chart-5", "chart-2", "chart-4", "chart-3"] as const;
 
 /** Outcome / throughput / cost-efficiency dashboard for the dock (issue #111). */
-export function AnalyticsPanel({ summary }: { summary: AnalyticsSummary }) {
+export function AnalyticsPanel({
+  summary,
+  costByModel,
+}: {
+  summary: AnalyticsSummary;
+  costByModel: ModelCost[];
+}) {
   const {
     totalJobs,
     completedJobs,
@@ -32,68 +44,110 @@ export function AnalyticsPanel({ summary }: { summary: AnalyticsSummary }) {
 
   if (totalJobs === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-        No jobs in this window yet.
-      </p>
+      <Card pad="none" className="overflow-hidden">
+        <EmptyState
+          icon={ChartNoAxesColumn}
+          title="No jobs in this window yet"
+          description="Once Drydock runs jobs in the selected range, outcome and cost analytics appear here."
+        />
+      </Card>
     );
   }
+
+  // ColumnChart renders oldest → newest left-to-right; `daily` is newest-first.
+  // Spread into a plain indexable record so it satisfies the chart's prop type.
+  const chronological = [...daily]
+    .reverse()
+    .map((d) => ({ day: d.day, completed: d.completed, merged: d.merged }));
+
+  const modelBars: BarListItem[] = [...costByModel]
+    .sort((a, b) => b.costUsd - a.costUsd)
+    .map((m, i) => ({
+      label: m.model,
+      value: m.costUsd,
+      tone: MODEL_TONES[i % MODEL_TONES.length],
+    }));
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <Metric
+        <StatCard
+          icon={GitMerge}
           label="Merge rate"
           value={`${Math.round(mergeRate * 100)}%`}
-          sub={`${mergedJobs} of ${completedJobs} completed`}
+          sub={`${mergedJobs} of ${completedJobs}`}
+          tone="success"
+          active
         />
-        <Metric
-          label="Time to merge (p50)"
+        <StatCard
+          icon={Timer}
+          label="Time to merge"
           value={formatDurationSec(timeToMergeP50Sec)}
           sub={`p90 ${formatDurationSec(timeToMergeP90Sec)}`}
         />
-        <Metric label="Avg CI retries" value={avgCiRetries.toFixed(1)} sub="per completed job" />
-        <Metric
-          label="Throughput"
-          value={mergedPerDay === null ? "—" : `${mergedPerDay.toFixed(1)}/day`}
-          sub="merges per active day"
+        <StatCard
+          icon={RefreshCw}
+          label="Avg CI retries"
+          value={avgCiRetries.toFixed(1)}
+          sub="per completed job"
         />
-        <Metric
+        <StatCard
+          icon={Gauge}
+          label="Throughput"
+          value={mergedPerDay === null ? "—" : `${mergedPerDay.toFixed(1)}/d`}
+          sub="merges per active day"
+          tone="primary"
+          active
+        />
+        <StatCard
+          icon={DollarSign}
           label="Cost per merge"
           value={costPerMergedUsd === null ? "—" : `$${costPerMergedUsd.toFixed(2)}`}
-          sub={`$${totalCostUsd.toFixed(2)} total`}
+          sub={`$${totalCostUsd.toFixed(0)} total`}
+          tone="primary"
+          active
         />
-        <Metric label="Jobs" value={String(totalJobs)} sub={`${completedJobs} completed`} />
+        <StatCard
+          icon={ListChecks}
+          label="Jobs"
+          value={totalJobs}
+          sub={`${completedJobs} completed`}
+        />
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Daily throughput</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {daily.length === 0 ? (
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Card className="lg:col-span-2" pad="lg">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-base font-semibold">Daily throughput</h3>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-sm bg-secondary" /> Completed
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span
+                  className="h-2.5 w-2.5 rounded-sm"
+                  style={{ background: toneVar("chart-2") }}
+                />{" "}
+                Merged
+              </span>
+            </div>
+          </div>
+          {chronological.length === 0 ? (
             <p className="text-sm text-muted-foreground">No completed jobs in this window.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <th className="py-2">Day</th>
-                  <th className="py-2 text-right">Completed</th>
-                  <th className="py-2 text-right">Merged</th>
-                </tr>
-              </thead>
-              <tbody>
-                {daily.map((d) => (
-                  <tr key={d.day} className="border-b border-border/50 last:border-0">
-                    <td className="py-2 font-mono text-muted-foreground">{d.day}</td>
-                    <td className="py-2 text-right tabular-nums">{d.completed}</td>
-                    <td className="py-2 text-right tabular-nums">{d.merged}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <ColumnChart data={chronological} height={150} />
           )}
-        </CardContent>
-      </Card>
+        </Card>
+
+        <Card pad="lg">
+          <h3 className="mb-4 text-base font-semibold">Spend by model</h3>
+          {modelBars.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No spend recorded yet.</p>
+          ) : (
+            <BarList items={modelBars} money />
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

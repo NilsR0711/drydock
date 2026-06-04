@@ -1,12 +1,15 @@
 "use client";
 
+import { Cpu, DollarSign, RefreshCw, Timer } from "lucide-react";
 import { useEffect, useState } from "react";
+import { StatCard } from "@/components/ui/stat-card";
+import { formatDuration, formatUsd } from "@/lib/utils";
 
 /**
- * Live job metrics. Subscribes to the same SSE stream as the log viewer and
- * updates the cost figure when the orchestrator emits a `result` event
- * (payload carries `costUsd`). Token totals are not streamed per-event, so they
- * stay at their persisted values.
+ * Live job metrics, rendered as a StatCard strip. Subscribes to the same SSE
+ * stream as the log viewer and updates the cost figure when the orchestrator
+ * emits a `result` event (payload carries `costUsd`). Token totals are not
+ * streamed per-event, so they stay at their persisted values.
  */
 export function JobMetrics({
   jobId,
@@ -15,6 +18,8 @@ export function JobMetrics({
   initialCostUsd,
   inputTokens,
   outputTokens,
+  durationSec,
+  attempts,
 }: {
   jobId: number;
   issueNumber: number;
@@ -22,6 +27,8 @@ export function JobMetrics({
   initialCostUsd: number;
   inputTokens: number;
   outputTokens: number;
+  durationSec?: number | null;
+  attempts?: number;
 }) {
   const [costUsd, setCostUsd] = useState(initialCostUsd);
 
@@ -39,14 +46,35 @@ export function JobMetrics({
     return () => es.close();
   }, [jobId]);
 
+  const tokenSub = `${(inputTokens / 1000).toFixed(0)}k in · ${(outputTokens / 1000).toFixed(1)}k out · #${issueNumber}`;
+
   return (
-    <dl className="grid gap-1 text-sm">
-      <div>Issue: #{issueNumber}</div>
-      <div>Model: {model ?? "—"}</div>
-      <div>Cost: ${costUsd.toFixed(4)}</div>
-      <div>
-        Tokens: {inputTokens} in / {outputTokens} out
-      </div>
-    </dl>
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <StatCard
+        icon={DollarSign}
+        label="Cost"
+        value={formatUsd(costUsd)}
+        sub={tokenSub}
+        tone="primary"
+        active
+      />
+      <StatCard
+        icon={Timer}
+        label="Duration"
+        value={durationSec != null ? formatDuration(durationSec) : "—"}
+      />
+      <StatCard
+        icon={RefreshCw}
+        label="Attempts"
+        value={attempts ?? "—"}
+        tone={attempts != null && attempts > 2 ? "warning" : "neutral"}
+        active={attempts != null && attempts > 2}
+      />
+      <StatCard
+        icon={Cpu}
+        label="Model"
+        value={<span className="font-mono text-base">{(model ?? "—").replace("claude-", "")}</span>}
+      />
+    </div>
   );
 }

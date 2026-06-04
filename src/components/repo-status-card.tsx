@@ -1,31 +1,23 @@
 "use client";
 
-import { AlertTriangle } from "lucide-react";
+import { Clock, DollarSign, FolderGit2, Trash2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import type { RepoDashboardRow } from "@/lib/db/queries";
 import { removeRepoAction } from "@/lib/repos/actions";
-import { cn } from "@/lib/utils";
-
-/** Compact "3m ago" style relative time; absolute date past a week. */
-function relativeTime(epochSeconds: number): string {
-  const diff = Math.floor(Date.now() / 1000) - epochSeconds;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
-  return new Date(epochSeconds * 1000).toLocaleDateString();
-}
+import { cn, formatUsd, relativeTime } from "@/lib/utils";
 
 export function RepoStatusCard({ repo }: { repo: RepoDashboardRow }) {
   const [pending, start] = useTransition();
   const [confirmRemove, setConfirmRemove] = useState(false);
   const { success, error } = useToast();
+
+  const active = repo.working + repo.ciRunning > 0;
 
   function remove() {
     start(async () => {
@@ -40,81 +32,101 @@ export function RepoStatusCard({ repo }: { repo: RepoDashboardRow }) {
 
   return (
     <Card
+      hover
+      // Repos that want a human are bordered so they stand out in the grid.
       className={cn(
-        "hover-elevate transition-shadow hover:shadow-md",
-        // Repos that want a human are bordered so they stand out in the grid.
-        repo.attention && "border-destructive/50 bg-destructive/5",
+        "flex flex-col gap-3 p-4",
+        repo.attention && "border-destructive/40 bg-destructive/[0.04]",
       )}
     >
-      <CardContent className="space-y-3 p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <Link
-              href={`/repos/${repo.id}`}
-              className="font-mono text-sm font-semibold hover:underline"
-            >
-              {repo.name}
-            </Link>
-            <p className="truncate text-xs text-muted-foreground">{repo.path}</p>
-          </div>
-          {repo.attention && (
-            <Badge tone="destructive" className="shrink-0">
-              <AlertTriangle className="h-3 w-3" /> Needs human
-            </Badge>
-          )}
-        </div>
-
-        <div className="flex flex-wrap gap-1.5">
-          {repo.platform === "gitlab" && <Badge tone="primary">GitLab</Badge>}
-          <Badge tone="neutral">{repo.queued} queued</Badge>
-          {repo.working > 0 ? (
-            <Badge status="working">{repo.working} working</Badge>
-          ) : (
-            <Badge tone="neutral">0 working</Badge>
-          )}
-          {repo.ciRunning > 0 ? (
-            <Badge status="ci_running">{repo.ciRunning} CI</Badge>
-          ) : (
-            <Badge tone="neutral">0 CI</Badge>
-          )}
-          {repo.needsHuman > 0 && <Badge tone="destructive">{repo.needsHuman} needs human</Badge>}
-        </div>
-
-        {repo.inFlight.length > 0 && (
-          <ul className="space-y-0.5 text-xs text-muted-foreground">
-            {repo.inFlight.map((job) => (
-              <li key={job.id} className="flex items-center gap-1.5">
-                <Badge status={job.status} className="px-1.5 py-0" />
-                <Link href={`/jobs/${job.id}`} className="font-mono hover:underline">
-                  #{job.issueNumber}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>
-            Today:{" "}
-            <span className="tabular-nums text-foreground">${repo.todaySpend.toFixed(2)}</span>
+      <div className="flex items-start justify-between gap-2">
+        <Link
+          href={`/repos/${repo.id}`}
+          className="group flex min-w-0 items-center gap-2 rounded-md text-left focus-ring"
+        >
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground">
+            <FolderGit2 className="h-[15px] w-[15px]" />
           </span>
-          <span>{repo.lastActivityAt ? relativeTime(repo.lastActivityAt) : "no activity"}</span>
-        </div>
+          <span className="min-w-0">
+            <span className="block truncate font-mono text-sm font-semibold group-hover:underline">
+              {repo.name}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">{repo.path}</span>
+          </span>
+        </Link>
+        {repo.attention ? (
+          <Badge tone="destructive" className="shrink-0">
+            <TriangleAlert className="h-[11px] w-[11px]" /> Needs human
+          </Badge>
+        ) : active ? (
+          <Badge status="working" className="shrink-0">
+            Active
+          </Badge>
+        ) : (
+          <Badge tone="neutral" className="shrink-0">
+            Idle
+          </Badge>
+        )}
+      </div>
 
-        <div className="flex gap-2">
-          <Link href={`/repos/${repo.id}`}>
-            <Button size="sm">Open</Button>
-          </Link>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={pending}
-            onClick={() => setConfirmRemove(true)}
-          >
-            Remove
-          </Button>
-        </div>
-      </CardContent>
+      <div className="flex flex-wrap gap-1.5">
+        {repo.platform === "gitlab" && <Badge tone="primary">GitLab</Badge>}
+        <Badge tone="neutral">{repo.queued} queued</Badge>
+        {repo.working > 0 ? (
+          <Badge status="working">{repo.working} working</Badge>
+        ) : (
+          <Badge tone="neutral">0 working</Badge>
+        )}
+        {repo.ciRunning > 0 ? (
+          <Badge status="ci_running">{repo.ciRunning} CI</Badge>
+        ) : (
+          <Badge tone="neutral">0 CI</Badge>
+        )}
+        {repo.needsHuman > 0 && <Badge tone="destructive">{repo.needsHuman} needs human</Badge>}
+      </div>
+
+      {repo.inFlight.length > 0 && (
+        <ul className="flex flex-col gap-1 border-t border-card-border pt-2.5 text-xs">
+          {repo.inFlight.slice(0, 3).map((job) => (
+            <li key={job.id} className="flex items-center gap-2">
+              <Badge status={job.status} className="shrink-0 px-1.5 py-0" />
+              <Link
+                href={`/jobs/${job.id}`}
+                className="truncate text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <span className="font-mono text-foreground/80">#{job.issueNumber}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-auto flex items-center justify-between border-t border-card-border pt-2.5 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5">
+          <DollarSign className="h-3 w-3" />
+          <span className="tnum text-foreground/90">{formatUsd(repo.todaySpend)}</span> today
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <Clock className="h-3 w-3" />
+          {repo.lastActivityAt ? relativeTime(repo.lastActivityAt) : "no activity"}
+        </span>
+      </div>
+
+      <div className="flex gap-2">
+        <Link href={`/repos/${repo.id}`}>
+          <Button size="sm">Open workspace</Button>
+        </Link>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={pending}
+          onClick={() => setConfirmRemove(true)}
+          aria-label="Remove repository"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
       <ConfirmDialog
         open={confirmRemove}
         onOpenChange={setConfirmRemove}

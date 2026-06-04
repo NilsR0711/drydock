@@ -1,11 +1,28 @@
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 
-export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+const CARD_PAD = {
+  none: "",
+  sm: "p-4",
+  default: "p-5",
+  lg: "p-6",
+} as const;
+
+export function Card({
+  className,
+  pad,
+  hover,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & {
+  pad?: "none" | "sm" | "default" | "lg";
+  hover?: boolean;
+}) {
   return (
     <div
       className={cn(
         "rounded-xl border border-card-border bg-card text-card-foreground shadow-sm",
+        hover && "hover-elevate transition-shadow hover:shadow-md",
+        pad && CARD_PAD[pad],
         className,
       )}
       {...props}

@@ -1,10 +1,15 @@
+import { ListChecks } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { JobsHistoryFilters } from "@/components/jobs-history-filters";
 import { JobsHistoryPagination } from "@/components/jobs-history-pagination";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { listJobsPage, listRepos } from "@/lib/db/queries";
 import { MODELS, modelLabel } from "@/lib/models";
+import { formatDuration, formatUsd, relativeTime } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -26,85 +31,85 @@ export default async function JobsIndexPage({
   const result = listJobsPage({ page, pageSize: PAGE_SIZE, repoId, status, model, search });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Job history</h1>
-          <p className="text-sm text-muted-foreground">
-            {result.total} job{result.total !== 1 ? "s" : ""} across all repos
-          </p>
-        </div>
+    <div className="dd-fade-up">
+      <PageHeader
+        title="Job history"
+        subtitle={`Every run Drydock has executed, newest first — ${result.total} job${
+          result.total !== 1 ? "s" : ""
+        } across all repos.`}
+        icon={ListChecks}
+      />
+
+      <div className="mb-4">
+        <Suspense>
+          <JobsHistoryFilters
+            repos={repos.map((r) => ({ id: r.id, name: r.name }))}
+            models={MODELS.map((m) => ({ id: m.id, label: m.label }))}
+          />
+        </Suspense>
       </div>
 
-      <Suspense>
-        <JobsHistoryFilters
-          repos={repos.map((r) => ({ id: r.id, name: r.name }))}
-          models={MODELS.map((m) => ({ id: m.id, label: m.label }))}
-        />
-      </Suspense>
-
       {result.rows.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          No jobs match the current filters.
-        </p>
+        <Card>
+          <EmptyState
+            icon={ListChecks}
+            title="No jobs match"
+            description="Try a different status, model, or repository filter."
+          />
+        </Card>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-secondary/40 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <th className="px-4 py-2.5">Job</th>
-                <th className="px-4 py-2.5">Repo</th>
-                <th className="px-4 py-2.5">Issue</th>
-                <th className="px-4 py-2.5">Status</th>
-                <th className="px-4 py-2.5">Model</th>
-                <th className="px-4 py-2.5">Cost</th>
-                <th className="px-4 py-2.5">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.rows.map((row, i) => (
-                <tr key={row.id} className={i % 2 === 0 ? "bg-background" : "bg-secondary/20"}>
-                  <td className="px-4 py-2.5 font-mono">
-                    <Link href={`/jobs/${row.id}`} className="hover:underline">
-                      #{row.id}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Link href={`/repos/${row.repoId}`} className="hover:underline">
-                      {row.repoName}
-                    </Link>
-                  </td>
-                  <td className="max-w-xs px-4 py-2.5">
-                    <span className="font-mono text-muted-foreground">#{row.issueNumber}</span>
-                    {row.issueTitle && (
-                      <span className="ml-1.5 truncate text-foreground">{row.issueTitle}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Badge status={row.status} />
-                  </td>
-                  <td className="px-4 py-2.5 text-muted-foreground">{modelLabel(row.model)}</td>
-                  <td className="px-4 py-2.5 tabular-nums text-muted-foreground">
-                    ${row.costUsd.toFixed(4)}
-                  </td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {new Date(row.createdAt * 1000).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Card pad="none" className="overflow-hidden">
+          <div className="hidden grid-cols-[1fr_auto_auto_auto_auto] gap-4 border-b border-card-border px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid">
+            <span>Issue</span>
+            <span className="text-right">Model</span>
+            <span className="text-right">Cost</span>
+            <span className="text-right">Duration</span>
+            <span className="text-right">Started</span>
+          </div>
+          <ul>
+            {result.rows.map((row) => {
+              const startedAt = row.startedAt ?? row.createdAt;
+              const endedAt = row.finishedAt ?? null;
+              const durationSec =
+                row.startedAt && endedAt ? Math.max(0, endedAt - row.startedAt) : null;
+              return (
+                <li key={row.id}>
+                  <Link
+                    href={`/jobs/${row.id}`}
+                    className="grid w-full grid-cols-1 gap-1 border-b border-card-border/60 px-4 py-3 text-left last:border-0 hover-elevate focus-ring sm:grid-cols-[1fr_auto_auto_auto_auto] sm:items-center sm:gap-4"
+                  >
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <Badge status={row.status} className="shrink-0" />
+                      <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                        {row.repoName} #{row.issueNumber}
+                      </span>
+                      {row.issueTitle && <span className="truncate text-sm">{row.issueTitle}</span>}
+                    </span>
+                    <span className="hidden text-right font-mono text-xs text-muted-foreground sm:block">
+                      {modelLabel(row.model)}
+                    </span>
+                    <span className="hidden text-right text-sm tnum sm:block">
+                      {formatUsd(row.costUsd)}
+                    </span>
+                    <span className="hidden text-right text-sm text-muted-foreground tnum sm:block">
+                      {durationSec !== null ? formatDuration(durationSec) : "—"}
+                    </span>
+                    <span className="hidden text-right text-xs text-muted-foreground sm:block">
+                      {relativeTime(startedAt)}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
       )}
 
-      <Suspense>
-        <JobsHistoryPagination page={result.page} totalPages={result.totalPages} />
-      </Suspense>
+      <div className="mt-4">
+        <Suspense>
+          <JobsHistoryPagination page={result.page} totalPages={result.totalPages} />
+        </Suspense>
+      </div>
     </div>
   );
 }

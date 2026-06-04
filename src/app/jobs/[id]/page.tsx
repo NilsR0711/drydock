@@ -3,9 +3,12 @@ import { notFound } from "next/navigation";
 import { JobMetrics } from "@/components/job-metrics";
 import { JobStopButton } from "@/components/job-stop-button";
 import { LogViewer } from "@/components/log-viewer";
+import { PageHeader } from "@/components/page-header";
 import { PrQuestionPanel } from "@/components/pr-question-panel";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { getDb } from "@/lib/db/client";
+import { getRepo } from "@/lib/db/queries";
 import { jobEvents } from "@/lib/db/schema";
 import { getJob } from "@/lib/orchestrator/jobs";
 import { listPrQuestions } from "@/lib/orchestrator/pr-questions";
@@ -17,21 +20,42 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const jobId = Number(id);
   const job = getJob(jobId);
   if (!job) notFound();
+  const repo = getRepo(job.repoId);
   const events = getDb().select().from(jobEvents).where(eq(jobEvents.jobId, jobId)).all();
   const questions = job.prNumber != null ? listPrQuestions(job.id) : [];
   const inFlight = ["working", "ci_running", "retrying"].includes(job.status);
+  const isError = job.status === "needs_human";
+
+  const repoName = repo?.name ?? `repo #${job.repoId}`;
+  const end = job.finishedAt ?? Math.floor(Date.now() / 1000);
+  const durationSec = job.startedAt != null ? Math.max(0, end - job.startedAt) : null;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-bold">Job #{job.id}</h1>
-        <Badge status={job.status}>{job.status}</Badge>
-        {inFlight && (
-          <div className="ml-auto">
-            <JobStopButton jobId={job.id} />
-          </div>
-        )}
-      </div>
+    <div className="dd-fade-up space-y-5">
+      <PageHeader
+        breadcrumb={[
+          { label: "Dashboard", href: "/" },
+          { label: repoName, href: `/repos/${job.repoId}` },
+          { label: `#${job.issueNumber}` },
+        ]}
+        title={`Job #${job.id}`}
+        subtitle={
+          <span className="inline-flex items-center gap-2">
+            <Badge status={job.status} />
+            <span className="font-mono">
+              {repoName} #{job.issueNumber}
+            </span>
+          </span>
+        }
+        actions={inFlight ? <JobStopButton jobId={job.id} /> : undefined}
+      />
+
+      {isError && (
+        <Alert tone="destructive" title="Paused for a human">
+          {job.errorMessage ?? "A guardrail stopped the run before anything risky was written."}
+        </Alert>
+      )}
+
       <JobMetrics
         jobId={job.id}
         issueNumber={job.issueNumber}
@@ -39,7 +63,10 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         initialCostUsd={job.costUsd}
         inputTokens={job.totalInputTokens}
         outputTokens={job.totalOutputTokens}
+        durationSec={durationSec}
+        attempts={job.attempts}
       />
+
       {job.prNumber != null && (
         <PrQuestionPanel
           jobId={job.id}
@@ -53,13 +80,16 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           }))}
         />
       )}
-      <section>
-        <h2 className="mb-2 font-semibold">Live log</h2>
-        <LogViewer
-          jobId={job.id}
-          initial={events.map((e) => ({ id: e.id, type: e.type, payload: JSON.parse(e.payload) }))}
-        />
-      </section>
+
+      <LogViewer
+        jobId={job.id}
+        initial={events.map((e) => ({
+          id: e.id,
+          type: e.type,
+          payload: JSON.parse(e.payload),
+          ts: e.ts,
+        }))}
+      />
     </div>
   );
 }

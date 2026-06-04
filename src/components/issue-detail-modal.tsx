@@ -1,12 +1,17 @@
 "use client";
 
+import { ListChecks, MessageSquare, Play, Save, Settings2, Tag } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 import { AgentSelect } from "@/components/agent-select";
 import { ModelSelect } from "@/components/model-select";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import type { AgentId } from "@/lib/agents/types";
 import type { IssueSubtask } from "@/lib/db/schema";
 import type { IssueDetail } from "@/lib/github/gh";
@@ -23,13 +28,16 @@ import {
 } from "@/lib/issues/actions";
 import { defaultModelForAgent } from "@/lib/models";
 
-/** Display label and tone for each subtask lifecycle state. */
-const SUBTASK_DISPLAY: Record<string, { label: string; symbol: string }> = {
-  pending: { label: "Pending", symbol: "○" },
-  in_progress: { label: "In progress", symbol: "◐" },
-  done: { label: "Done", symbol: "✓" },
-  skipped: { label: "Skipped", symbol: "⊘" },
-  deferred: { label: "Deferred", symbol: "⏸" },
+/** Display label, symbol and badge tone for each subtask lifecycle state. */
+const SUBTASK_DISPLAY: Record<
+  string,
+  { label: string; symbol: string; tone: "neutral" | "primary" | "success" | "warning" }
+> = {
+  pending: { label: "Pending", symbol: "○", tone: "neutral" },
+  in_progress: { label: "In progress", symbol: "◐", tone: "primary" },
+  done: { label: "Done", symbol: "✓", tone: "success" },
+  skipped: { label: "Skipped", symbol: "⊘", tone: "neutral" },
+  deferred: { label: "Deferred", symbol: "⏸", tone: "warning" },
 };
 
 export function IssueDetailModal({
@@ -112,14 +120,18 @@ export function IssueDetailModal({
       <span id={titleId} className="sr-only">
         Issue #{issueNumber}
       </span>
-      {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
+      {error && (
+        <Alert tone="destructive" className="mb-3">
+          {error}
+        </Alert>
+      )}
       {!detail ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">#{detail.number}</span>
-            <Badge>{detail.state}</Badge>
+            <span className="text-xs font-mono text-muted-foreground tnum">#{detail.number}</span>
+            <Badge status={detail.state} />
             <Button
               size="sm"
               variant="outline"
@@ -132,15 +144,13 @@ export function IssueDetailModal({
           </div>
 
           {/* Per-job model/agent override (issue #101) */}
-          <div className="rounded-lg border border-card-border bg-card p-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="rounded-xl border border-card-border bg-secondary/40 p-4">
+            <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <Settings2 className="h-3.5 w-3.5" />
               Run settings
             </p>
             <div className="flex flex-wrap items-end gap-2">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-muted-foreground" htmlFor="modal-agent-select">
-                  Agent
-                </label>
+              <Field label="Agent" htmlFor="modal-agent-select">
                 <AgentSelect
                   id="modal-agent-select"
                   value={overrideAgent}
@@ -148,21 +158,16 @@ export function IssueDetailModal({
                     setOverrideAgent(v);
                     setOverrideModel(defaultModelForAgent(v));
                   }}
-                  className="h-8 text-sm"
                 />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-muted-foreground" htmlFor="modal-model-select">
-                  Model
-                </label>
+              </Field>
+              <Field label="Model" htmlFor="modal-model-select">
                 <ModelSelect
                   id="modal-model-select"
                   value={overrideModel}
                   onChange={setOverrideModel}
                   agent={overrideAgent}
-                  className="h-8 text-sm"
                 />
-              </div>
+              </Field>
               <Button
                 size="sm"
                 disabled={pending}
@@ -177,6 +182,7 @@ export function IssueDetailModal({
                   })
                 }
               >
+                <Play />
                 Start job now
               </Button>
               {detail.labels.includes(queueLabel) ? (
@@ -215,23 +221,15 @@ export function IssueDetailModal({
               )}
             </div>
             {overrideModel !== defaultModel || overrideAgent !== defaultAgent ? (
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Override active — repo default: <span className="font-medium">{defaultModel}</span>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Override active — repo default:{" "}
+                <span className="font-medium text-foreground">{defaultModel}</span>
               </p>
             ) : null}
           </div>
 
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium"
-          />
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            rows={8}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-          />
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} className="font-medium" />
+          <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={8} />
           <Button
             size="sm"
             disabled={pending}
@@ -243,20 +241,23 @@ export function IssueDetailModal({
               })
             }
           >
+            <Save />
             Save changes
           </Button>
 
           <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <Tag className="h-3.5 w-3.5" />
               Labels
             </p>
-            <div className="flex flex-wrap items-center gap-1">
+            <div className="flex flex-wrap items-center gap-1.5">
               {detail.labels.map((l) => (
                 <button
                   key={l}
                   type="button"
                   title="Remove label"
                   disabled={pending}
+                  className="rounded-md focus-ring disabled:opacity-50"
                   onClick={() =>
                     start(() => {
                       setIssueLabelsAction(repoId, detail.number, [], [l])
@@ -265,14 +266,14 @@ export function IssueDetailModal({
                     })
                   }
                 >
-                  <Badge>{l} ×</Badge>
+                  <Badge className="cursor-pointer">{l} ×</Badge>
                 </button>
               ))}
-              <input
+              <Input
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
                 placeholder="add label"
-                className="w-28 rounded-md border border-input bg-background px-2 py-1 text-xs"
+                className="h-8 w-28 text-xs"
               />
               <Button
                 size="sm"
@@ -296,17 +297,22 @@ export function IssueDetailModal({
 
           {subtasks.length > 0 && (
             <div>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <ListChecks className="h-3.5 w-3.5" />
                 Subtasks ({subtasks.filter((s) => s.status === "done").length}/{subtasks.length})
               </p>
-              <ol className="space-y-1">
+              <ol className="space-y-1.5">
                 {subtasks.map((s) => {
-                  const display = SUBTASK_DISPLAY[s.status] ?? { label: s.status, symbol: "○" };
+                  const display = SUBTASK_DISPLAY[s.status] ?? {
+                    label: s.status,
+                    symbol: "○",
+                    tone: "neutral" as const,
+                  };
                   const muted = s.status === "done" || s.status === "skipped";
                   return (
                     <li
                       key={s.id}
-                      className="flex items-center gap-2 rounded-md border border-card-border bg-background px-2 py-1 text-sm"
+                      className="flex items-center gap-2 rounded-lg border border-card-border bg-secondary/40 px-3 py-1.5 text-sm"
                     >
                       <span className="text-muted-foreground" aria-hidden>
                         {display.symbol}
@@ -315,7 +321,7 @@ export function IssueDetailModal({
                         {s.title}
                       </span>
                       <span className="ml-auto">
-                        <Badge>{display.label}</Badge>
+                        <Badge tone={display.tone}>{display.label}</Badge>
                       </span>
                     </li>
                   );
@@ -325,31 +331,32 @@ export function IssueDetailModal({
           )}
 
           <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <MessageSquare className="h-3.5 w-3.5" />
               Comments
             </p>
             <ul className="space-y-2">
               {detail.comments.map((c) => (
                 <li
                   key={`${c.author}-${c.createdAt}`}
-                  className="rounded-md border border-card-border bg-background p-2 text-sm"
+                  className="rounded-lg border border-card-border bg-secondary/40 p-3 text-sm"
                 >
                   <p className="text-xs text-muted-foreground">
-                    {c.author} · {c.createdAt}
+                    <span className="font-medium text-foreground">{c.author}</span> · {c.createdAt}
                   </p>
-                  <p className="whitespace-pre-wrap">{c.body}</p>
+                  <p className="mt-1 whitespace-pre-wrap text-pretty">{c.body}</p>
                 </li>
               ))}
               {detail.comments.length === 0 && (
                 <li className="text-sm text-muted-foreground">No comments yet.</li>
               )}
             </ul>
-            <textarea
+            <Textarea
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               rows={3}
               placeholder="Write a comment…"
-              className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="mt-2"
             />
             <Button
               size="sm"

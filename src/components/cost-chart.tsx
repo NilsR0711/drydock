@@ -1,36 +1,17 @@
-"use client";
-
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { BarList } from "@/components/ui/bar-list";
 import type { DailyCost } from "@/lib/db/cost-queries";
 
+/**
+ * Daily-cost chart. Replaces the former recharts bar chart with the dark-first
+ * BarList primitive: one proportional bar per day, chronological, with a tabular
+ * USD value column.
+ */
 export function CostChart({ data }: { data: DailyCost[] }) {
   const chronological = [...data].reverse();
   return (
-    <div className="h-72 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chronological}>
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-          <XAxis dataKey="day" fontSize={11} stroke="hsl(var(--muted-foreground))" />
-          <YAxis fontSize={11} stroke="hsl(var(--muted-foreground))" />
-          <Tooltip
-            cursor={{ fill: "hsl(var(--muted))" }}
-            contentStyle={{
-              background: "hsl(var(--popover))",
-              border: "1px solid hsl(var(--border))",
-              borderRadius: "0.5rem",
-              color: "hsl(var(--popover-foreground))",
-              fontSize: 12,
-            }}
-            formatter={(v) => `$${Number(v).toFixed(4)}`}
-          />
-          <Bar
-            dataKey="costUsd"
-            fill="hsl(var(--chart-1))"
-            radius={[4, 4, 0, 0]}
-            name="Cost (USD)"
-          />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
+    <BarList
+      items={chronological.map((d) => ({ label: d.day, value: d.costUsd, tone: "chart-1" }))}
+      money
+    />
   );
 }

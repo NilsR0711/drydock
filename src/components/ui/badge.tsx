@@ -12,7 +12,7 @@ const TONES: Record<Tone, string> = {
 };
 
 /** Map a job/issue/CI status to a visual tone. */
-const STATUS_TONE: Record<string, Tone> = {
+export const STATUS_TONE: Record<string, Tone> = {
   queued: "neutral",
   working: "primary",
   ci_running: "warning",
@@ -22,10 +22,13 @@ const STATUS_TONE: Record<string, Tone> = {
   needs_human: "destructive",
   aborted: "neutral",
   interrupted: "warning",
+  open: "neutral",
+  triaged: "primary",
+  releasing: "primary",
 };
 
 /** Statuses that represent live, in-flight work — rendered with a pulsing dot. */
-const ACTIVE_STATUSES = new Set(["working", "ci_running", "retrying"]);
+const ACTIVE_STATUSES = new Set(["working", "ci_running", "retrying", "releasing"]);
 
 export function Badge({
   className,

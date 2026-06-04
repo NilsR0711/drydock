@@ -1,5 +1,7 @@
 "use client";
 
+import type { LucideIcon } from "lucide-react";
+import { Info, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 
@@ -17,6 +19,7 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   variant = "default",
   pending = false,
+  icon,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -27,18 +30,21 @@ export function ConfirmDialog({
   cancelLabel?: string;
   variant?: "default" | "destructive";
   pending?: boolean;
+  icon?: LucideIcon;
 }) {
-  const titleId = "confirm-dialog-title";
+  const isDestructive = variant === "destructive";
+  const Icon = icon ?? (isDestructive ? TriangleAlert : Info);
   return (
-    <Dialog open={open} onClose={() => onOpenChange(false)} labelledById={titleId}>
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h2 id={titleId} className="text-base font-semibold">
-            {title}
-          </h2>
-          {description && <p className="text-sm text-muted-foreground">{description}</p>}
-        </div>
-        <div className="flex justify-end gap-2">
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={title}
+      description={description}
+      icon={Icon}
+      tone={isDestructive ? "destructive" : "primary"}
+      size="sm"
+      footer={
+        <>
           <Button
             variant="outline"
             size="sm"
@@ -48,7 +54,7 @@ export function ConfirmDialog({
             {cancelLabel}
           </Button>
           <Button
-            variant={variant === "destructive" ? "destructive" : "default"}
+            variant={isDestructive ? "destructive" : "default"}
             size="sm"
             disabled={pending}
             onClick={() => {
@@ -58,8 +64,8 @@ export function ConfirmDialog({
           >
             {confirmLabel}
           </Button>
-        </div>
-      </div>
-    </Dialog>
+        </>
+      }
+    />
   );
 }

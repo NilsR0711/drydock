@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -20,13 +21,13 @@ export function JobsHistoryPagination({ page, totalPages }: { page: number; tota
 
   return (
     <nav className="flex items-center justify-center gap-1 py-2" aria-label="Pagination">
-      <PagLink href={pageHref(page - 1)} disabled={page === 1}>
-        ‹
+      <PagLink href={pageHref(page - 1)} disabled={page === 1} aria-label="Previous page">
+        <ChevronLeft className="h-4 w-4" />
       </PagLink>
       {pages.map((p, i) =>
         p === "…" ? (
           // biome-ignore lint/suspicious/noArrayIndexKey: ellipsis sentinel, stable
-          <span key={`ellipsis-${i}`} className="px-1 text-muted-foreground">
+          <span key={`ellipsis-${i}`} className="px-1.5 text-sm text-muted-foreground">
             …
           </span>
         ) : (
@@ -35,8 +36,8 @@ export function JobsHistoryPagination({ page, totalPages }: { page: number; tota
           </PagLink>
         ),
       )}
-      <PagLink href={pageHref(page + 1)} disabled={page === totalPages}>
-        ›
+      <PagLink href={pageHref(page + 1)} disabled={page === totalPages} aria-label="Next page">
+        <ChevronRight className="h-4 w-4" />
       </PagLink>
     </nav>
   );
@@ -47,22 +48,25 @@ function PagLink({
   children,
   disabled,
   active,
+  "aria-label": ariaLabel,
 }: {
   href: string;
   children: React.ReactNode;
   disabled?: boolean;
   active?: boolean;
+  "aria-label"?: string;
 }) {
   return (
     <Link
       href={href}
+      aria-label={ariaLabel}
       aria-disabled={disabled}
       tabIndex={disabled ? -1 : undefined}
       className={cn(
-        "flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-sm transition-colors",
+        "inline-flex h-8 min-w-8 items-center justify-center rounded-md border px-2.5 text-sm font-medium transition-colors focus-ring",
         active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border bg-background text-foreground hover:bg-accent",
+          ? "border-primary bg-primary text-primary-foreground shadow-sm"
+          : "border-border bg-card text-foreground hover-elevate",
         disabled && "pointer-events-none opacity-40",
       )}
     >

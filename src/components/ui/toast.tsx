@@ -1,6 +1,7 @@
 "use client";
 
-import { CheckCircle2, Info, X, XCircle } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { CircleCheck, CircleX, Info, X } from "lucide-react";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { ariaLiveForVariant } from "@/lib/ui/aria-utils";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,7 @@ interface ToastContextValue {
   toast: (input: ToastInput) => void;
   success: (title: string, description?: string) => void;
   error: (title: string, description?: string) => void;
+  info: (title: string, description?: string) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -57,6 +59,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       toast,
       success: (title, description) => toast({ title, description, variant: "success" }),
       error: (title, description) => toast({ title, description, variant: "error" }),
+      info: (title, description) => toast({ title, description, variant: "info" }),
     }),
     [toast],
   );
@@ -75,23 +78,25 @@ export function useToast(): ToastContextValue {
   return ctx;
 }
 
-const ICONS: Record<ToastVariant, typeof Info> = {
-  success: CheckCircle2,
-  error: XCircle,
+const ICONS: Record<ToastVariant, LucideIcon> = {
+  success: CircleCheck,
+  error: CircleX,
   info: Info,
 };
 
-const TONES: Record<ToastVariant, string> = {
-  success: "text-success",
-  error: "text-destructive",
-  info: "text-muted-foreground",
+/** Icon tint + progress-bar fill per variant. */
+const VARIANT_STYLE: Record<ToastVariant, { icon: string; bar: string }> = {
+  success: { icon: "text-success", bar: "bg-success" },
+  error: { icon: "text-destructive", bar: "bg-destructive" },
+  info: { icon: "text-primary", bar: "bg-primary" },
 };
 
 function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
   const Icon = ICONS[t.variant];
+  const style = VARIANT_STYLE[t.variant];
   return (
-    <div className="pointer-events-auto flex items-start gap-3 rounded-xl border border-card-border bg-card p-3 shadow-lg">
-      <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", TONES[t.variant])} />
+    <div className="dd-toast dd-toast-in pointer-events-auto relative flex items-start gap-3 overflow-hidden rounded-xl border border-card-border bg-card p-3.5 shadow-lg">
+      <Icon className={cn("mt-0.5 h-[18px] w-[18px] shrink-0", style.icon)} />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{t.title}</p>
         {t.description && <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>}
@@ -104,6 +109,10 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: numb
       >
         <X className="h-3.5 w-3.5" />
       </button>
+      <span
+        className={cn("dd-toast-progress absolute bottom-0 left-0 h-0.5 w-full", style.bar)}
+        style={{ animationDuration: `${AUTO_DISMISS_MS}ms` }}
+      />
     </div>
   );
 }
