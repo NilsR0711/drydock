@@ -13,6 +13,22 @@ import { formatUsd } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
+/** The last 7 calendar days (local time), oldest → newest, as YYYY-MM-DD. */
+function last7Days(): string[] {
+  const out: string[] = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+    out.push(
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+        d.getDate(),
+      ).padStart(2, "0")}`,
+    );
+  }
+  return out;
+}
+
 export default function CostsPage() {
   const daily = dailyCosts();
   const byModel = costByModel();
@@ -21,10 +37,13 @@ export default function CostsPage() {
   const spendToday = todayCost();
   const spendLimit = getSettings().dailyCostLimitUsd;
 
-  // Last 7 days, newest first → chronological for the sparkline trend.
-  const last7 = daily.slice(0, 7);
+  // Last 7 calendar days, zero-filled so quiet days still appear (matches the
+  // dashboard trend). `days` is oldest → newest; the list renders newest first.
+  const byDay = new Map(daily.map((d) => [d.day, d.costUsd]));
+  const days = last7Days();
+  const last7 = [...days].reverse().map((day) => ({ day, costUsd: byDay.get(day) ?? 0 }));
   const total7 = last7.reduce((sum, d) => sum + d.costUsd, 0);
-  const sparkData = [...last7].reverse().map((d) => d.costUsd);
+  const sparkData = days.map((day) => byDay.get(day) ?? 0);
 
   const modelItems = byModel
     .filter((m) => m.costUsd > 0)
@@ -82,7 +101,7 @@ export default function CostsPage() {
             <h3 className="text-base font-semibold">Last 7 days</h3>
             <span className="tnum text-sm font-semibold">{formatUsd(total7)}</span>
           </div>
-          {sparkData.length === 0 ? (
+          {daily.length === 0 ? (
             <EmptyState
               compact
               icon={DollarSign}

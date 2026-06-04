@@ -257,7 +257,7 @@ export function LogViewer({ jobId, initial = [] }: { jobId: number; initial?: Lo
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const [showFilter, setShowFilter] = useState(false);
   const seen = useRef(new Set<number>(initial.map((l) => l.id)));
-  const { success } = useToast();
+  const { success, error } = useToast();
 
   useEffect(() => {
     const es = new EventSource(`/api/sse/jobs/${jobId}`);
@@ -301,10 +301,15 @@ export function LogViewer({ jobId, initial = [] }: { jobId: number; initial?: Lo
         return `${clock}${l.type}\t${body}`;
       })
       .join("\n");
-    navigator.clipboard
-      ?.writeText(text)
+    const clip = navigator.clipboard;
+    if (!clip) {
+      error("Copy failed", "The clipboard is unavailable in this context.");
+      return;
+    }
+    clip
+      .writeText(text)
       .then(() => success("Log copied", `${lines.length} events`))
-      .catch(() => success("Log copied"));
+      .catch(() => error("Copy failed", "Could not write to the clipboard."));
   }
 
   return (
