@@ -81,7 +81,9 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
   const repoJobs = db.select().from(jobs).where(eq(jobs.repoId, ws.repo.id)).all();
   const jobCount = (statuses: string[]) =>
     repoJobs.filter((j) => statuses.includes(j.status)).length;
-  const workingCount = jobCount(["working", "ci_running", "retrying"]);
+  // Keep Working and CI-running as non-overlapping buckets (matching
+  // dashboardSnapshot), so the two tiles don't double-count ci_running jobs.
+  const workingCount = jobCount(["working", "retrying"]);
   const ciRunningCount = jobCount(["ci_running"]);
   const mergedCount = jobCount(["merged"]);
   const needsHumanCount = jobCount(["needs_human"]);
