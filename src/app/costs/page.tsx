@@ -101,7 +101,7 @@ export default function CostsPage() {
             <h3 className="text-base font-semibold">Last 7 days</h3>
             <span className="tnum text-sm font-semibold">{formatUsd(total7)}</span>
           </div>
-          {daily.length === 0 ? (
+          {daily.length === 0 && spendToday === 0 ? (
             <EmptyState
               compact
               icon={DollarSign}
