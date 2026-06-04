@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/NilsR0711/drydock/compare/v0.1.4...v0.1.5) (2026-06-04)
+
+
+### Features
+
+* dark-first visual design overhaul ([#118](https://github.com/NilsR0711/drydock/issues/118)) ([#148](https://github.com/NilsR0711/drydock/issues/148)) ([8d87b9b](https://github.com/NilsR0711/drydock/commit/8d87b9b1df5ab0c512398d38f2fb4fa223f86c44))
+
 ## [0.1.4](https://github.com/NilsR0711/drydock/compare/v0.1.3...v0.1.4) (2026-06-01)
 
 
