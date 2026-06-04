@@ -31,7 +31,13 @@ function adrNumber(filePath: string): string {
 }
 
 export function AdrReview({ items }: { items: AdrItem[] }) {
-  const pendingCount = items.filter((a) => a.status === "pending_review").length;
+  // Track cards resolved in this session so the header count stays in sync with
+  // the per-card badges before the next navigation refresh.
+  const [resolvedIds, setResolvedIds] = useState<Set<number>>(() => new Set());
+  const markResolved = (id: number) => setResolvedIds((prev) => new Set(prev).add(id));
+  const pendingCount = items.filter(
+    (a) => a.status === "pending_review" && !resolvedIds.has(a.id),
+  ).length;
 
   return (
     <div className="dd-fade-up max-w-3xl">
@@ -54,7 +60,7 @@ export function AdrReview({ items }: { items: AdrItem[] }) {
       ) : (
         <div className="flex flex-col gap-3">
           {items.map((adr) => (
-            <AdrCard key={adr.id} adr={adr} />
+            <AdrCard key={adr.id} adr={adr} onResolved={() => markResolved(adr.id)} />
           ))}
         </div>
       )}
@@ -62,7 +68,7 @@ export function AdrReview({ items }: { items: AdrItem[] }) {
   );
 }
 
-function AdrCard({ adr }: { adr: AdrItem }) {
+function AdrCard({ adr, onResolved }: { adr: AdrItem; onResolved: () => void }) {
   const [pending, start] = useTransition();
   const [comment, setComment] = useState("");
   const [confirmReject, setConfirmReject] = useState(false);
@@ -77,6 +83,7 @@ function AdrCard({ adr }: { adr: AdrItem }) {
       try {
         await approveAdrAction(adr.id);
         setResolved("approved");
+        onResolved();
         success("ADR approved", adr.title);
       } catch (e) {
         error("Failed to approve ADR", e instanceof Error ? e.message : String(e));
@@ -89,6 +96,7 @@ function AdrCard({ adr }: { adr: AdrItem }) {
       try {
         await rejectAdrAction(adr.id, comment);
         setResolved("rejected");
+        onResolved();
         success("ADR rejected", adr.title);
       } catch (e) {
         error("Failed to reject ADR", e instanceof Error ? e.message : String(e));
