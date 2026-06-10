@@ -66,6 +66,39 @@ export interface BabysitterDeps {
   now?: () => number;
   /** When set, CI failures are routed through the auto-heal engine (issue #16). */
   autoHeal?: AutoHealConfig;
+  /**
+   * Review settle gate (issue #159, default 0 = merge immediately). After CI
+   * first goes all-green the loop keeps polling for this long before merging,
+   * so late bot/human reviews can land and feed the review-feedback loop
+   * instead of arriving on an already-merged PR. Any regression to
+   * pending/failed during the window resets the gate.
+   */
+  mergeGateMs?: number;
+}
+
+/**
+ * Tracks the review settle gate across polls (issue #159): `start()` opens the
+ * window on the first all-green poll, `open()` reports whether the window is
+ * still holding the merge back, and `reset()` clears it when checks regress so
+ * a fresh green streak must settle again.
+ */
+function createMergeGate(gateMs: number, now: () => number) {
+  let greenSince: number | undefined;
+  return {
+    /** Returns true when this poll opened the window (first green). */
+    start(): boolean {
+      if (gateMs <= 0) return false;
+      if (greenSince !== undefined) return false;
+      greenSince = now();
+      return true;
+    },
+    open(): boolean {
+      return gateMs > 0 && greenSince !== undefined && now() - greenSince < gateMs;
+    },
+    reset(): void {
+      greenSince = undefined;
+    },
+  };
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -130,6 +163,7 @@ export async function ciBabysitter(
   const ciWaitMs = deps.ciWaitMs ?? Number.POSITIVE_INFINITY;
   const now = deps.now ?? Date.now;
   const deadline = now() + ciWaitMs;
+  const gate = createMergeGate(deps.mergeGateMs ?? 0, now);
 
   let job = jobArg;
   let polls = 0;
@@ -139,17 +173,31 @@ export async function ciBabysitter(
     const outcome = classifyChecks(checks);
 
     if (outcome === "pending") {
+      gate.reset();
       if (now() >= deadline) return escalateCiTimeout(job, prNumber, ciWaitMs, deps, db);
       await sleep(pollMs);
       continue;
     }
 
     if (outcome === "passed") {
+      if (gate.start()) {
+        recordEvent(
+          job.id,
+          "status",
+          { reason: "merge gate: CI green, waiting for late reviews", prNumber },
+          db,
+        );
+      }
+      if (gate.open()) {
+        await sleep(pollMs);
+        continue;
+      }
       await deps.gh.mergePr(prNumber);
       return transitionJob(job.id, "merged", { prNumber }, db);
     }
 
     // failed
+    gate.reset();
     job = transitionJob(job.id, "ci_failed", { prNumber }, db);
     if (job.ciRetryCount >= MAX_CI_RETRIES) {
       return escalateToHuman(job, prNumber, `CI failed ${MAX_CI_RETRIES} times.`, deps, db);
@@ -214,6 +262,7 @@ async function autoHealLoop(
   const now = deps.now ?? heal.now ?? Date.now;
   const ciWaitMs = deps.ciWaitMs ?? Number.POSITIVE_INFINITY;
   const deadline = now() + ciWaitMs;
+  const gate = createMergeGate(deps.mergeGateMs ?? 0, now);
 
   let job = jobArg;
   let pending: PendingHeal | undefined;
@@ -224,12 +273,27 @@ async function autoHealLoop(
     const outcome = classifyChecks(checks);
 
     if (outcome === "pending") {
+      gate.reset();
       if (now() >= deadline) return escalateCiTimeout(job, prNumber, ciWaitMs, deps, db);
       await sleep(pollMs);
       continue;
     }
 
     if (outcome === "passed") {
+      if (gate.start()) {
+        recordEvent(
+          job.id,
+          "status",
+          { reason: "merge gate: CI green, waiting for late reviews", prNumber },
+          db,
+        );
+      }
+      // A pending heal is finalized only once the gate clears: if the window
+      // surfaces a regression, the normal failure path verifies it instead.
+      if (gate.open()) {
+        await sleep(pollMs);
+        continue;
+      }
       if (pending) {
         const after = await heal.headSha(prNumber);
         finalizeHealingAttempt(pending.attemptId, { status: "healed", afterSha: after }, db);
@@ -241,6 +305,7 @@ async function autoHealLoop(
     }
 
     // --- failed ---
+    gate.reset();
     const failing = checks.filter((c) => FAIL_STATES.has(c.state.toUpperCase()));
     const headSha = await heal.headSha(prNumber);
 

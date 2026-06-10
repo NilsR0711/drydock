@@ -77,6 +77,12 @@ export const repos = sqliteTable("repos", {
   // Optional per-repo wall-clock CI wait budget in minutes (issue #52). Null
   // falls back to the global settings.maxCiWaitMinutes default.
   maxCiWaitMinutes: integer("max_ci_wait_minutes"),
+  // Review settle gate in minutes (issue #159, default 0 = merge immediately).
+  // After CI first goes all-green the babysitter keeps polling for this long
+  // before merging, so late bot/human reviews (e.g. cursor[bot]) can land and
+  // feed the review-feedback loop instead of arriving on a merged PR. Any
+  // regression to pending/failed during the window resets the gate.
+  mergeGateMinutes: integer("merge_gate_minutes").notNull().default(0),
   // Optional per-repo per-job USD cost ceiling (issue #57). Null falls back to
   // the global settings.maxJobCostUsd default; 0 disables the ceiling entirely.
   maxJobCostUsd: real("max_job_cost_usd"),

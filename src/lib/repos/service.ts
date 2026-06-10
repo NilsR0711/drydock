@@ -73,6 +73,10 @@ export const repoInputSchema = z.object({
   // Optional per-repo wall-clock CI wait budget in minutes (issue #52).
   // Null/undefined falls back to the global settings.maxCiWaitMinutes default.
   maxCiWaitMinutes: z.number().int().nonnegative().nullish(),
+  // Review settle gate in minutes (issue #159). 0 merges immediately on green
+  // CI (today's behavior); a positive value keeps polling that long after the
+  // first all-green poll so late bot/human reviews can land before the merge.
+  mergeGateMinutes: z.number().int().nonnegative().default(0),
   // Optional per-repo per-job USD cost ceiling (issue #57). Null/undefined falls
   // back to the global settings.maxJobCostUsd default.
   maxJobCostUsd: z.number().nonnegative().nullish(),

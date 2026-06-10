@@ -126,6 +126,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         gh: forge,
         db,
         ciWaitMs,
+        // Review settle gate (issue #159): hold the merge after CI goes green
+        // so late bot/human reviews can land first. 0 merges immediately.
+        mergeGateMs: repo.mergeGateMinutes * 60_000,
         resumeSession: (rj, sessionId, failedLog) =>
           resumeAgentSession(rj, sessionId, failedLog, repo.path, {
             db,
