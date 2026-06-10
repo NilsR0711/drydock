@@ -20,6 +20,7 @@ export function JobMetrics({
   outputTokens,
   durationSec,
   attempts,
+  active = true,
 }: {
   jobId: number;
   issueNumber: number;
@@ -29,10 +30,14 @@ export function JobMetrics({
   outputTokens: number;
   durationSec?: number | null;
   attempts?: number;
+  /** Whether the job is still running (from the server's job status). */
+  active?: boolean;
 }) {
   const [costUsd, setCostUsd] = useState(initialCostUsd);
 
   useEffect(() => {
+    // A finished job's cost is already persisted — don't open a stream.
+    if (!active) return;
     const es = new EventSource(`/api/sse/jobs/${jobId}`);
     const onResult = (ev: MessageEvent) => {
       try {
@@ -44,7 +49,7 @@ export function JobMetrics({
     };
     es.addEventListener("result", onResult);
     return () => es.close();
-  }, [jobId]);
+  }, [jobId, active]);
 
   const tokenSub = `${(inputTokens / 1000).toFixed(0)}k in · ${(outputTokens / 1000).toFixed(1)}k out · #${issueNumber}`;
 

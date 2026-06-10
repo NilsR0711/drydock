@@ -10,9 +10,9 @@ import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
+import { RelativeTime } from "@/components/ui/relative-time";
 import { useToast } from "@/components/ui/toast";
 import { approveAdrAction, rejectAdrAction } from "@/lib/adr/actions";
-import { relativeTime } from "@/lib/utils";
 
 export interface AdrItem {
   id: number;
@@ -110,7 +110,9 @@ function AdrCard({ adr, onResolved }: { adr: AdrItem; onResolved: () => void }) 
         <span className="font-mono text-sm font-semibold text-muted-foreground">{number}</span>
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium">{adr.title}</p>
-          <p className="text-xs text-muted-foreground">{relativeTime(adr.createdAt)}</p>
+          <p className="text-xs text-muted-foreground">
+            <RelativeTime ts={adr.createdAt} />
+          </p>
         </div>
         {isPending ? (
           <div className="flex shrink-0 gap-2">

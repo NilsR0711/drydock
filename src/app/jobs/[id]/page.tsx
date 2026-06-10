@@ -59,6 +59,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       <JobMetrics
         jobId={job.id}
         issueNumber={job.issueNumber}
+        active={inFlight}
         model={job.model}
         initialCostUsd={job.costUsd}
         inputTokens={job.totalInputTokens}

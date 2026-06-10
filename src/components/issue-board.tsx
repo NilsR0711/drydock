@@ -30,7 +30,7 @@ import {
   reorderIssuesAction,
   syncRepoIssuesAction,
 } from "@/lib/issues/actions";
-import { moveIssueDown, moveIssueUp } from "@/lib/issues/order";
+import { moveIssueBefore, moveIssueDown, moveIssueUp } from "@/lib/issues/order";
 import { cn } from "@/lib/utils";
 
 function parseLabels(raw: string): string[] {
@@ -141,9 +141,14 @@ export function IssueBoard({
     if (dragNumber === null || dragNumber === targetNumber) return;
     const moved = issues.find((i) => i.number === dragNumber);
     if (!moved || !inQueue(moved)) return; // only reorder queued items
-    const order = queue.map((i) => i.number).filter((n) => n !== dragNumber);
-    const targetIdx = order.indexOf(targetNumber);
-    order.splice(targetIdx, 0, dragNumber);
+    // Build the new order from the FULL queue, not the search-filtered view:
+    // sending only the visible numbers would partially update priorities and
+    // collide with the hidden issues.
+    const order = moveIssueBefore(
+      issues.filter(inQueue).map((i) => i.number),
+      dragNumber,
+      targetNumber,
+    );
     setDragNumber(null);
     setOverNumber(null);
     start(() => {

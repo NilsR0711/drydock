@@ -17,9 +17,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { RelativeTime } from "@/components/ui/relative-time";
 import { useToast } from "@/components/ui/toast";
 import { abortJobAction, requeueJobAction } from "@/lib/orchestrator/job-actions";
-import { relativeTime } from "@/lib/utils";
 
 export interface NeedsHumanRow {
   id: number;
@@ -115,7 +115,7 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
                     </span>
                     <Badge tone="destructive">needs human</Badge>
                     <span className="text-xs text-muted-foreground">
-                      · {job.attempts} attempts · {relativeTime(job.parkedAt)}
+                      · {job.attempts} attempts · <RelativeTime ts={job.parkedAt} />
                     </span>
                   </Link>
                   <p className="mt-1 text-sm text-muted-foreground text-pretty">

@@ -9,10 +9,19 @@ export interface BudgetGaugeProps {
   label?: string;
 }
 
+/**
+ * Clamped spend/limit ratio for the gauge sweep. The settings schema allows a
+ * limit of 0, which would otherwise produce NaN/Infinity and leak into the SVG
+ * stroke math — a non-positive limit renders as an empty gauge instead.
+ */
+export function budgetRatio(value: number, limit: number): number {
+  return limit > 0 ? Math.min(value / limit, 1) : 0;
+}
+
 /** 270° radial spend gauge: primary → warning → destructive as the limit nears. */
 export function BudgetGauge({ value, limit, size = 132, label = "Spend today" }: BudgetGaugeProps) {
-  const ratio = Math.min(value / limit, 1);
-  const over = value >= limit;
+  const ratio = budgetRatio(value, limit);
+  const over = limit > 0 && value >= limit;
   const tone = over || ratio >= 0.95 ? "destructive" : ratio >= 0.8 ? "warning" : "primary";
   const color = toneVar(tone);
   const r = (size - 18) / 2;
@@ -69,7 +78,8 @@ export function BudgetGauge({ value, limit, size = 132, label = "Spend today" }:
           <Badge tone="warning">{Math.round(ratio * 100)}% used</Badge>
         ) : (
           <span className="text-muted-foreground">
-            {label} · {Math.round(ratio * 100)}% of budget
+            {label}
+            {limit > 0 && <> · {Math.round(ratio * 100)}% of budget</>}
           </span>
         )}
       </div>
@@ -84,8 +94,8 @@ export interface BudgetMeterProps {
 
 /** Compact linear budget meter for the per-repo cost panel. */
 export function BudgetMeter({ value, limit }: BudgetMeterProps) {
-  const ratio = Math.min(value / limit, 1);
-  const over = value >= limit;
+  const ratio = budgetRatio(value, limit);
+  const over = limit > 0 && value >= limit;
   const tone = over || ratio >= 0.95 ? "destructive" : ratio >= 0.8 ? "warning" : "primary";
   return (
     <div className="flex flex-col gap-1.5">
@@ -95,7 +105,7 @@ export function BudgetMeter({ value, limit }: BudgetMeterProps) {
           <span className="font-normal text-muted-foreground">/ ${limit.toFixed(2)}</span>
         </span>
         <span className={cn("text-xs font-medium", `text-${tone}`)}>
-          {Math.round(ratio * 100)}%
+          {limit > 0 ? `${Math.round(ratio * 100)}%` : "—"}
         </span>
       </div>
       <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
