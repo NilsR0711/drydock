@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { notifyPauseTransition } from "@/lib/notify/lifecycle";
 import { getSettings, saveSettings } from "@/lib/settings/service";
-import { transitionJob } from "./jobs";
+import { getJob, transitionJob } from "./jobs";
 import { abortAllJobs, abortJob } from "./singleton";
+import { canTransition, InvalidTransitionError, type JobStatus } from "./state-machine";
 
 /** Put a needs_human (or interrupted) job back in the queue for another attempt. */
 export async function requeueJobAction(jobId: number) {
@@ -23,7 +24,22 @@ export async function requeueJobAction(jobId: number) {
  */
 export async function abortJobAction(jobId: number) {
   abortJob(jobId);
-  const job = transitionJob(jobId, "aborted");
+  // abortJob only signals the subprocess; the job may still be settling its own
+  // transitions (or may already sit in a terminal state). Only flip to aborted
+  // when the state machine allows it from the current status, and tolerate the
+  // race where the job settles between the check and the write.
+  let job = getJob(jobId);
+  if (!job) throw new Error(`job ${jobId} not found`);
+  if (canTransition(job.status as JobStatus, "aborted")) {
+    try {
+      job = transitionJob(jobId, "aborted");
+    } catch (err) {
+      if (!(err instanceof InvalidTransitionError)) throw err;
+      // The job reached a state with no abort edge (e.g. it merged) in between;
+      // report the settled row instead of failing the action.
+      job = getJob(jobId) ?? job;
+    }
+  }
   revalidatePath("/needs-human");
   revalidatePath("/");
   revalidatePath(`/jobs/${jobId}`);

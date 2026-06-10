@@ -18,6 +18,7 @@ import { commandForAgent } from "./agent-command";
 import { type AgentSessionResult, resumeAgentSession, spawnAgentSession } from "./agent-session";
 import { ciBabysitter } from "./ci-babysitter";
 import { getJob, recordEvent, transitionJob } from "./jobs";
+import { InvalidTransitionError } from "./state-machine";
 import {
   markSubtasksDone,
   markSubtasksParked,
@@ -297,9 +298,23 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     const message = err instanceof Error ? err.message : String(err);
     recordEvent(job.id, "error", { message }, db);
     const current = getJob(job.id, db) as Job;
-    if (["working", "ci_running", "retrying"].includes(current.status)) {
+    // ci_failed is included so a throw between the babysitter's ci_failed and
+    // retrying transitions parks the job for a human instead of stranding it
+    // in a non-terminal state forever (which would block sequential repos).
+    if (["working", "ci_running", "ci_failed", "retrying"].includes(current.status)) {
       if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
-      return transitionJob(job.id, "needs_human", { errorMessage: message.slice(0, 500) }, db);
+      try {
+        return transitionJob(job.id, "needs_human", { errorMessage: message.slice(0, 500) }, db);
+      } catch (transitionErr) {
+        if (!(transitionErr instanceof InvalidTransitionError)) throw transitionErr;
+        // A concurrent abort flipped the job terminal between the status read
+        // above and this write; the settled row is the outcome, not a new error.
+        logError(
+          `[run-job] job ${job.id} settled concurrently during failure handling`,
+          transitionErr,
+        );
+        return getJob(job.id, db) as Job;
+      }
     }
     return current;
   } finally {

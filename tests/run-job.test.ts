@@ -4,7 +4,7 @@ import { registerAdr } from "@/lib/adr/service";
 import { createDb, type DB } from "@/lib/db/client";
 import { type Job, jobs } from "@/lib/db/schema";
 import { EmptyCommitError, type Worktree } from "@/lib/git/worktree";
-import { createJob, getJob } from "@/lib/orchestrator/jobs";
+import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { runJob } from "@/lib/orchestrator/run-job";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { saveTemplate } from "@/lib/prompts/templates";
@@ -189,6 +189,40 @@ describe("runJob", () => {
     const result = await runJob(job.id, deps as never);
     expect(result.status).toBe("needs_human");
     expect(result.errorMessage).toContain("push rejected");
+    expect(removed.v).toBe(true);
+  });
+
+  it("recovers a job to needs_human when a throw lands while it sits in ci_failed", async () => {
+    const removed = { v: false };
+    const deps = baseDeps(removed, {
+      runBabysitter: vi.fn(async (job: Job) => {
+        // Simulate a crash between the babysitter's ci_failed and retrying
+        // transitions: the job must not strand in non-terminal ci_failed
+        // (which would block a sequential repo's pipeline forever).
+        transitionJob(job.id, "ci_failed", {}, db);
+        throw new Error("resume crashed");
+      }),
+    });
+    const job = createJob({ repoId, issueNumber: 9 }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("needs_human");
+    expect(result.errorMessage).toContain("resume crashed");
+    expect(removed.v).toBe(true);
+  });
+
+  it("returns the settled row when a concurrent abort lands before failure handling", async () => {
+    const removed = { v: false };
+    const deps = baseDeps(removed, {
+      runBabysitter: vi.fn(async (job: Job) => {
+        // An operator abort flips the job terminal while the babysitter dies;
+        // the catch block must report the settled row, not throw.
+        transitionJob(job.id, "aborted", {}, db);
+        throw new Error("SIGTERM");
+      }),
+    });
+    const job = createJob({ repoId, issueNumber: 10 }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("aborted");
     expect(removed.v).toBe(true);
   });
 

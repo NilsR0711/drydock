@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { jobEvents } from "@/lib/db/schema";
@@ -6,6 +7,7 @@ import { spawnRunner } from "@/lib/exec/runner";
 import { recoverInterruptedJobs, recoverOnStartup } from "@/lib/orchestrator/driver";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { runMockSession } from "@/lib/orchestrator/session";
+import { InvalidTransitionError } from "@/lib/orchestrator/state-machine";
 import { addRepo } from "@/lib/repos/service";
 
 const MOCK_CLAUDE = fileURLToPath(new URL("./fixtures/mock-claude.js", import.meta.url));
@@ -62,6 +64,26 @@ describe("mock-claude.js subprocess", () => {
     });
     expect(final.status).toBe("merged");
   }, 10000);
+});
+
+describe("transitionJob atomicity", () => {
+  it("rejects an invalid transition and leaves the row untouched", () => {
+    const job = createJob({ repoId, issueNumber: 8 }, db);
+    transitionJob(job.id, "working", {}, db);
+    expect(() => transitionJob(job.id, "merged", {}, db)).toThrow(InvalidTransitionError);
+    expect(getJob(job.id, db)?.status).toBe("working");
+    const events = db.select().from(jobEvents).where(eq(jobEvents.jobId, job.id)).all();
+    expect(events.filter((e) => e.type === "status")).toHaveLength(1); // only -> working
+  });
+
+  it("rolls back the status write when the transition event cannot be recorded", () => {
+    const job = createJob({ repoId, issueNumber: 9 }, db);
+    // Force the event insert inside the transaction to fail: the status update
+    // and its event-log entry must commit (or roll back) together.
+    db.run(sql`DROP TABLE job_events`);
+    expect(() => transitionJob(job.id, "working", {}, db)).toThrow();
+    expect(getJob(job.id, db)?.status).toBe("queued");
+  });
 });
 
 describe("crash recovery", () => {

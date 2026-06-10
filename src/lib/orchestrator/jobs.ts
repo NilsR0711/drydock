@@ -50,20 +50,28 @@ export function transitionJob(
   patch: Partial<Job> = {},
   db: DB = getDb(),
 ): Job {
-  const job = getJob(jobId, db);
-  if (!job) throw new Error(`job ${jobId} not found`);
-  assertTransition(job.status as JobStatus, to);
-  const now = Math.floor(Date.now() / 1000);
-  const extra: Partial<Job> = {};
-  if (to === "working" && !job.startedAt) extra.startedAt = now;
-  if (["merged", "needs_human", "aborted"].includes(to)) extra.finishedAt = now;
-  const updated = db
-    .update(jobs)
-    .set({ ...extra, ...patch, status: to })
-    .where(eq(jobs.id, jobId))
-    .returning()
-    .get();
-  recordEvent(jobId, "status", { from: job.status, to }, db);
+  // better-sqlite3 transactions are synchronous and serialized on the single
+  // process connection, so wrapping the read-validate-write makes the
+  // transition atomic: no interleaved write can invalidate the check, and the
+  // status update and its event-log entry commit (or roll back) together.
+  const updated = db.transaction((tx) => {
+    const txDb = tx as unknown as DB;
+    const job = getJob(jobId, txDb);
+    if (!job) throw new Error(`job ${jobId} not found`);
+    assertTransition(job.status as JobStatus, to);
+    const now = Math.floor(Date.now() / 1000);
+    const extra: Partial<Job> = {};
+    if (to === "working" && !job.startedAt) extra.startedAt = now;
+    if (["merged", "needs_human", "aborted"].includes(to)) extra.finishedAt = now;
+    const row = tx
+      .update(jobs)
+      .set({ ...extra, ...patch, status: to })
+      .where(eq(jobs.id, jobId))
+      .returning()
+      .get();
+    recordEvent(jobId, "status", { from: job.status, to }, txDb);
+    return row;
+  });
   emitDashboardChange();
   return updated;
 }

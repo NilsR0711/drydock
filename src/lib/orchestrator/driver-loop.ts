@@ -33,6 +33,7 @@ import { driveReleaseManagement } from "./release-management-driver";
 import { driveReviewFeedback } from "./review-feedback-driver";
 import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
+import { JOB_STATES, TERMINAL_STATES } from "./state-machine";
 import { buildSubtaskGenerator, decomposeRepo } from "./subtask-driver";
 
 /** Latch so the daily cost-limit notification fires once per breach, not per tick. */
@@ -141,9 +142,16 @@ async function autoEligible(
   return true;
 }
 
-const OPEN_STATES = ["queued", "working", "ci_running", "ci_failed", "retrying"] as const;
+// Every non-terminal state counts as "open" for issue-level dedupe, including
+// the operator-gated parking states (needs_human/interrupted, ADR 005): a
+// parked issue is skipped by the tick instead of churning a no-op enqueue (or,
+// worse, auto-requeueing past the operator gate) every poll. Derived from the
+// state machine so it stays in lockstep with enqueueJob's non-terminal dedupe.
+const OPEN_STATES = JOB_STATES.filter((s) => !TERMINAL_STATES.includes(s));
 // Non-terminal, already-started states. A repo with any such job is "in flight":
-// for sequential repos the next issue waits until this clears (merged/needs_human/aborted).
+// for sequential repos the next issue waits until this clears. Parked jobs
+// (needs_human/interrupted) are deliberately NOT in flight — they must not
+// block a sequential repo's pipeline while they wait on an operator.
 const IN_FLIGHT_STATES = ["working", "ci_running", "ci_failed", "retrying"] as const;
 
 function hasOpenJob(db: DB, repoId: number, issueNumber: number): boolean {
