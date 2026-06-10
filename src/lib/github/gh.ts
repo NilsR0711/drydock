@@ -381,8 +381,8 @@ export class GhClient {
       }
     }
     const args = ["label", "create", name];
-    if (opts.color) args.push("--color", opts.color);
-    if (opts.description) args.push("--description", opts.description);
+    if (opts.color) args.push(flagEq("--color", opts.color));
+    if (opts.description) args.push(flagEq("--description", opts.description));
     const res = await this.exec(args);
     // A concurrent create can win the race; treat "already exists" as success.
     if (res.exitCode !== 0 && !/already exists/i.test(res.stderr)) {

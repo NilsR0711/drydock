@@ -225,6 +225,8 @@ export class StreamJsonParser {
       // If the result omits usage (0/0), keep the accumulated per-turn totals.
       if (parsed.inputTokens > 0) this.totalInputTokens = parsed.inputTokens;
       if (parsed.outputTokens > 0) this.totalOutputTokens = parsed.outputTokens;
+      if (parsed.cacheCreationInputTokens > 0)
+        this.totalCacheCreationInputTokens = parsed.cacheCreationInputTokens;
       if (parsed.cacheReadInputTokens > 0)
         this.totalCacheReadInputTokens = parsed.cacheReadInputTokens;
       if (parsed.costUsd !== undefined) this.costUsd = parsed.costUsd;

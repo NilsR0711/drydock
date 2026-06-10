@@ -7,6 +7,9 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const jobId = Number(id);
+  if (!Number.isInteger(jobId) || jobId <= 0) {
+    return new Response("Invalid job id", { status: 400 });
+  }
   const broker = getBroker();
   const encoder = new TextEncoder();
 
@@ -18,9 +21,16 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         controller.enqueue(encoder.encode(`${idLine}event: ${event.type}\ndata: ${data}\n\n`));
       };
 
-      // Replay the last 200 persisted events, then go live.
+      // Replay the last 200 persisted events, then go live. A corrupt persisted
+      // payload must not kill the whole stream, so parse each row defensively.
       for (const row of broker.replay(jobId)) {
-        write({ id: row.id, type: row.type, payload: JSON.parse(row.payload) });
+        let payload: unknown;
+        try {
+          payload = JSON.parse(row.payload);
+        } catch {
+          payload = { error: "unparseable event payload" };
+        }
+        write({ id: row.id, type: row.type, payload });
       }
 
       const sub: Subscriber = { send: write };
