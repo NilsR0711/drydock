@@ -238,3 +238,84 @@ describe("ciBabysitter", () => {
     expect(db.select().from(followupIssues).all()).toHaveLength(1);
   });
 });
+
+describe("ciBabysitter — merge gate (issue #159)", () => {
+  it("holds the merge for the settle window, then merges", async () => {
+    const job = ciRunningJob(20);
+    const { gh, runner } = scriptedGh([[{ name: "build", state: "SUCCESS" }]]);
+    let t = 0;
+    const sleep = vi.fn(async () => {
+      t += 2 * 60_000;
+    });
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: vi.fn(),
+      sleep,
+      now: () => t,
+      mergeGateMs: 5 * 60_000,
+      maxPolls: 1000,
+    });
+    expect(final.status).toBe("merged");
+    // Three gated polls (at 0, 2, and 4 min) before the 5-minute window elapses.
+    expect(sleep).toHaveBeenCalledTimes(3);
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      expect.arrayContaining(["pr", "merge", "5"]),
+      "/tmp/r",
+    );
+  });
+
+  it("resets the settle window when checks regress to pending", async () => {
+    const job = ciRunningJob(21);
+    const { gh } = scriptedGh([
+      [{ name: "build", state: "SUCCESS" }],
+      [{ name: "build", state: "PENDING" }],
+      [{ name: "build", state: "SUCCESS" }],
+    ]);
+    let t = 0;
+    const sleep = vi.fn(async () => {
+      t += 3 * 60_000;
+    });
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: vi.fn(),
+      sleep,
+      now: () => t,
+      mergeGateMs: 5 * 60_000,
+      ciWaitMs: 60 * 60_000,
+      maxPolls: 1000,
+    });
+    expect(final.status).toBe("merged");
+    // Without the reset, the third poll (6 min after the first green) would
+    // merge straight away; the pending regression re-arms the window, costing
+    // two more gated polls (4 sleeps total instead of 2).
+    expect(sleep).toHaveBeenCalledTimes(4);
+  });
+
+  it("still runs the retry path when checks fail during the window", async () => {
+    const job = ciRunningJob(22);
+    const { gh } = scriptedGh([
+      [{ name: "build", state: "SUCCESS" }],
+      [{ name: "build", state: "FAILURE" }],
+      [{ name: "build", state: "SUCCESS" }],
+    ]);
+    const resume = vi.fn(async () => {});
+    let t = 0;
+    const sleep = vi.fn(async () => {
+      t += 3 * 60_000;
+    });
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      sleep,
+      now: () => t,
+      mergeGateMs: 5 * 60_000,
+      maxPolls: 1000,
+    });
+    expect(resume).toHaveBeenCalledOnce();
+    expect(final.status).toBe("merged");
+  });
+});

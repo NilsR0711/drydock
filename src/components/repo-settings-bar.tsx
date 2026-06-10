@@ -17,6 +17,7 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
   const [limit, setLimit] = useState(repo.dailyCostLimitUsd);
   const [maxJobMinutes, setMaxJobMinutes] = useState(repo.maxJobMinutes?.toString() ?? "");
   const [maxCiWaitMinutes, setMaxCiWaitMinutes] = useState(repo.maxCiWaitMinutes?.toString() ?? "");
+  const [mergeGateMinutes, setMergeGateMinutes] = useState(repo.mergeGateMinutes.toString());
   const [adrGating, setAdrGating] = useState(repo.adrGating);
   const [sequential, setSequential] = useState(repo.sequential);
   const [pending, start] = useTransition();
@@ -66,6 +67,15 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
     const minutes = value === "" ? null : Number(value);
     if (minutes !== null && (!Number.isInteger(minutes) || minutes < 0)) return;
     persist({ [field]: minutes });
+  }
+
+  // 0 merges immediately on green CI; a positive value holds the merge so late
+  // bot/human reviews can land first (issue #159).
+  function changeMergeGate(value: string) {
+    setMergeGateMinutes(value);
+    const minutes = Number(value);
+    if (value === "" || !Number.isInteger(minutes) || minutes < 0) return;
+    persist({ mergeGateMinutes: minutes });
   }
 
   function changeGating(value: boolean) {
@@ -137,6 +147,25 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
             value={maxCiWaitMinutes}
             onChange={(e) => changeMinutes("maxCiWaitMinutes", e.target.value)}
             placeholder="Global default"
+            className="w-32"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="repo-merge-gate-minutes"
+            className="text-xs font-medium text-muted-foreground"
+          >
+            Merge gate minutes
+          </label>
+          <Input
+            id="repo-merge-gate-minutes"
+            type="number"
+            min={0}
+            step={1}
+            value={mergeGateMinutes}
+            onChange={(e) => changeMergeGate(e.target.value)}
+            placeholder="0 = merge on green"
             className="w-32"
           />
         </div>

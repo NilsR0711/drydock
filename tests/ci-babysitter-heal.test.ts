@@ -339,4 +339,38 @@ describe("ciBabysitter auto-heal", () => {
     );
     expect(getJob(job.id, db)?.status).toBe("needs_human");
   });
+
+  it("holds the merge for the settle window after a heal goes green (issue #159)", async () => {
+    const job = ciRunningJob(13);
+    const { gh, runner } = scriptedGh([
+      [{ name: "test", state: "FAILURE" }], // poll 1: failing → heal
+      [{ name: "test", state: "SUCCESS" }], // poll 2+: green, gated
+    ]);
+    const resume = vi.fn(async () => {});
+    const headSha = vi.fn().mockResolvedValueOnce("sha-1").mockResolvedValue("sha-2");
+    let t = 0;
+    const sleep = vi.fn(async () => {
+      t += 2 * 60_000;
+    });
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      sleep,
+      pollMs: 1,
+      maxPolls: 20,
+      now: () => t,
+      mergeGateMs: 5 * 60_000,
+      autoHeal: { headSha, provider: "github" },
+    });
+    expect(resume).toHaveBeenCalledOnce();
+    expect(final.status).toBe("merged");
+    // Three gated polls (at 0, 2, and 4 min) before the 5-minute window elapses.
+    expect(sleep).toHaveBeenCalledTimes(3);
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      expect.arrayContaining(["pr", "merge", "5"]),
+      "/tmp/r",
+    );
+  });
 });
