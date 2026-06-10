@@ -49,8 +49,10 @@ export const repos = sqliteTable("repos", {
   // Drydock auto-detect the platform from the repo's config files.
   deploymentPlatform: text("deployment_platform"),
   // JSON string arrays; parsed via repoAutomation(). Only trusted reviewers'
-  // feedback is acted on; ignored bots are never acted on.
+  // feedback is acted on. Bot accounts ([bot] logins) are ignored unless
+  // explicitly allowlisted in trustedBots; ignored bots are never acted on.
   trustedReviewers: text("trusted_reviewers").notNull().default("[]"),
+  trustedBots: text("trusted_bots").notNull().default("[]"),
   ignoredBots: text("ignored_bots")
     .notNull()
     .default('["dependabot[bot]","github-actions[bot]","codecov[bot]"]'),

@@ -8,7 +8,11 @@ import {
 } from "@/lib/orchestrator/review-feedback";
 
 describe("isTrustedReviewer", () => {
-  const cfg = { trustedReviewers: ["alice", "Bob"], ignoredBots: ["dependabot[bot]"] };
+  const cfg = {
+    trustedReviewers: ["alice", "Bob"],
+    trustedBots: [],
+    ignoredBots: ["dependabot[bot]"],
+  };
 
   it("accepts an allowlisted human (case-insensitive)", () => {
     expect(isTrustedReviewer("alice", cfg)).toBe(true);
@@ -25,14 +29,49 @@ describe("isTrustedReviewer", () => {
     ).toBe(false);
   });
 
-  it("ignores typical bot logins by the [bot] suffix", () => {
+  it("ignores [bot] logins that are not on the trusted-bots allowlist", () => {
     expect(
-      isTrustedReviewer("some-ci[bot]", { trustedReviewers: ["some-ci[bot]"], ignoredBots: [] }),
+      isTrustedReviewer("some-ci[bot]", {
+        trustedReviewers: ["some-ci[bot]"],
+        trustedBots: [],
+        ignoredBots: [],
+      }),
     ).toBe(false);
   });
 
-  it("trusts nobody when the allowlist is empty (opt-in safety)", () => {
-    expect(isTrustedReviewer("alice", { trustedReviewers: [], ignoredBots: [] })).toBe(false);
+  it("accepts an allowlisted bot (case-insensitive) — issue #158", () => {
+    const gate = { trustedReviewers: [], trustedBots: ["cursor[bot]"], ignoredBots: [] };
+    expect(isTrustedReviewer("cursor[bot]", gate)).toBe(true);
+    expect(isTrustedReviewer("Cursor[bot]", gate)).toBe(true);
+  });
+
+  it("trusted-bots entries do not grant trust to humans", () => {
+    expect(
+      isTrustedReviewer("alice", { trustedReviewers: [], trustedBots: ["alice"], ignoredBots: [] }),
+    ).toBe(false);
+  });
+
+  it("an explicit ignore beats the trusted-bots allowlist", () => {
+    expect(
+      isTrustedReviewer("cursor[bot]", {
+        trustedReviewers: [],
+        trustedBots: ["cursor[bot]"],
+        ignoredBots: ["cursor[bot]"],
+      }),
+    ).toBe(false);
+  });
+
+  it("trusts nobody when the allowlists are empty (opt-in safety)", () => {
+    expect(
+      isTrustedReviewer("alice", { trustedReviewers: [], trustedBots: [], ignoredBots: [] }),
+    ).toBe(false);
+    expect(
+      isTrustedReviewer("cursor[bot]", {
+        trustedReviewers: [],
+        trustedBots: [],
+        ignoredBots: [],
+      }),
+    ).toBe(false);
   });
 });
 

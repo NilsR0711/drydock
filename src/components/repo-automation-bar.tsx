@@ -165,6 +165,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [whitelist, setWhitelist] = useState(parseList(repo.autoLabelWhitelist).join(", "));
   const [authors, setAuthors] = useState(parseList(repo.priorityAuthors).join(", "));
   const [reviewers, setReviewers] = useState(parseList(repo.trustedReviewers).join(", "));
+  const [allowedBots, setAllowedBots] = useState(parseList(repo.trustedBots).join(", "));
   const [bots, setBots] = useState(parseList(repo.ignoredBots).join(", "));
   const [minAssoc, setMinAssoc] = useState(repo.minAuthorAssociation);
   const [deployPlatform, setDeployPlatform] = useState(repo.deploymentPlatform ?? "");
@@ -313,7 +314,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               setAutoFeedback(v);
               persist({ autoReviewFeedback: v });
             }}
-            help="Runs the mechanical iteration for trusted reviewers (bots ignored)."
+            help="Runs the mechanical iteration for trusted reviewers and allowlisted bots."
           >
             <TagField
               label="Trusted reviewers"
@@ -323,11 +324,18 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               help="Only feedback from these reviewers is acted on."
             />
             <TagField
+              label="Trusted bots"
+              value={allowedBots}
+              onChange={setAllowedBots}
+              onBlur={() => persist({ trustedBots: splitInput(allowedBots) })}
+              help="Bot reviewers (e.g. cursor[bot]) whose findings are acted on. Bots not listed here are ignored."
+            />
+            <TagField
               label="Ignored bots"
               value={bots}
               onChange={setBots}
               onBlur={() => persist({ ignoredBots: splitInput(bots) })}
-              help="Review comments from these bots are skipped."
+              help="Review comments from these bots are always skipped, even if also listed as trusted."
             />
           </AutoToggle>
           <AutoToggle

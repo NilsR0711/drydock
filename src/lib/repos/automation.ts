@@ -18,6 +18,7 @@ export interface RepoAutomation {
   autoLabelWhitelist: string[];
   priorityAuthors: string[];
   trustedReviewers: string[];
+  trustedBots: string[];
   ignoredBots: string[];
   minAuthorAssociation: "approved" | "any";
   maxAttempts: number;
@@ -54,6 +55,7 @@ export function repoAutomation(repo: Repo): RepoAutomation {
     autoLabelWhitelist: parseStringArray(repo.autoLabelWhitelist),
     priorityAuthors: parseStringArray(repo.priorityAuthors),
     trustedReviewers: parseStringArray(repo.trustedReviewers),
+    trustedBots: parseStringArray(repo.trustedBots),
     ignoredBots: parseStringArray(repo.ignoredBots),
     minAuthorAssociation: repo.minAuthorAssociation === "any" ? "any" : "approved",
     maxAttempts: repo.maxAttempts,

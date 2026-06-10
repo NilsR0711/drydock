@@ -18,22 +18,27 @@ import {
 /** How a reviewer comment should be handled. */
 export type FeedbackClassification = "actionable" | "question" | "out_of_scope";
 
-/** The trusted-reviewer / ignored-bot allowlists for one repo. */
+/** The trusted-reviewer / trusted-bot / ignored-bot allowlists for one repo. */
 export interface ReviewerGate {
   trustedReviewers: string[];
+  trustedBots: string[];
   ignoredBots: string[];
 }
 
 /**
- * Whether a reviewer's feedback may be acted on. Bots are always ignored (an
- * explicit ignore-list match, or the conventional `[bot]` login suffix), and a
- * human must appear on the trusted allowlist. An empty allowlist trusts nobody,
- * keeping the feature inert until a repo opts specific reviewers in.
+ * Whether a reviewer's feedback may be acted on. An explicit ignore-list match
+ * always loses. Bot accounts (the conventional `[bot]` login suffix) must
+ * appear on the trusted-bots allowlist (issue #158) — e.g. `cursor[bot]` for
+ * automated review findings; a human must appear on the trusted-reviewers
+ * allowlist. Empty allowlists trust nobody, keeping the feature inert until a
+ * repo opts specific reviewers or bots in.
  */
 export function isTrustedReviewer(login: string, gate: ReviewerGate): boolean {
   const lower = login.toLowerCase();
-  if (lower.endsWith("[bot]")) return false;
   if (gate.ignoredBots.some((b) => b.toLowerCase() === lower)) return false;
+  if (lower.endsWith("[bot]")) {
+    return gate.trustedBots.some((b) => b.toLowerCase() === lower);
+  }
   return gate.trustedReviewers.some((r) => r.toLowerCase() === lower);
 }
 
