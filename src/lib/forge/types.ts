@@ -63,6 +63,13 @@ export interface ForgeClient {
   mergePr(prNumber: number): Promise<void>;
   createPr(input: { head: string; base: string; title: string; body: string }): Promise<number>;
   /**
+   * Re-run the failed jobs of the PR's most recent failed CI run (the CI
+   * auto-heal `rerun` action for flaky checks, issue #16). Optional and
+   * best-effort: only forges that can re-trigger runs (currently GitHub)
+   * implement it. Returns whether a re-run was actually triggered.
+   */
+  reRunFailedChecks?(prNumber: number): Promise<boolean>;
+  /**
    * Refresh rate-limit accounting before a background sweep. Optional and
    * best-effort: only the GitHub forge meters a shared API budget (see the
    * rate-limit governor); other forges omit it.

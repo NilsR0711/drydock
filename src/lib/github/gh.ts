@@ -460,32 +460,28 @@ export class GhClient {
   }
 
   /**
-   * Fetch the failed-step log of the CI run for a PR. `gh run view` is keyed by
-   * run id, not PR, so we (1) resolve the PR's head branch, (2) find the most
-   * recent failed run on that branch, and (3) read its `--log-failed` output.
-   * Returns an empty string (never garbage) when no failed run can be found.
+   * Resolve the most recent failed CI run on a PR's head branch. `gh run` is
+   * keyed by run id, not PR, so we (1) resolve the PR's head branch and
+   * (2) find the newest run on that branch that concluded `failure`.
+   * Best-effort and never-throwing: returns `null` when nothing resolves.
    */
-  async failedRunLog(prNumber: number): Promise<string> {
-    // Best-effort and never-throwing: when the budget is gated, skip silently
-    // rather than raise — the caller treats an empty log as "no detail yet".
-    if (!this.governor.decide("core", currentPriority()).allowed) return "";
-
+  private async latestFailedRunId(prNumber: number): Promise<number | null> {
     // 1. Resolve the PR head branch.
     const prRes = await this.run(
       "gh",
       ["pr", "view", String(prNumber), "--json", "headRefName"],
       this.cwd,
     );
-    if (prRes.exitCode !== 0) return "";
+    if (prRes.exitCode !== 0) return null;
     let branch: string;
     try {
       branch = z
         .object({ headRefName: z.string() })
         .parse(JSON.parse(prRes.stdout || "{}")).headRefName;
     } catch {
-      return "";
+      return null;
     }
-    if (!branch) return "";
+    if (!branch) return null;
 
     // 2. Find the most recent failed run on that branch.
     const listRes = await this.run(
@@ -493,26 +489,50 @@ export class GhClient {
       ["run", "list", "--branch", branch, "--json", "databaseId,conclusion", "--limit", "20"],
       this.cwd,
     );
-    if (listRes.exitCode !== 0) return "";
+    if (listRes.exitCode !== 0) return null;
     let runs: { databaseId: number; conclusion: string }[];
     try {
       runs = z
         .array(z.object({ databaseId: z.number(), conclusion: z.string().default("") }))
         .parse(JSON.parse(listRes.stdout || "[]"));
     } catch {
-      return "";
+      return null;
     }
-    const failed = runs.find((r) => r.conclusion === "failure");
-    if (!failed) return "";
+    return runs.find((r) => r.conclusion === "failure")?.databaseId ?? null;
+  }
 
-    // 3. Read the failed-step log of that run.
-    const logRes = await this.run(
-      "gh",
-      ["run", "view", String(failed.databaseId), "--log-failed"],
-      this.cwd,
-    );
+  /**
+   * Fetch the failed-step log of the CI run for a PR: resolve the most recent
+   * failed run on the PR's head branch, then read its `--log-failed` output.
+   * Returns an empty string (never garbage) when no failed run can be found.
+   */
+  async failedRunLog(prNumber: number): Promise<string> {
+    // Best-effort and never-throwing: when the budget is gated, skip silently
+    // rather than raise — the caller treats an empty log as "no detail yet".
+    if (!this.governor.decide("core", currentPriority()).allowed) return "";
+
+    const runId = await this.latestFailedRunId(prNumber);
+    if (runId === null) return "";
+
+    const logRes = await this.run("gh", ["run", "view", String(runId), "--log-failed"], this.cwd);
     if (logRes.exitCode !== 0) return "";
     return logRes.stdout.slice(-8000);
+  }
+
+  /**
+   * Re-run only the failed jobs of the PR's most recent failed CI run (the CI
+   * auto-heal `rerun` action for flaky checks, issue #16). Best-effort and
+   * never-throwing: returns whether a re-run was actually triggered, so the
+   * caller can escalate instead of pretending a heal attempt happened.
+   */
+  async reRunFailedChecks(prNumber: number): Promise<boolean> {
+    if (!this.governor.decide("core", currentPriority()).allowed) return false;
+
+    const runId = await this.latestFailedRunId(prNumber);
+    if (runId === null) return false;
+
+    const res = await this.run("gh", ["run", "rerun", String(runId), "--failed"], this.cwd);
+    return res.exitCode === 0;
   }
 
   /**

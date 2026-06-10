@@ -90,6 +90,19 @@ describe("driveReleaseManagement — auto pipeline", () => {
     expect(forge.createRelease).toHaveBeenCalledOnce();
   });
 
+  it("skips the forge head-SHA call once the PR's run is past detected", async () => {
+    const repo = addRepo({ path: "/r", name: "r", releaseEnabled: true }, db);
+    mergedJob(repo, 1, 5);
+    const forge = releaseForge();
+    await driveReleaseManagement({ db, forgeFor: () => forge, generatorFor: () => genYes() });
+    expect(forge.prHeadSha).toHaveBeenCalledTimes(1);
+    // Later sweeps in the merge window find the published run in the DB and
+    // never re-resolve the PR's head SHA against the forge.
+    await driveReleaseManagement({ db, forgeFor: () => forge, generatorFor: () => genYes() });
+    await driveReleaseManagement({ db, forgeFor: () => forge, generatorFor: () => genYes() });
+    expect(forge.prHeadSha).toHaveBeenCalledTimes(1);
+  });
+
   it("isolates a per-repo failure so other repos still process", async () => {
     const bad = addRepo({ path: "/bad", name: "bad", releaseEnabled: true }, db);
     const good = addRepo({ path: "/good", name: "good", releaseEnabled: true }, db);

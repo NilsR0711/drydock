@@ -147,6 +147,23 @@ export function verifyHeal(input: VerifyInput): VerifyResult {
   return { verdict: "progressed", reason: "fewer checks failing" };
 }
 
+/**
+ * Judge a plain re-run attempt (flaky checks). A re-run pushes no commit, so
+ * the head SHA never moves and only the failing-check count is meaningful —
+ * {@link verifyHeal}'s same-SHA rejection would misreport every re-run.
+ */
+export function verifyRerun(
+  input: Pick<VerifyInput, "beforeFailingCount" | "afterFailingCount">,
+): VerifyResult {
+  if (input.afterFailingCount >= input.beforeFailingCount) {
+    return { verdict: "rejected", reason: "re-run did not clear the flaky check" };
+  }
+  if (input.afterFailingCount === 0) {
+    return { verdict: "healed", reason: "all checks green after re-run" };
+  }
+  return { verdict: "progressed", reason: "fewer checks failing after re-run" };
+}
+
 // --- Persistence -----------------------------------------------------------
 
 // Sessions actively consuming a run slot (not merely waiting or finished).
@@ -160,10 +177,19 @@ export function getHealingSession(id: number, db: DB = getDb()): HealingSession 
   return db.select().from(healingSessions).where(eq(healingSessions.id, id)).get();
 }
 
+// Statuses a (re)starting babysitter loop can safely pick back up: both can
+// step to `awaiting_slot`, so the caller's next transition is always valid.
+const RESTARTABLE: readonly HealingStatus[] = ["triaging", "cooldown"];
+
 /**
  * Open (or reuse) the healing session for a PR at a given head SHA. Any
  * non-terminal session for the same PR on a *different* head is superseded
  * first, so a session always reflects the SHA actually under repair.
+ *
+ * A same-SHA session is reused only when it is in a restartable state
+ * (`triaging`/`cooldown`). A mid-flight same-SHA session (e.g. `awaiting_ci`)
+ * is an orphan of an interrupted loop — it is superseded and a fresh session
+ * opened, so the caller never receives a session it cannot legally drive.
  */
 export function openHealingSession(
   jobId: number,
@@ -183,10 +209,31 @@ export function openHealingSession(
     }
   }
 
-  const sameSha = existing.find((s) => s.headSha === headSha);
-  if (sameSha) return getHealingSession(sameSha.id, db) ?? sameSha;
+  const sameSha = existing.filter((s) => s.headSha === headSha);
+  const restartable = sameSha.find((s) => (RESTARTABLE as readonly string[]).includes(s.status));
+  if (restartable) return getHealingSession(restartable.id, db) ?? restartable;
+  for (const s of sameSha) {
+    if (!isTerminal(s.status)) transitionHealingSession(s.id, "superseded", db);
+  }
 
   return db.insert(healingSessions).values({ jobId, prNumber, headSha }).returning().get();
+}
+
+/**
+ * Move a still-open session into a terminal exit state, tolerating any current
+ * status: exit states are reachable from every non-terminal state, so this
+ * never throws. Used by the babysitter when it hands a PR to a human, so no
+ * session is left occupying an in-flight slot (the concurrency cap counts
+ * `repairing`/`awaiting_ci`/`verifying` sessions forever otherwise).
+ */
+export function closeHealingSession(
+  id: number,
+  to: "blocked" | "escalated" | "superseded",
+  db: DB = getDb(),
+): void {
+  const session = getHealingSession(id, db);
+  if (!session || isTerminal(session.status)) return;
+  transitionHealingSession(id, to, db);
 }
 
 /** Transition a healing session, validating against the state machine. */

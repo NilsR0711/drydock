@@ -6,6 +6,7 @@ import { classifyFailure } from "./ci-failure-classifier";
 import { buildFixPrompt, DEFAULT_EVIDENCE_LINES, extractEvidence } from "./ci-fix-prompt";
 import {
   activeHealingRunCount,
+  closeHealingSession,
   DEFAULT_HEAL_BUDGETS,
   finalizeHealingAttempt,
   type HealBudgets,
@@ -15,6 +16,7 @@ import {
   recordHealingAttempt,
   transitionHealingSession,
   verifyHeal,
+  verifyRerun,
 } from "./ci-healing";
 import { getJob, recordEvent, transitionJob } from "./jobs";
 
@@ -185,14 +187,17 @@ interface PendingHeal {
   sessionId: number;
   beforeSha: string;
   beforeFailing: number;
+  /** A re-run pushes no commit, so it is verified by failing count alone. */
+  kind: "repair" | "rerun";
 }
 
 /**
  * The opt-in CI auto-heal loop (issue #16). Classifies failing checks, opens a
  * SHA-bound healing session (superseding stale ones), and — under hard budgets,
  * a cooldown, and a concurrency cap — makes one targeted fix attempt at a time.
- * Each attempt is verified for a real, improving change before counting; empty
- * or non-improving heals escalate to a human. Never auto-heals external/unknown
+ * Flaky failures get a forge-level re-run instead of a code fix. Each attempt
+ * is verified for a real, improving change before counting; empty or
+ * non-improving heals escalate to a human. Never auto-heals external/unknown
  * failures.
  */
 async function autoHealLoop(
@@ -239,14 +244,21 @@ async function autoHealLoop(
     const failing = checks.filter((c) => FAIL_STATES.has(c.state.toUpperCase()));
     const headSha = await heal.headSha(prNumber);
 
-    // Verify the previous attempt now that CI has re-run.
+    // Verify the previous attempt now that CI has re-run. A re-run leaves the
+    // head SHA unchanged by design, so it is judged on failing count alone.
     if (pending) {
-      const verdict = verifyHeal({
-        beforeSha: pending.beforeSha,
-        afterSha: headSha,
-        beforeFailingCount: pending.beforeFailing,
-        afterFailingCount: failing.length,
-      });
+      const verdict =
+        pending.kind === "rerun"
+          ? verifyRerun({
+              beforeFailingCount: pending.beforeFailing,
+              afterFailingCount: failing.length,
+            })
+          : verifyHeal({
+              beforeSha: pending.beforeSha,
+              afterSha: headSha,
+              beforeFailingCount: pending.beforeFailing,
+              afterFailingCount: failing.length,
+            });
       finalizeHealingAttempt(pending.attemptId, { status: verdict.verdict, afterSha: headSha }, db);
       const finishedSession = pending.sessionId;
       pending = undefined;
@@ -255,7 +267,12 @@ async function autoHealLoop(
         transitionHealingSession(finishedSession, "escalated", db);
         return escalateToHuman(job, prNumber, `CI auto-heal: ${verdict.reason}.`, deps, db);
       }
-      // progressed → keep healing on the new head; fall through to plan again.
+      // progressed → keep healing on the new head. Park the finished session
+      // via verifying → cooldown *before* opening the next one: left in
+      // `awaiting_ci` it would occupy an in-flight slot forever (the
+      // concurrency cap counts it) and a same-SHA reopen could not restart it.
+      transitionHealingSession(finishedSession, "verifying", db);
+      transitionHealingSession(finishedSession, "cooldown", db);
     }
 
     const session = openHealingSession(job.id, prNumber, headSha, db);
@@ -274,7 +291,7 @@ async function autoHealLoop(
 
     switch (plan.action) {
       case "block": {
-        if (session.status === "triaging") transitionHealingSession(session.id, "blocked", db);
+        closeHealingSession(session.id, "blocked", db);
         await deps.gh.commentIssue(
           job.issueNumber,
           `CI auto-heal: ${plan.reason} — not auto-fixable. Handing over to a human.`,
@@ -287,7 +304,7 @@ async function autoHealLoop(
         );
       }
       case "escalate": {
-        if (session.status === "triaging") transitionHealingSession(session.id, "escalated", db);
+        closeHealingSession(session.id, "escalated", db);
         return escalateToHuman(job, prNumber, `CI auto-heal: ${plan.reason}.`, deps, db);
       }
       case "wait_slot": {
@@ -298,11 +315,10 @@ async function autoHealLoop(
         await sleep(Math.min(plan.waitMs, pollMs));
         continue;
       }
-      case "repair":
-      case "rerun": {
+      case "repair": {
         const sessionId = job.sessionId;
         if (!sessionId) {
-          if (session.status === "triaging") transitionHealingSession(session.id, "escalated", db);
+          closeHealingSession(session.id, "escalated", db);
           return escalateToHuman(job, prNumber, "CI failed but no session id to resume.", deps, db);
         }
         const attempt = recordHealingAttempt(session.id, plan.target, headSha, db);
@@ -311,16 +327,14 @@ async function autoHealLoop(
         job = transitionJob(job.id, "ci_failed", { prNumber }, db);
         job = transitionJob(job.id, "retrying", { ciRetryCount: job.ciRetryCount + 1 }, db);
 
-        if (plan.action === "repair") {
-          // Targeted, category-specific fix prompt with focused, line-capped
-          // evidence (issue #62) — not a generic raw-log dump.
-          const prompt = buildFixPrompt({
-            checkName: plan.target.checkName,
-            log: failedLog,
-            maxLines: budgets.maxEvidenceLines,
-          });
-          await deps.resumeSession(job, sessionId, prompt);
-        }
+        // Targeted, category-specific fix prompt with focused, line-capped
+        // evidence (issue #62) — not a generic raw-log dump.
+        const prompt = buildFixPrompt({
+          checkName: plan.target.checkName,
+          log: failedLog,
+          maxLines: budgets.maxEvidenceLines,
+        });
+        await deps.resumeSession(job, sessionId, prompt);
 
         transitionHealingSession(session.id, "awaiting_ci", db);
         job = transitionJob(job.id, "ci_running", {}, db);
@@ -329,6 +343,41 @@ async function autoHealLoop(
           sessionId: session.id,
           beforeSha: headSha,
           beforeFailing: failing.length,
+          kind: "repair",
+        };
+        continue;
+      }
+      case "rerun": {
+        // A flaky check wants a plain re-run, not a code fix. Trigger it on
+        // the forge first; only a confirmed re-run counts as a heal attempt.
+        const triggered = (await deps.gh.reRunFailedChecks?.(prNumber)) ?? false;
+        if (!triggered) {
+          closeHealingSession(session.id, "escalated", db);
+          return escalateToHuman(
+            job,
+            prNumber,
+            `CI auto-heal: flaky check "${plan.target.checkName}" requires a manual re-run (this forge cannot re-run failed checks).`,
+            deps,
+            db,
+          );
+        }
+        const attempt = recordHealingAttempt(session.id, plan.target, headSha, db);
+        // No agent runs for a re-run: the session skips `repairing` and the
+        // job stays `ci_running` (it never stopped being babysat).
+        transitionHealingSession(session.id, "awaiting_slot", db);
+        transitionHealingSession(session.id, "awaiting_ci", db);
+        recordEvent(
+          job.id,
+          "status",
+          { reason: "auto-heal re-ran flaky check", checkName: plan.target.checkName, prNumber },
+          db,
+        );
+        pending = {
+          attemptId: attempt.id,
+          sessionId: session.id,
+          beforeSha: headSha,
+          beforeFailing: failing.length,
+          kind: "rerun",
         };
         continue;
       }

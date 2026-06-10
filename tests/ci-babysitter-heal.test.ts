@@ -4,7 +4,12 @@ import { followupIssues, healingAttempts, healingSessions } from "@/lib/db/schem
 import type { PrCheck } from "@/lib/github/gh";
 import { GhClient } from "@/lib/github/gh";
 import { ciBabysitter } from "@/lib/orchestrator/ci-babysitter";
-import { DEFAULT_HEAL_BUDGETS } from "@/lib/orchestrator/ci-healing";
+import {
+  activeHealingRunCount,
+  DEFAULT_HEAL_BUDGETS,
+  openHealingSession,
+  transitionHealingSession,
+} from "@/lib/orchestrator/ci-healing";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { addRepo } from "@/lib/repos/service";
 
@@ -161,6 +166,155 @@ describe("ciBabysitter auto-heal", () => {
     expect(final.status).toBe("needs_human");
     expect(resume).not.toHaveBeenCalled();
     expect(getJob(job.id, db)?.errorMessage).toContain("CI did not complete in time");
+  });
+
+  it("re-runs a flaky check on the forge (no agent) and merges when it goes green", async () => {
+    const job = ciRunningJob(7);
+    const { gh, runner } = scriptedGh([
+      [{ name: "e2e", state: "TIMED_OUT" }], // poll 1: flaky → forge re-run
+      [{ name: "e2e", state: "SUCCESS" }], // poll 2: green → merged
+    ]);
+    const resume = vi.fn(async () => {});
+    // A re-run pushes no commit, so the head SHA never moves.
+    const headSha = vi.fn().mockResolvedValue("sha-1");
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      ...fast,
+      autoHeal: { headSha, provider: "github" },
+    });
+    expect(final.status).toBe("merged");
+    expect(resume).not.toHaveBeenCalled(); // a re-run never runs the agent
+    expect(runner).toHaveBeenCalledWith("gh", ["run", "rerun", "1", "--failed"], "/tmp/r");
+    const attempts = db.select().from(healingAttempts).all();
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.status).toBe("healed");
+    expect(db.select().from(healingSessions).all()[0]?.status).toBe("healed");
+  });
+
+  it("escalates when the re-run leaves the flaky check failing", async () => {
+    const job = ciRunningJob(8);
+    const { gh } = scriptedGh([
+      [{ name: "e2e", state: "TIMED_OUT" }], // poll 1: flaky → forge re-run
+      [{ name: "e2e", state: "TIMED_OUT" }], // poll 2: still failing → escalate
+    ]);
+    const resume = vi.fn(async () => {});
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      ...fast,
+      autoHeal: { headSha: vi.fn().mockResolvedValue("sha-1"), provider: "github" },
+    });
+    expect(final.status).toBe("needs_human");
+    expect(resume).not.toHaveBeenCalled();
+    expect(getJob(job.id, db)?.errorMessage).toContain("re-run did not clear");
+    const attempts = db.select().from(healingAttempts).all();
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.status).toBe("rejected");
+    expect(db.select().from(healingSessions).all()[0]?.status).toBe("escalated");
+  });
+
+  it("escalates without burning an attempt when the forge cannot re-run", async () => {
+    const job = ciRunningJob(9);
+    const { gh, runner } = scriptedGh([[{ name: "e2e", state: "TIMED_OUT" }]]);
+    // Simulate a forge without re-run support (e.g. GitLab).
+    (gh as { reRunFailedChecks?: unknown }).reRunFailedChecks = undefined;
+    const resume = vi.fn(async () => {});
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      ...fast,
+      autoHeal: { headSha: vi.fn().mockResolvedValue("sha-1"), provider: "github" },
+    });
+    expect(final.status).toBe("needs_human");
+    expect(resume).not.toHaveBeenCalled();
+    expect(getJob(job.id, db)?.errorMessage).toContain("manual re-run");
+    expect(db.select().from(healingAttempts).all()).toHaveLength(0); // no attempt burned
+    expect(db.select().from(healingSessions).all()[0]?.status).toBe("escalated");
+    expect(db.select().from(followupIssues).all()).toHaveLength(1);
+    expect(runner.mock.calls.some(([, args]) => args[1] === "rerun")).toBe(false);
+  });
+
+  it("escalates without burning an attempt when the forge re-run is not triggered", async () => {
+    const job = ciRunningJob(10);
+    const { gh } = scriptedGh([[{ name: "e2e", state: "TIMED_OUT" }]]);
+    gh.reRunFailedChecks = vi.fn(async () => false);
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: vi.fn(async () => {}),
+      ...fast,
+      autoHeal: { headSha: vi.fn().mockResolvedValue("sha-1"), provider: "github" },
+    });
+    expect(final.status).toBe("needs_human");
+    expect(db.select().from(healingAttempts).all()).toHaveLength(0);
+    expect(db.select().from(healingSessions).all()[0]?.status).toBe("escalated");
+  });
+
+  it("closes a progressed session before opening the next one (no leaked slot)", async () => {
+    const job = ciRunningJob(11);
+    const { gh } = scriptedGh([
+      [
+        { name: "test", state: "FAILURE" },
+        { name: "lint", state: "FAILURE" },
+      ], // poll 1: two failures → repair "test"
+      [{ name: "lint", state: "FAILURE" }], // poll 2: progressed → repair "lint"
+      [{ name: "lint", state: "SUCCESS" }], // poll 3: green → merged
+    ]);
+    const resume = vi.fn(async () => {});
+    const headSha = vi
+      .fn()
+      .mockResolvedValueOnce("sha-1")
+      .mockResolvedValueOnce("sha-2")
+      .mockResolvedValue("sha-3");
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      ...fast,
+      autoHeal: { headSha, provider: "github" },
+    });
+    expect(final.status).toBe("merged");
+    expect(resume).toHaveBeenCalledTimes(2);
+    const sessions = db.select().from(healingSessions).all();
+    expect(sessions).toHaveLength(2);
+    // The progressed session must not linger in awaiting_ci: it would occupy
+    // an in-flight healing slot forever and block all future healing.
+    expect(sessions.find((s) => s.headSha === "sha-1")?.status).toBe("superseded");
+    expect(sessions.find((s) => s.headSha === "sha-2")?.status).toBe("healed");
+    expect(activeHealingRunCount(db)).toBe(0);
+    const attempts = db.select().from(healingAttempts).all();
+    expect(attempts.map((a) => a.status)).toEqual(["progressed", "healed"]);
+  });
+
+  it("recovers from a stale mid-flight session for the same head SHA (no crash)", async () => {
+    const job = ciRunningJob(12);
+    // A previous loop crashed and left a session for sha-1 stuck in awaiting_ci.
+    const stale = openHealingSession(job.id, 5, "sha-1", db);
+    transitionHealingSession(stale.id, "awaiting_slot", db);
+    transitionHealingSession(stale.id, "repairing", db);
+    transitionHealingSession(stale.id, "awaiting_ci", db);
+    const { gh } = scriptedGh([
+      [{ name: "test", state: "FAILURE" }],
+      [{ name: "test", state: "SUCCESS" }],
+    ]);
+    const resume = vi.fn(async () => {});
+    const headSha = vi.fn().mockResolvedValueOnce("sha-1").mockResolvedValue("sha-2");
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      ...fast,
+      autoHeal: { headSha, provider: "github" },
+    });
+    expect(final.status).toBe("merged");
+    const sessions = db.select().from(healingSessions).all();
+    expect(sessions.find((s) => s.id === stale.id)?.status).toBe("superseded");
+    expect(sessions.find((s) => s.id !== stale.id)?.status).toBe("healed");
+    expect(activeHealingRunCount(db)).toBe(0);
   });
 
   it("stays bounded by the heal budget and escalates rather than looping forever", async () => {
