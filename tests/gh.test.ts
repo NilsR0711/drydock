@@ -588,7 +588,7 @@ describe("GhClient.ensureLabel", () => {
     await gh.ensureLabel("drydock:queue", { color: "1f6feb", description: "Queued" });
     expect(runner).toHaveBeenLastCalledWith(
       "gh",
-      ["label", "create", "drydock:queue", "--color", "1f6feb", "--description", "Queued"],
+      ["label", "create", "drydock:queue", "--color=1f6feb", "--description=Queued"],
       "/repo",
     );
   });

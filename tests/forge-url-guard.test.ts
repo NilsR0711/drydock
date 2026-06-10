@@ -52,6 +52,19 @@ describe("isPrivateOrReservedHost", () => {
     expect(isPrivateOrReservedHost("[::1]")).toBe(true);
   });
 
+  it("flags hex-notation IPv4-mapped IPv6 (Node URL canonical form)", () => {
+    // Node's URL constructor normalizes the dotted form to hex groups, e.g.
+    // new URL("https://[::ffff:169.254.169.254]").hostname → "[::ffff:a9fe:a9fe]".
+    expect(isPrivateOrReservedHost("[::ffff:a9fe:a9fe]")).toBe(true); // 169.254.169.254
+    expect(isPrivateOrReservedHost("[::ffff:7f00:1]")).toBe(true); // 127.0.0.1
+    expect(isPrivateOrReservedHost("[::ffff:c0a8:101]")).toBe(true); // 192.168.1.1
+    expect(isPrivateOrReservedHost("::ffff:0:101")).toBe(true); // 0.0.1.1
+  });
+
+  it("does not flag a public hex-notation IPv4-mapped address", () => {
+    expect(isPrivateOrReservedHost("[::ffff:101:101]")).toBe(false); // 1.1.1.1
+  });
+
   it("does not flag public IPs or DNS names", () => {
     expect(isPrivateOrReservedHost("140.82.121.3")).toBe(false);
     expect(isPrivateOrReservedHost("172.32.0.1")).toBe(false);
@@ -75,6 +88,17 @@ describe("assertSafeForgeUrl", () => {
       /private|loopback/i,
     );
     expect(() => assertSafeForgeUrl("http://127.0.0.1:8080/api/v4")).toThrow(ForgeError);
+  });
+
+  it("rejects an IPv4-mapped IPv6 metadata target after URL normalization", () => {
+    // The URL constructor rewrites the host to hex form before the guard runs;
+    // both spellings must be refused.
+    expect(() => assertSafeForgeUrl("https://[::ffff:169.254.169.254]/latest/meta-data")).toThrow(
+      /private|loopback/i,
+    );
+    expect(() => assertSafeForgeUrl("https://[::ffff:a9fe:a9fe]/latest/meta-data")).toThrow(
+      /private|loopback/i,
+    );
   });
 
   it("allows a private target only with the explicit opt-in", () => {

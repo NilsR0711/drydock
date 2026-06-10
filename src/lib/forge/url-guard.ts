@@ -45,6 +45,17 @@ function isPrivateIpv6(host: string): boolean {
   // IPv4-mapped (::ffff:a.b.c.d) — reuse the v4 rules on the embedded address.
   const mapped = h.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
   if (mapped?.[1]) return isPrivateIpv4(mapped[1]);
+  // Node's URL constructor canonicalizes IPv4-mapped hosts to hex groups before
+  // any guard sees them (`[::ffff:169.254.169.254]` → `[::ffff:a9fe:a9fe]`), so
+  // the dotted match above never fires for URL-derived hostnames. Decode the
+  // hex form — including the shorter `::ffff:hhhh` / `::ffff:0:hhhh` spellings,
+  // which encode 0.0.x.y — back to dotted-decimal and reuse the v4 rules.
+  const hexMapped = h.match(/^::ffff:(?:([0-9a-f]{1,4}):)?([0-9a-f]{1,4})$/);
+  if (hexMapped?.[2]) {
+    const hi = Number.parseInt(hexMapped[1] ?? "0", 16);
+    const lo = Number.parseInt(hexMapped[2], 16);
+    return isPrivateIpv4(`${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`);
+  }
   if (h.startsWith("fe80")) return true; // link-local
   // Unique local addresses fc00::/7 (fc.. and fd..).
   if (/^f[cd]/.test(h)) return true;
