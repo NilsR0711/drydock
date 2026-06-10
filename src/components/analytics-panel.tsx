@@ -133,7 +133,12 @@ export function AnalyticsPanel({
             </div>
           </div>
           {chronological.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No completed jobs in this window.</p>
+            <EmptyState
+              compact
+              icon={ChartNoAxesColumn}
+              title="No completed jobs"
+              description="Daily throughput appears once jobs finish in this window."
+            />
           ) : (
             <ColumnChart data={chronological} height={150} />
           )}
@@ -142,7 +147,12 @@ export function AnalyticsPanel({
         <Card pad="lg">
           <h3 className="mb-4 text-base font-semibold">Spend by model</h3>
           {modelBars.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No spend recorded yet.</p>
+            <EmptyState
+              compact
+              icon={DollarSign}
+              title="No spend yet"
+              description="Model costs appear once jobs run in this window."
+            />
           ) : (
             <BarList items={modelBars} money />
           )}

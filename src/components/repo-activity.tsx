@@ -80,7 +80,12 @@ export function RepoActivity({
           )}
         </div>
         {recentJobs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No jobs yet.</p>
+          <EmptyState
+            compact
+            icon={History}
+            title="No jobs yet"
+            description="Finished runs will appear here once Drydock processes an issue."
+          />
         ) : (
           <ul className="flex flex-col gap-0.5">
             {recentJobs.map((j) => (

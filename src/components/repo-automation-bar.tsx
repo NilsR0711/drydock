@@ -3,7 +3,6 @@
 import {
   GitPullRequestArrow,
   HeartPulse,
-  type LucideIcon,
   MessageSquare,
   ShieldCheck,
   Tag,
@@ -11,8 +10,8 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState, useTransition } from "react";
 import { Alert } from "@/components/ui/alert";
-import type { Tone } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
+import { Fieldset } from "@/components/ui/fieldset";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -22,7 +21,6 @@ import { HelpTip } from "@/components/ui/tooltip";
 import type { Repo } from "@/lib/db/schema";
 import { updateRepoAction } from "@/lib/repos/actions";
 import { AGENT_INSTRUCTIONS_MAX_CHARS } from "@/lib/repos/agent-instructions";
-import { cn } from "@/lib/utils";
 
 function parseList(raw: string): string[] {
   try {
@@ -43,43 +41,6 @@ function splitInput(value: string): string[] {
         .filter(Boolean),
     ),
   ];
-}
-
-const FIELDSET_CHIP: Record<Tone, string> = {
-  neutral: "bg-secondary text-muted-foreground",
-  primary: "bg-primary/10 text-primary",
-  success: "bg-success-muted text-success",
-  warning: "bg-warning-muted text-warning",
-  destructive: "bg-destructive/10 text-destructive",
-};
-
-function Fieldset({
-  icon: Icon,
-  legend,
-  description,
-  tone = "neutral",
-  children,
-}: {
-  icon: LucideIcon;
-  legend: string;
-  description?: string;
-  tone?: Tone;
-  children: ReactNode;
-}) {
-  return (
-    <fieldset className="rounded-lg border border-border p-4">
-      <legend className="flex items-center gap-2 px-1">
-        <span
-          className={cn("flex h-6 w-6 items-center justify-center rounded-md", FIELDSET_CHIP[tone])}
-        >
-          <Icon className="h-3.5 w-3.5" />
-        </span>
-        <span className="text-sm font-semibold">{legend}</span>
-      </legend>
-      {description && <p className="mb-3 mt-1 text-xs text-muted-foreground">{description}</p>}
-      <div className="flex flex-col gap-3">{children}</div>
-    </fieldset>
-  );
 }
 
 function AutoToggle({

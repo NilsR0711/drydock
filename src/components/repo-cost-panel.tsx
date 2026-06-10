@@ -1,5 +1,6 @@
 import { DollarSign } from "lucide-react";
 import { BudgetMeter } from "@/components/ui/budget-gauge";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Sparkline } from "@/components/ui/sparkline";
 import { formatUsd } from "@/lib/utils";
 
@@ -45,7 +46,12 @@ export function RepoCostPanel({
       <BudgetMeter value={todayUsd} limit={limitUsd} />
 
       {daily.length === 0 && todayUsd === 0 ? (
-        <p className="text-sm text-muted-foreground">No spend recorded yet.</p>
+        <EmptyState
+          compact
+          icon={DollarSign}
+          title="No spend yet"
+          description="Costs appear here once jobs run in this repo."
+        />
       ) : (
         <>
           <div className="rounded-lg border border-border p-3">
@@ -54,7 +60,7 @@ export function RepoCostPanel({
               <span className="tnum">{formatUsd(weekTotal)}</span>
             </div>
             {series.length > 1 ? (
-              <Sparkline data={series} width={320} height={42} tone="chart-1" />
+              <Sparkline data={series} width={320} height={42} tone="chart-1" average />
             ) : (
               <p className="text-xs text-muted-foreground">Not enough data yet.</p>
             )}
