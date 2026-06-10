@@ -18,6 +18,7 @@ import { commandForAgent } from "./agent-command";
 import { type AgentSessionResult, resumeAgentSession, spawnAgentSession } from "./agent-session";
 import { ciBabysitter } from "./ci-babysitter";
 import { getJob, recordEvent, transitionJob } from "./jobs";
+import { runOneShotAndRecordCost } from "./one-shot-runner";
 import { InvalidTransitionError } from "./state-machine";
 import {
   markSubtasksDone,
@@ -47,6 +48,31 @@ export interface RunJobDeps {
   runBabysitter?: (job: Job, prNumber: number) => Promise<Job>;
   verify?: (job: Job, prNumber: number) => Promise<void>;
   notify?: NotifyEvent;
+  /** Run the read-only plan stage (issue #160); injectable for tests. */
+  runPlan?: (job: Job, prompt: string, cwd: string) => Promise<{ text: string; exitCode: number }>;
+  /** Post a comment on the job's issue; injectable for tests. */
+  commentIssue?: (issueNumber: number, body: string) => Promise<void>;
+}
+
+/** Keeps an unexpectedly verbose plan from flooding the work prompt. */
+const PLAN_MAX_CHARS = 10_000;
+
+/** Render the plan as a dedicated, length-capped prompt section (issue #160). */
+export function planPromptSection(plan: string): string {
+  const trimmed = plan.trim();
+  if (!trimmed) return "";
+  const capped =
+    trimmed.length > PLAN_MAX_CHARS
+      ? `${trimmed.slice(0, PLAN_MAX_CHARS)}\n… (truncated)`
+      : trimmed;
+  return [
+    "",
+    "",
+    "## Implementation plan",
+    "Follow this plan unless the code contradicts it:",
+    "",
+    capped,
+  ].join("\n");
 }
 
 /** Event-aware notification sink: routes a lifecycle event + message downstream. */
@@ -119,6 +145,25 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         costCapUsd: maxJobCostUsd,
       }));
   const createPr = deps.createPr ?? ((input) => forge.createPr(input));
+  // Plan stage runner (issue #160): a read-only, cost-tracked one-shot in the
+  // worktree. Reuses the model the implementation session will run on.
+  const runPlan =
+    deps.runPlan ??
+    ((j: Job, prompt: string, cwd: string) =>
+      runOneShotAndRecordCost({
+        provider,
+        command,
+        model: j.model ?? repo.defaultModel,
+        cwd,
+        prompt,
+        repoId: repo.id,
+        type: "plan",
+        timeoutMs,
+        db,
+      }).then((r) => ({ text: r.text, exitCode: r.exitCode })));
+  const commentIssue =
+    deps.commentIssue ??
+    ((issueNumber: number, body: string) => forge.commentIssue(issueNumber, body));
   const runBabysitter =
     deps.runBabysitter ??
     ((j, prNumber) =>
@@ -188,6 +233,50 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // operator's free-text guidance as a dedicated, length-capped section.
     // Empty/unset leaves the prompt untouched.
     prompt += agentInstructionsPromptSection(repo.agentInstructions);
+
+    // Opt-in plan-first stage (issue #160): a read-only one-shot pass produces
+    // an implementation plan that is posted on the issue (audit trail) and
+    // embedded in the implementation prompt. Best-effort by construction: a
+    // non-zero exit, an empty plan, or a failed comment falls back to the
+    // normal single-stage run rather than failing the job.
+    if (repo.planFirst) {
+      const planPrompt = renderTemplate(resolveTemplateContent(repo.id, TEMPLATE_NAMES.plan, db), {
+        ISSUE_NUM: job.issueNumber,
+        BRANCH: wt.branch,
+        REPO_NAME: repo.name,
+      });
+      try {
+        const plan = await runPlan(getJob(job.id, db) as Job, planPrompt, wt.path);
+        const planText = plan.text.trim();
+        if (plan.exitCode === 0 && planText.length > 0) {
+          recordEvent(job.id, "status", { reason: "plan stage complete" }, db);
+          prompt += planPromptSection(planText);
+          try {
+            await commentIssue(
+              job.issueNumber,
+              `**Implementation plan** (job ${job.id}):\n\n${planText}`,
+            );
+          } catch (err) {
+            logError(`[run-job] plan comment failed for job ${job.id}`, err);
+          }
+        } else {
+          recordEvent(
+            job.id,
+            "status",
+            { reason: "plan stage failed, continuing without a plan", exitCode: plan.exitCode },
+            db,
+          );
+        }
+      } catch (err) {
+        logError(`[run-job] plan stage failed for job ${job.id}`, err);
+        recordEvent(
+          job.id,
+          "status",
+          { reason: "plan stage failed, continuing without a plan" },
+          db,
+        );
+      }
+    }
 
     const session = await runSession(getJob(job.id, db) as Job, prompt, wt.path);
     if (session.timedOut) {
