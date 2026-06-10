@@ -50,6 +50,30 @@ describe("ADR registration", () => {
     expect(listAdrs(undefined, db)).toHaveLength(1);
   });
 
+  it("scopes dedup to the repo: the same path in two repos registers twice", () => {
+    const a = addRepo({ path: "/a", name: "a" }, db).id;
+    const b = addRepo({ path: "/b", name: "b" }, db).id;
+    const first = registerAdr({ repoId: a, filePath: "docs/adr/001.md", content: "# From A" }, db);
+    const second = registerAdr({ repoId: b, filePath: "docs/adr/001.md", content: "# From B" }, db);
+    expect(second.id).not.toBe(first.id);
+    expect(second.repoId).toBe(b);
+    expect(listAdrs(undefined, db, a).map((x) => x.title)).toEqual(["From A"]);
+    expect(listAdrs(undefined, db, b).map((x) => x.title)).toEqual(["From B"]);
+  });
+
+  it("is idempotent per (repo, path) and keeps null-repo ADRs separate", () => {
+    const a = addRepo({ path: "/a", name: "a" }, db).id;
+    const scoped = registerAdr({ repoId: a, filePath: "docs/adr/002.md", content: "# S" }, db);
+    expect(registerAdr({ repoId: a, filePath: "docs/adr/002.md", content: "# S2" }, db).id).toBe(
+      scoped.id,
+    );
+    const unscoped = registerAdr({ filePath: "docs/adr/002.md", content: "# U" }, db);
+    expect(unscoped.id).not.toBe(scoped.id);
+    expect(unscoped.repoId).toBeNull();
+    expect(registerAdr({ filePath: "docs/adr/002.md", content: "# U2" }, db).id).toBe(unscoped.id);
+    expect(listAdrs(undefined, db)).toHaveLength(2);
+  });
+
   it("approve / reject transitions", () => {
     const adr = registerAdr({ filePath: "/r/docs/adr/002.md", content: "# B" }, db);
     expect(setAdrStatus(adr.id, "approved", db).status).toBe("approved");

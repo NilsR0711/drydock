@@ -67,6 +67,12 @@ export const repoInputSchema = z.object({
   ignoredBots: jsonStringArray('["dependabot[bot]","github-actions[bot]","codecov[bot]"]'),
   minAuthorAssociation: z.enum(["approved", "any"]).default("approved"),
   maxAttempts: z.number().int().positive().default(3),
+  // Optional per-repo wall-clock session timeout in minutes (issue #47).
+  // Null/undefined falls back to the global settings.maxJobMinutes default.
+  maxJobMinutes: z.number().int().nonnegative().nullish(),
+  // Optional per-repo wall-clock CI wait budget in minutes (issue #52).
+  // Null/undefined falls back to the global settings.maxCiWaitMinutes default.
+  maxCiWaitMinutes: z.number().int().nonnegative().nullish(),
   // Optional per-repo per-job USD cost ceiling (issue #57). Null/undefined falls
   // back to the global settings.maxJobCostUsd default.
   maxJobCostUsd: z.number().nonnegative().nullish(),

@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { type Adr, adrs } from "@/lib/db/schema";
 
@@ -15,14 +15,26 @@ export function parseAdrTitle(content: string, filePath: string): string {
 }
 
 /**
- * Register a discovered ADR file. Idempotent per file_path: re-seeing a file
- * does not create a duplicate row (the watcher may fire add + change).
+ * Register a discovered ADR file. Idempotent per (repo_id, file_path):
+ * re-seeing a file does not create a duplicate row (the watcher may fire
+ * add + change), but the same path in another repo registers separately so an
+ * ADR is never attributed to the wrong repo.
  */
 export function registerAdr(
   input: { jobId?: number; repoId?: number; filePath: string; content: string },
   db: DB = getDb(),
 ): Adr {
-  const existing = db.select().from(adrs).where(eq(adrs.filePath, input.filePath)).get();
+  const repoId = input.repoId ?? null;
+  const existing = db
+    .select()
+    .from(adrs)
+    .where(
+      and(
+        eq(adrs.filePath, input.filePath),
+        repoId === null ? isNull(adrs.repoId) : eq(adrs.repoId, repoId),
+      ),
+    )
+    .get();
   if (existing) return existing;
   return db
     .insert(adrs)

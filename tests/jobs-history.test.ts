@@ -161,6 +161,58 @@ describe("listJobsPage", () => {
     expect(result.rows[0]?.issueTitle).toBe("Add dark mode");
   });
 
+  it("escapes LIKE wildcards: '%' is matched literally", () => {
+    const db = getDb();
+    const repo = db.insert(repos).values({ path: "/w", name: "wild" }).returning().get();
+    db.insert(issues)
+      .values([
+        { repoId: repo.id, number: 1, title: "Reach 100% coverage", labels: "[]" },
+        { repoId: repo.id, number: 2, title: "Reach 100x coverage", labels: "[]" },
+      ])
+      .run();
+    db.insert(jobs)
+      .values([
+        { repoId: repo.id, issueNumber: 1, status: "merged" },
+        { repoId: repo.id, issueNumber: 2, status: "merged" },
+      ])
+      .run();
+    const result = listJobsPage({ search: "100%" });
+    expect(result.total).toBe(1);
+    expect(result.rows[0]?.issueTitle).toBe("Reach 100% coverage");
+  });
+
+  it("escapes LIKE wildcards: '_' is matched literally", () => {
+    const db = getDb();
+    const repo = db.insert(repos).values({ path: "/w2", name: "wild2" }).returning().get();
+    db.insert(issues)
+      .values([
+        { repoId: repo.id, number: 1, title: "Rename re_name field", labels: "[]" },
+        { repoId: repo.id, number: 2, title: "Rename reXname field", labels: "[]" },
+      ])
+      .run();
+    db.insert(jobs)
+      .values([
+        { repoId: repo.id, issueNumber: 1, status: "merged" },
+        { repoId: repo.id, issueNumber: 2, status: "merged" },
+      ])
+      .run();
+    const result = listJobsPage({ search: "re_name" });
+    expect(result.total).toBe(1);
+    expect(result.rows[0]?.issueTitle).toBe("Rename re_name field");
+  });
+
+  it("escapes LIKE wildcards: a literal backslash still matches", () => {
+    const db = getDb();
+    const repo = db.insert(repos).values({ path: "/w3", name: "wild3" }).returning().get();
+    db.insert(issues)
+      .values({ repoId: repo.id, number: 1, title: "Fix C:\\temp path handling", labels: "[]" })
+      .run();
+    db.insert(jobs).values({ repoId: repo.id, issueNumber: 1, status: "merged" }).run();
+    const result = listJobsPage({ search: "C:\\temp" });
+    expect(result.total).toBe(1);
+    expect(result.rows[0]?.issueTitle).toBe("Fix C:\\temp path handling");
+  });
+
   it("returns empty result when no jobs exist", () => {
     const result = listJobsPage({});
     expect(result.total).toBe(0);

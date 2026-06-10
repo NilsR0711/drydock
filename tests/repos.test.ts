@@ -103,6 +103,41 @@ describe("repos service", () => {
     expect(() => addRepo({ path: "/jc3", name: "jc3", maxJobCostUsd: -2 }, db)).toThrow();
   });
 
+  it("defaults the per-repo time-limit overrides to unset (issues #47/#52)", () => {
+    const repo = addRepo({ path: "/tl", name: "tl" }, db);
+    expect(repo.maxJobMinutes).toBeNull();
+    expect(repo.maxCiWaitMinutes).toBeNull();
+  });
+
+  it("stores and updates per-repo time-limit overrides (issues #47/#52)", () => {
+    const repo = addRepo(
+      { path: "/tl2", name: "tl2", maxJobMinutes: 90, maxCiWaitMinutes: 45 },
+      db,
+    );
+    expect(repo.maxJobMinutes).toBe(90);
+    expect(repo.maxCiWaitMinutes).toBe(45);
+    const updated = updateRepo(repo.id, { maxJobMinutes: 120, maxCiWaitMinutes: 60 }, db);
+    expect(updated.maxJobMinutes).toBe(120);
+    expect(updated.maxCiWaitMinutes).toBe(60);
+  });
+
+  it("clears a per-repo time-limit override back to the global default via null", () => {
+    const repo = addRepo(
+      { path: "/tl3", name: "tl3", maxJobMinutes: 90, maxCiWaitMinutes: 45 },
+      db,
+    );
+    const updated = updateRepo(repo.id, { maxJobMinutes: null, maxCiWaitMinutes: null }, db);
+    expect(updated.maxJobMinutes).toBeNull();
+    expect(updated.maxCiWaitMinutes).toBeNull();
+  });
+
+  it("rejects negative or non-integer time-limit overrides", () => {
+    expect(() => addRepo({ path: "/tl4", name: "tl4", maxJobMinutes: -1 }, db)).toThrow();
+    expect(() => addRepo({ path: "/tl5", name: "tl5", maxCiWaitMinutes: -5 }, db)).toThrow();
+    expect(() => addRepo({ path: "/tl6", name: "tl6", maxJobMinutes: 1.5 }, db)).toThrow();
+    expect(() => addRepo({ path: "/tl7", name: "tl7", maxCiWaitMinutes: 2.5 }, db)).toThrow();
+  });
+
   it("updates a repo", () => {
     const repo = addRepo({ path: "/tmp/foo", name: "foo" }, db);
     const updated = updateRepo(repo.id, { name: "bar", defaultModel: "claude-haiku-4-5" }, db);

@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, like, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, or, type SQL, sql } from "drizzle-orm";
 import { type DB, getDb } from "./client";
 import { todayCost } from "./cost-queries";
 import { type Issue, issues, type Job, jobs, type Repo, repos } from "./schema";
@@ -243,11 +243,14 @@ export function listJobsPage(filters: JobHistoryFilters, db: DB = getDb()): JobH
     if (!Number.isNaN(asNumber) && Number.isInteger(asNumber) && String(asNumber) === term) {
       conditions.push(eq(jobs.issueNumber, asNumber));
     } else {
+      // Escape LIKE wildcards so a literal search for "100%" or "re_name"
+      // matches only those characters. The term stays a bound parameter;
+      // drizzle's like() has no escape support, hence the sql fragments.
+      const pattern = `%${term.replace(/[\\%_]/g, "\\$&")}%`;
       conditions.push(
         or(
-          like(issues.title, `%${term}%`),
-          // Also allow falling back to number search if input happens to look like a number fragment
-          sql`LOWER(${issues.title}) LIKE LOWER(${`%${term}%`})`,
+          sql`${issues.title} LIKE ${pattern} ESCAPE '\\'`,
+          sql`LOWER(${issues.title}) LIKE LOWER(${pattern}) ESCAPE '\\'`,
         ) as SQL,
       );
     }

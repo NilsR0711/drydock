@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { repos } from "@/lib/db/schema";
@@ -58,6 +59,18 @@ describe("issues service", () => {
     syncIssuesFromGh(repoId, [gh(1, "a"), gh(2, "b"), gh(3, "c")], db);
     reorderIssues(repoId, [3, 1, 2], db);
     expect(listIssues(repoId, db).map((i) => i.number)).toEqual([3, 1, 2]);
+  });
+
+  it("reorder is atomic: a failure mid-way leaves the previous order intact", () => {
+    syncIssuesFromGh(repoId, [gh(1, "a"), gh(2, "b"), gh(3, "c"), gh(4, "d")], db);
+    // Make the third UPDATE of the reorder fail (issue #2 is updated third when
+    // reordering to [4, 3, 2, 1]); the earlier updates must roll back with it.
+    db.run(
+      sql`CREATE TRIGGER fail_reorder BEFORE UPDATE OF priority ON issues
+          WHEN NEW.number = 2 BEGIN SELECT RAISE(ABORT, 'boom'); END`,
+    );
+    expect(() => reorderIssues(repoId, [4, 3, 2, 1], db)).toThrow();
+    expect(listIssues(repoId, db).map((i) => i.number)).toEqual([1, 2, 3, 4]);
   });
 
   it("stores unlabelled issues too (full backlog sync)", () => {
