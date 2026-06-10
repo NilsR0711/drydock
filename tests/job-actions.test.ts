@@ -52,6 +52,30 @@ describe("abortJobAction", () => {
 
     expect(result.status).toBe("aborted");
   });
+
+  it("returns a merged job unchanged instead of throwing", async () => {
+    const db = getDb();
+    const job = createJob({ repoId, issueNumber: 4 }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "ci_running", {}, db);
+    transitionJob(job.id, "merged", {}, db);
+
+    const result = await abortJobAction(job.id);
+
+    expect(result.status).toBe("merged");
+    expect(getJob(job.id, db)?.status).toBe("merged");
+  });
+
+  it("is a no-op for a job that is already aborted", async () => {
+    const db = getDb();
+    const job = createJob({ repoId, issueNumber: 5 }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "aborted", {}, db);
+
+    const result = await abortJobAction(job.id);
+
+    expect(result.status).toBe("aborted");
+  });
 });
 
 describe("emergencyStopAction", () => {

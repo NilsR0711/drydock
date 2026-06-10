@@ -56,6 +56,8 @@ export const spawnStreamRunner: StreamRunner = (cmd, args, cwd, cb) => {
     abort: (graceMs = 5000) => {
       child.kill("SIGTERM");
       killTimer = setTimeout(() => child.kill("SIGKILL"), graceMs);
+      // Don't let the SIGKILL timer keep the event loop alive on shutdown.
+      killTimer.unref?.();
     },
   };
 

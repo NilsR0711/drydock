@@ -4,7 +4,7 @@ import { createDb, type DB } from "@/lib/db/client";
 import { issues, type Job, jobs } from "@/lib/db/schema";
 import { reorderIssues, syncIssuesFromGh } from "@/lib/issues/service";
 import { driveTick } from "@/lib/orchestrator/driver-loop";
-import { createJob, getJob, listJobsByStatus } from "@/lib/orchestrator/jobs";
+import { createJob, getJob, listJobsByStatus, transitionJob } from "@/lib/orchestrator/jobs";
 import { setDrainMode } from "@/lib/orchestrator/runtime";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
@@ -148,6 +148,55 @@ describe("driveTick", () => {
     await driveTick({ db, fetchIssues, runJob } as never);
     const parStarted = started.filter((id) => getJob(id, db)?.repoId === parRepo);
     expect(parStarted.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not re-enqueue an issue whose job is parked in needs_human", async () => {
+    const job = createJob({ repoId, issueNumber: 7 }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "needs_human", {}, db);
+    const started: number[] = [];
+    const d = deps(started, {
+      fetchIssues: vi.fn(async () => [
+        { number: 7, title: "parked", labels: [{ name: "drydock:queue" }] },
+      ]),
+    });
+    await driveTick(d as never);
+    // Parking states are operator-gated (ADR 005): the tick must skip the
+    // issue cleanly, not queue a second attempt past the operator.
+    expect(db.select().from(jobs).where(eq(jobs.issueNumber, 7)).all()).toHaveLength(1);
+    expect(getJob(job.id, db)?.status).toBe("needs_human");
+    expect(started).toEqual([]);
+  });
+
+  it("does not re-enqueue an issue whose job is interrupted", async () => {
+    const job = createJob({ repoId, issueNumber: 8 }, db);
+    transitionJob(job.id, "interrupted", {}, db);
+    const started: number[] = [];
+    const d = deps(started, {
+      fetchIssues: vi.fn(async () => [
+        { number: 8, title: "interrupted", labels: [{ name: "drydock:queue" }] },
+      ]),
+    });
+    await driveTick(d as never);
+    expect(db.select().from(jobs).where(eq(jobs.issueNumber, 8)).all()).toHaveLength(1);
+    expect(getJob(job.id, db)?.status).toBe("interrupted");
+    expect(started).toEqual([]);
+  });
+
+  it("parked jobs do not block a sequential repo's pipeline", async () => {
+    saveSettings({ maxParallelJobs: 5 }, db);
+    const seqRepo = addRepo({ path: "/seq-parked", name: "seq-parked", sequential: true }, db).id;
+    const parked = createJob({ repoId: seqRepo, issueNumber: 1 }, db);
+    transitionJob(parked.id, "working", {}, db);
+    transitionJob(parked.id, "needs_human", {}, db);
+    const queued = createJob({ repoId: seqRepo, issueNumber: 2 }, db);
+    const started: number[] = [];
+    const runJob = vi.fn(async (jobId: number) => {
+      started.push(jobId);
+      return getJob(jobId, db) as Job;
+    });
+    await driveTick({ db, fetchIssues: vi.fn(async () => []), runJob } as never);
+    expect(started).toContain(queued.id);
   });
 
   it("swallows a runJob error so the loop survives", async () => {
