@@ -3,9 +3,14 @@ import { CODEX_MAX_PRICE, CODEX_PRICING, codexPriceForModel } from "@/lib/agents
 import { estimateCost, MAX_PRICE, PRICING, priceForModel } from "@/lib/orchestrator/pricing";
 
 describe("pricing", () => {
-  it("knows Opus 4.8, Opus 4.7, Sonnet 4.5 and Haiku 4.5 rates", () => {
+  it("knows Fable 5, Opus 4.8, Opus 4.7, Sonnet 4.6, Sonnet 4.5 and Haiku 4.5 rates", () => {
+    expect(priceForModel("claude-fable-5")).toMatchObject({ inputPerMTok: 10, outputPerMTok: 50 });
     expect(priceForModel("claude-opus-4-8")).toMatchObject({ inputPerMTok: 5, outputPerMTok: 25 });
-    expect(priceForModel("claude-opus-4-7")).toMatchObject({ inputPerMTok: 15, outputPerMTok: 75 });
+    expect(priceForModel("claude-opus-4-7")).toMatchObject({ inputPerMTok: 5, outputPerMTok: 25 });
+    expect(priceForModel("claude-sonnet-4-6")).toMatchObject({
+      inputPerMTok: 3,
+      outputPerMTok: 15,
+    });
     expect(priceForModel("claude-sonnet-4-5")).toMatchObject({
       inputPerMTok: 3,
       outputPerMTok: 15,
