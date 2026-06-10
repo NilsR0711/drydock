@@ -7,10 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { RelativeTime } from "@/components/ui/relative-time";
 import { useToast } from "@/components/ui/toast";
 import type { RepoDashboardRow } from "@/lib/db/queries";
 import { removeRepoAction } from "@/lib/repos/actions";
-import { cn, formatUsd, relativeTime } from "@/lib/utils";
+import { cn, formatUsd } from "@/lib/utils";
 
 export function RepoStatusCard({ repo }: { repo: RepoDashboardRow }) {
   const [pending, start] = useTransition();
@@ -108,7 +109,7 @@ export function RepoStatusCard({ repo }: { repo: RepoDashboardRow }) {
         </span>
         <span className="inline-flex items-center gap-1.5">
           <Clock className="h-3 w-3" />
-          {repo.lastActivityAt ? relativeTime(repo.lastActivityAt) : "no activity"}
+          <RelativeTime ts={repo.lastActivityAt} />
         </span>
       </div>
 

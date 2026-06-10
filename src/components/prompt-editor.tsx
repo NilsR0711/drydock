@@ -32,7 +32,9 @@ const TEMPLATE_OPTIONS = [
 ];
 
 function formatDate(unixSeconds: number) {
-  return new Date(unixSeconds * 1000).toLocaleString(undefined, {
+  // Pin the locale (the UI is English-only): the system locale differs between
+  // the server and the browser, which would cause a hydration mismatch.
+  return new Date(unixSeconds * 1000).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",

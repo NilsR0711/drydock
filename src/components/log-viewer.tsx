@@ -19,6 +19,7 @@ import { Virtuoso } from "react-virtuoso";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
+import { useHydrated } from "@/lib/ui/use-hydrated";
 import { cn } from "@/lib/utils";
 
 export interface LogLine {
@@ -90,7 +91,11 @@ function cfgFor(type: string): EventCfg {
   return EVENT_CFG[type] ?? FALLBACK_CFG;
 }
 
-/** HH:MM:SS from a unix-seconds timestamp. */
+/**
+ * HH:MM:SS from a unix-seconds timestamp, in the viewer's local timezone.
+ * Timezone-dependent, so it must stay out of the SSR markup — only call it
+ * after hydration (see the `showClock` gate in LogRow).
+ */
 function fmtClock(sec: number): string {
   return new Date(sec * 1000).toTimeString().slice(0, 8);
 }
@@ -226,10 +231,12 @@ function PayloadView({ type, payload }: { type: string; payload: unknown }) {
 }
 
 /** Render one log line: mono timestamp (if present), icon chip, label, payload. */
-function LogRow({ line }: { line: LogLine }) {
+function LogRow({ line, showClock }: { line: LogLine; showClock: boolean }) {
   const cfg = cfgFor(line.type);
   const Icon = cfg.icon;
-  const clock = line.ts ? fmtClock(line.ts) : "";
+  // The clock is local-timezone-dependent, so it only renders after hydration:
+  // the server markup stays deterministic and the user still sees local time.
+  const clock = showClock && line.ts ? fmtClock(line.ts) : "";
   return (
     <div
       className={cn(
@@ -285,6 +292,7 @@ export function LogViewer({
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const [showFilter, setShowFilter] = useState(false);
   const seen = useRef(new Set<number>(initial.map((l) => l.id)));
+  const hydrated = useHydrated();
   const { success, error } = useToast();
 
   useEffect(() => {
@@ -420,7 +428,7 @@ export function LogViewer({
         <Virtuoso
           data={visible}
           followOutput={autoscroll ? "smooth" : false}
-          itemContent={(_i, line) => <LogRow line={line} />}
+          itemContent={(_i, line) => <LogRow line={line} showClock={hydrated} />}
           components={{
             Footer: () =>
               running ? (

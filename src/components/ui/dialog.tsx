@@ -2,7 +2,7 @@
 
 import type { LucideIcon } from "lucide-react";
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { getFocusableElements, wrapFocus } from "@/lib/ui/focus-trap";
 import { cn } from "@/lib/utils";
 
@@ -69,6 +69,10 @@ export function Dialog({
   // Keep the panel mounted during the closing transition for the scale-out.
   const [mounted, setMounted] = useState(open);
   const [show, setShow] = useState(false);
+  // Per-instance title id: several dialogs can be mounted at once (exit
+  // animations overlap, multiple ConfirmDialogs on a page), so a static id
+  // would duplicate and break the aria-labelledby targets.
+  const titleId = useId();
 
   const close = () => {
     if (onOpenChange) onOpenChange(false);
@@ -135,7 +139,7 @@ export function Dialog({
 
   // Auto-generate a labelling id when the convenience title is used and no
   // explicit labelledById was provided.
-  const autoTitleId = title != null ? "dialog-title" : undefined;
+  const autoTitleId = title != null ? titleId : undefined;
   const ariaLabelledBy = labelledById ?? autoTitleId;
   const hasHeader = title != null || description != null || Icon != null;
 
