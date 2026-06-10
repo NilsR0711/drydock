@@ -56,6 +56,24 @@ export function getReleaseRun(id: number, db: DB = getDb()): ReleaseRun | undefi
   return db.select().from(releaseRuns).where(eq(releaseRuns.id, id)).get();
 }
 
+/**
+ * The latest run triggered by a given merged PR, if any. Lets the release
+ * sweep skip a PR whose run already advanced past `detected` without spending
+ * a forge API call to resolve the PR's head SHA on every sweep.
+ */
+export function findReleaseRunByTriggerPr(
+  repoId: number,
+  triggerPrNumber: number,
+  db: DB = getDb(),
+): ReleaseRun | undefined {
+  return db
+    .select()
+    .from(releaseRuns)
+    .where(and(eq(releaseRuns.repoId, repoId), eq(releaseRuns.triggerPrNumber, triggerPrNumber)))
+    .orderBy(desc(releaseRuns.id))
+    .get();
+}
+
 /** Fields a transition may set alongside the new status. */
 export interface ReleaseRunPatch {
   bump?: SemverBump;

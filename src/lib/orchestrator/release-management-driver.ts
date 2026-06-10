@@ -7,7 +7,7 @@ import type { ForgeClient } from "@/lib/forge/types";
 import { logError } from "@/lib/log/logger";
 import { dispatch } from "@/lib/notify/notifier";
 import type { ReleaseEvaluationGenerator } from "@/lib/release/release";
-import { createReleaseRun } from "@/lib/release/release-service";
+import { createReleaseRun, findReleaseRunByTriggerPr } from "@/lib/release/release-service";
 import { repoAutomation } from "@/lib/repos/automation";
 import { getSettings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
@@ -118,6 +118,11 @@ async function processMergedJob(
 ): Promise<void> {
   const { db, notify } = deps;
   const prNumber = job.prNumber as number;
+  // Cheap DB-only idempotency pre-check: when this PR already produced a run
+  // that moved past `detected` (published, skipped, errored, or mid-flight),
+  // skip without spending a forge API call on every sweep of the merge window.
+  const existing = findReleaseRunByTriggerPr(repo.id, prNumber, db);
+  if (existing && existing.status !== "detected") return;
   const headSha = await forgeClient.prHeadSha(prNumber);
   const run = createReleaseRun(
     { repoId: repo.id, mode: "auto", triggerPrNumber: prNumber, triggerSha: headSha },

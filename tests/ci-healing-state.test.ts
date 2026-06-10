@@ -30,6 +30,10 @@ describe("canHealingTransition", () => {
     expect(canHealingTransition("cooldown", "awaiting_slot")).toBe(true);
   });
 
+  it("lets a plain re-run skip repairing (awaiting_slot → awaiting_ci)", () => {
+    expect(canHealingTransition("awaiting_slot", "awaiting_ci")).toBe(true);
+  });
+
   it("allows escalation/blocking/superseding from active states", () => {
     expect(canHealingTransition("triaging", "blocked")).toBe(true);
     expect(canHealingTransition("verifying", "escalated")).toBe(true);

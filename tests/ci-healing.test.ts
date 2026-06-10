@@ -4,6 +4,7 @@ import { healingAttempts, healingSessions } from "@/lib/db/schema";
 import { classifyFailure } from "@/lib/orchestrator/ci-failure-classifier";
 import {
   activeHealingRunCount,
+  closeHealingSession,
   DEFAULT_HEAL_BUDGETS,
   finalizeHealingAttempt,
   fingerprintAttemptCount,
@@ -15,6 +16,7 @@ import {
   sessionAttemptCount,
   transitionHealingSession,
   verifyHeal,
+  verifyRerun,
 } from "@/lib/orchestrator/ci-healing";
 import { createJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { addRepo } from "@/lib/repos/service";
@@ -167,6 +169,24 @@ describe("verifyHeal", () => {
   });
 });
 
+describe("verifyRerun", () => {
+  it("rejects a re-run that did not clear the flaky check", () => {
+    const v = verifyRerun({ beforeFailingCount: 1, afterFailingCount: 1 });
+    expect(v.verdict).toBe("rejected");
+    expect(v.reason).toMatch(/re-run/i);
+  });
+
+  it("reports healed when all checks are green after the re-run", () => {
+    const v = verifyRerun({ beforeFailingCount: 2, afterFailingCount: 0 });
+    expect(v.verdict).toBe("healed");
+  });
+
+  it("reports progressed when fewer checks fail (same head SHA is fine)", () => {
+    const v = verifyRerun({ beforeFailingCount: 2, afterFailingCount: 1 });
+    expect(v.verdict).toBe("progressed");
+  });
+});
+
 describe("healing session persistence", () => {
   let db: DB;
   let jobId: number;
@@ -200,6 +220,55 @@ describe("healing session persistence", () => {
     const reloaded = db.select().from(healingSessions).all();
     expect(reloaded.find((s) => s.id === a.id)?.status).toBe("superseded");
     expect(reloaded.find((s) => s.id === b.id)?.status).toBe("triaging");
+  });
+
+  it("reuses a same-SHA session parked in cooldown", () => {
+    const a = openHealingSession(jobId, 7, "sha-1", db);
+    transitionHealingSession(a.id, "awaiting_slot", db);
+    transitionHealingSession(a.id, "awaiting_ci", db);
+    transitionHealingSession(a.id, "verifying", db);
+    transitionHealingSession(a.id, "cooldown", db);
+    const b = openHealingSession(jobId, 7, "sha-1", db);
+    expect(b.id).toBe(a.id);
+    expect(b.status).toBe("cooldown");
+  });
+
+  it("supersedes an orphaned mid-flight same-SHA session instead of reusing it", () => {
+    // Simulates a loop that crashed after leaving a session in awaiting_ci:
+    // reusing it would make the caller's next transition invalid and throw.
+    const a = openHealingSession(jobId, 7, "sha-1", db);
+    transitionHealingSession(a.id, "awaiting_slot", db);
+    transitionHealingSession(a.id, "repairing", db);
+    transitionHealingSession(a.id, "awaiting_ci", db);
+    const b = openHealingSession(jobId, 7, "sha-1", db);
+    expect(b.id).not.toBe(a.id);
+    expect(b.status).toBe("triaging");
+    const reloaded = db.select().from(healingSessions).all();
+    expect(reloaded.find((s) => s.id === a.id)?.status).toBe("superseded");
+    expect(() => transitionHealingSession(b.id, "awaiting_slot", db)).not.toThrow();
+  });
+
+  it("leaves a terminal same-SHA session untouched and opens a fresh one", () => {
+    const a = openHealingSession(jobId, 7, "sha-1", db);
+    transitionHealingSession(a.id, "escalated", db);
+    const b = openHealingSession(jobId, 7, "sha-1", db);
+    expect(b.id).not.toBe(a.id);
+    expect(b.status).toBe("triaging");
+    const reloaded = db.select().from(healingSessions).all();
+    expect(reloaded.find((s) => s.id === a.id)?.status).toBe("escalated");
+    // A later open prefers the restartable session over creating a third one.
+    expect(openHealingSession(jobId, 7, "sha-1", db).id).toBe(b.id);
+  });
+
+  it("closeHealingSession exits any non-terminal state and tolerates closed ones", () => {
+    const a = openHealingSession(jobId, 7, "sha-1", db);
+    transitionHealingSession(a.id, "awaiting_slot", db);
+    transitionHealingSession(a.id, "awaiting_ci", db);
+    expect(() => closeHealingSession(a.id, "escalated", db)).not.toThrow();
+    expect(db.select().from(healingSessions).all()[0]?.status).toBe("escalated");
+    // Already terminal: a second close is a no-op, never an invalid transition.
+    expect(() => closeHealingSession(a.id, "superseded", db)).not.toThrow();
+    expect(db.select().from(healingSessions).all()[0]?.status).toBe("escalated");
   });
 
   it("validates transitions through the state machine", () => {

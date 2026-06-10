@@ -458,6 +458,64 @@ describe("GhClient.failedRunLog", () => {
   });
 });
 
+describe("GhClient.reRunFailedChecks", () => {
+  /** Runner scripted for the branch → run list → rerun chain. */
+  function rerunRunner(over: { listRuns?: unknown[]; rerunExit?: number } = {}) {
+    const calls: { args: string[] }[] = [];
+    const runner = vi.fn(async (_cmd: string, args: string[]) => {
+      calls.push({ args });
+      if (args[0] === "pr" && args[1] === "view") {
+        return { stdout: JSON.stringify({ headRefName: "feat/x" }), stderr: "", exitCode: 0 };
+      }
+      if (args[0] === "run" && args[1] === "list") {
+        const runs = over.listRuns ?? [
+          { databaseId: 111, conclusion: "success" },
+          { databaseId: 222, conclusion: "failure" },
+        ];
+        return { stdout: JSON.stringify(runs), stderr: "", exitCode: 0 };
+      }
+      // gh run rerun <id> --failed
+      return { stdout: "", stderr: "", exitCode: over.rerunExit ?? 0 };
+    });
+    return { runner, calls };
+  }
+
+  it("re-runs the failed jobs of the most recent failed run and reports success", async () => {
+    const { runner, calls } = rerunRunner();
+    const gh = new GhClient("/repo", runner);
+    await expect(gh.reRunFailedChecks(12)).resolves.toBe(true);
+    expect(calls[0]?.args).toEqual(["pr", "view", "12", "--json", "headRefName"]);
+    expect(calls[2]?.args).toEqual(["run", "rerun", "222", "--failed"]);
+  });
+
+  it("returns false when no failed run exists (nothing to re-run)", async () => {
+    const { runner } = rerunRunner({ listRuns: [{ databaseId: 1, conclusion: "success" }] });
+    const gh = new GhClient("/repo", runner);
+    await expect(gh.reRunFailedChecks(12)).resolves.toBe(false);
+    expect(runner.mock.calls.some(([, args]) => args[1] === "rerun")).toBe(false);
+  });
+
+  it("returns false when the PR cannot be resolved", async () => {
+    const gh = new GhClient("/repo", fakeRunner({ exitCode: 1, stderr: "no pr" }));
+    await expect(gh.reRunFailedChecks(99)).resolves.toBe(false);
+  });
+
+  it("returns false when the rerun command itself fails", async () => {
+    const { runner } = rerunRunner({ rerunExit: 1 });
+    const gh = new GhClient("/repo", runner);
+    await expect(gh.reRunFailedChecks(12)).resolves.toBe(false);
+  });
+
+  it("returns false without spawning when the budget is gated", async () => {
+    const gov = new RateLimitGovernor({ now: () => 1_000_000 });
+    gov.observe("core", { remaining: 200, limit: 5000, reset: 2000 }); // below the floor
+    const { runner } = rerunRunner();
+    const gh = new GhClient("/repo", runner, gov);
+    await expect(gh.reRunFailedChecks(12)).resolves.toBe(false);
+    expect(runner).not.toHaveBeenCalled();
+  });
+});
+
 describe("GhClient issue read/write", () => {
   it("listAllIssues fetches open issues with author metadata", async () => {
     const runner = fakeRunner({

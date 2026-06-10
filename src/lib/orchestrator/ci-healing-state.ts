@@ -4,6 +4,8 @@
  *
  *   triaging → awaiting_slot → repairing → awaiting_ci → verifying → healed
  *
+ * A plain re-run of a flaky check involves no agent work, so it skips
+ * `repairing` and steps from `awaiting_slot` straight to `awaiting_ci`.
  * If a verified attempt left checks still red it loops back through `cooldown`
  * (enforcing the inter-attempt wait) to `awaiting_slot` for another try. Any
  * active state may end in `blocked` (external failure), `escalated` (budget
@@ -35,7 +37,7 @@ const EXITS: readonly HealingStatus[] = ["blocked", "escalated", "superseded"];
 
 const TRANSITIONS: Record<HealingStatus, readonly HealingStatus[]> = {
   triaging: ["awaiting_slot", ...EXITS],
-  awaiting_slot: ["repairing", ...EXITS],
+  awaiting_slot: ["repairing", "awaiting_ci", ...EXITS],
   repairing: ["awaiting_ci", ...EXITS],
   awaiting_ci: ["verifying", ...EXITS],
   verifying: ["healed", "cooldown", ...EXITS],
