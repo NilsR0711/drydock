@@ -8,10 +8,12 @@ describe("models", () => {
     expect(DEFAULT_MODEL).toBe("claude-opus-4-8");
   });
 
-  it("lists at least Opus 4.8, Opus 4.7, Sonnet, Haiku for claude", () => {
+  it("lists at least Fable 5, Opus 4.8, Opus 4.7, Sonnet 4.6, Sonnet 4.5, Haiku for claude", () => {
     const ids = modelsForAgent("claude").map((m) => m.id);
+    expect(ids).toContain("claude-fable-5");
     expect(ids).toContain("claude-opus-4-8");
     expect(ids).toContain("claude-opus-4-7");
+    expect(ids).toContain("claude-sonnet-4-6");
     expect(ids).toContain("claude-sonnet-4-5");
     expect(ids).toContain("claude-haiku-4-5");
   });

@@ -14,7 +14,9 @@ export interface ModelOption {
 
 export const MODELS: ModelOption[] = [
   { id: "claude-opus-4-8", label: "Claude Opus 4.8", agent: "claude" },
+  { id: "claude-fable-5", label: "Claude Fable 5", agent: "claude" },
   { id: "claude-opus-4-7", label: "Claude Opus 4.7", agent: "claude" },
+  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", agent: "claude" },
   { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", agent: "claude" },
   { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", agent: "claude" },
   { id: "gpt-5-codex", label: "GPT-5 Codex", agent: "codex" },
