@@ -9,6 +9,7 @@ export interface RepoAutomation {
   autoResolveMergeConflicts: boolean;
   includeProgressReplies: boolean;
   autoDecompose: boolean;
+  planFirst: boolean;
   verifyPr: boolean;
   autoHealDeployments: boolean;
   releaseEnabled: boolean;
@@ -46,6 +47,7 @@ export function repoAutomation(repo: Repo): RepoAutomation {
     autoResolveMergeConflicts: repo.autoResolveMergeConflicts,
     includeProgressReplies: repo.includeProgressReplies,
     autoDecompose: repo.autoDecompose,
+    planFirst: repo.planFirst,
     verifyPr: repo.verifyPr,
     autoHealDeployments: repo.autoHealDeployments,
     releaseEnabled: repo.releaseEnabled,

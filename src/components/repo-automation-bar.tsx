@@ -155,6 +155,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoHeal, setAutoHeal] = useState(repo.autoHealCi);
   const [autoFeedback, setAutoFeedback] = useState(repo.autoReviewFeedback);
   const [autoDecompose, setAutoDecompose] = useState(repo.autoDecompose);
+  const [planFirst, setPlanFirst] = useState(repo.planFirst);
   const [verifyPr, setVerifyPr] = useState(repo.verifyPr);
   const [autoHealDeploy, setAutoHealDeploy] = useState(repo.autoHealDeployments);
   const [releaseEnabled, setReleaseEnabled] = useState(repo.releaseEnabled);
@@ -297,6 +298,15 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               persist({ autoDecompose: v });
             }}
             help="Splits big issues into ordered, tracked subtasks before working them."
+          />
+          <AutoToggle
+            label="Plan before implementing"
+            checked={planFirst}
+            onChange={(v) => {
+              setPlanFirst(v);
+              persist({ planFirst: v });
+            }}
+            help="A read-only planning pass before implementation; the plan is posted on the issue and embedded in the work prompt. Falls back to a normal run on failure."
           />
           <AutoToggle
             label="Verify PR satisfies issue"

@@ -29,6 +29,7 @@ interface VersionInfo {
 const TEMPLATE_OPTIONS = [
   { value: TEMPLATE_NAMES.main, label: "Main" },
   { value: TEMPLATE_NAMES.ciFix, label: "CI fix" },
+  { value: TEMPLATE_NAMES.plan, label: "Plan" },
 ];
 
 function formatDate(unixSeconds: number) {

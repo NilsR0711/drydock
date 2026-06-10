@@ -4,7 +4,7 @@ import { oneShotCosts } from "@/lib/db/schema";
 import { type CommandOptions, type CommandRunner, spawnRunner } from "@/lib/exec/runner";
 import { StreamJsonParser } from "@/lib/stream/parser";
 
-export type OneShotType = "verify" | "decompose" | "pr-question" | "release";
+export type OneShotType = "verify" | "decompose" | "pr-question" | "release" | "plan";
 
 export interface OneShotResult {
   /** Plain text extracted from assistant events (empty string if none). */
