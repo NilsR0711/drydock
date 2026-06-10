@@ -10,6 +10,8 @@ export interface SparklineProps {
   tone?: string;
   fill?: boolean;
   strokeWidth?: number;
+  /** Draw a dashed reference line at the series mean (issue #115). */
+  average?: boolean;
 }
 
 /** Tiny inline trend line with an optional gradient fill and a leading dot. */
@@ -20,6 +22,7 @@ export function Sparkline({
   tone = "chart-1",
   fill = true,
   strokeWidth = 1.75,
+  average = false,
 }: SparklineProps) {
   // Unique per instance so two sparklines can't share a gradient <defs> id
   // (SVG ids are document-global; a data-derived id collides on equal series).
@@ -37,6 +40,8 @@ export function Sparkline({
   const area = `${line} L${width} ${height} L0 ${height} Z`;
   const color = toneVar(tone);
   const last = pts[pts.length - 1] ?? ([0, height - 3] as const);
+  const mean = data.reduce((a, v) => a + v, 0) / data.length;
+  const meanY = height - 3 - ((mean - min) / span) * (height - 6);
   return (
     <svg
       width={width}
@@ -55,6 +60,17 @@ export function Sparkline({
           </defs>
           <path d={area} fill={`url(#${id})`} />
         </>
+      )}
+      {average && data.length > 1 && (
+        <line
+          x1={0}
+          x2={width}
+          y1={meanY}
+          y2={meanY}
+          stroke="hsl(var(--muted-foreground) / 0.45)"
+          strokeWidth={1}
+          strokeDasharray="3 3"
+        />
       )}
       <path
         d={line}

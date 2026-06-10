@@ -1,15 +1,29 @@
 "use client";
 
+import { Bot, ShieldCheck, Timer } from "lucide-react";
 import { useState, useTransition } from "react";
 import { AgentSelect } from "@/components/agent-select";
 import { ModelSelect } from "@/components/model-select";
+import { Field } from "@/components/ui/field";
+import { Fieldset } from "@/components/ui/fieldset";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
+import { HelpTip } from "@/components/ui/tooltip";
 import type { AgentId } from "@/lib/agents/types";
 import type { Repo } from "@/lib/db/schema";
 import { defaultModelForAgent } from "@/lib/models";
 import { updateRepoAction } from "@/lib/repos/actions";
+
+/** Field label with an inline help tooltip, shared across the settings fieldsets. */
+function LabelWithHelp({ text, help }: { text: string; help: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      {text}
+      <HelpTip content={help} />
+    </span>
+  );
+}
 
 export function RepoSettingsBar({ repo }: { repo: Repo }) {
   const [agent, setAgent] = useState(repo.agent as AgentId);
@@ -89,125 +103,166 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Queue label</span>
-          <code className="inline-flex h-9 w-fit max-w-full items-center truncate rounded-lg bg-secondary px-3 font-mono text-xs text-muted-foreground">
-            {repo.queueLabel}
-          </code>
+    <div className="flex flex-col gap-4">
+      <Fieldset
+        icon={Bot}
+        legend="Agent & model"
+        tone="primary"
+        description="Which agent picks up issues in this repo, and the model it defaults to."
+      >
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Field
+            label={
+              <LabelWithHelp
+                text="Queue label"
+                help="Issues carrying this GitHub label enter the repo's processing queue."
+              />
+            }
+          >
+            <code className="inline-flex h-9 w-fit max-w-full items-center truncate rounded-lg bg-secondary px-3 font-mono text-xs text-muted-foreground">
+              {repo.queueLabel}
+            </code>
+          </Field>
+          <Field
+            label={<LabelWithHelp text="Agent" help="CLI agent used for new jobs in this repo." />}
+            htmlFor="repo-agent-select"
+          >
+            <AgentSelect id="repo-agent-select" value={agent} onChange={changeAgent} />
+          </Field>
+          <Field
+            label={
+              <LabelWithHelp
+                text="Model"
+                help="Default model for new jobs — switching agents resets it to that agent's default."
+              />
+            }
+            htmlFor="repo-model-select"
+          >
+            <ModelSelect id="repo-model-select" value={model} onChange={change} agent={agent} />
+          </Field>
         </div>
+      </Fieldset>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="repo-daily-limit" className="text-xs font-medium text-muted-foreground">
-            Daily limit ($)
-          </label>
-          <Input
-            id="repo-daily-limit"
-            type="number"
-            min={0}
-            step={1}
-            value={limit}
-            onChange={(e) => changeLimit(Number(e.target.value))}
-            className="w-28"
-          />
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label
+      <Fieldset
+        icon={Timer}
+        legend="Limits & timing"
+        tone="warning"
+        description="Spend and runtime guardrails for jobs in this repo."
+      >
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Field
+            label={
+              <LabelWithHelp
+                text="Daily limit ($)"
+                help="Hard cap on agent spend per day for this repo. New jobs wait once the cap is hit."
+              />
+            }
+            htmlFor="repo-daily-limit"
+          >
+            <Input
+              id="repo-daily-limit"
+              type="number"
+              min={0}
+              step={1}
+              value={limit}
+              onChange={(e) => changeLimit(Number(e.target.value))}
+            />
+          </Field>
+          <Field
+            label={
+              <LabelWithHelp
+                text="Max job minutes"
+                help="Abort jobs that run longer than this. Leave empty to use the global default."
+              />
+            }
             htmlFor="repo-max-job-minutes"
-            className="text-xs font-medium text-muted-foreground"
           >
-            Max job minutes
-          </label>
-          <Input
-            id="repo-max-job-minutes"
-            type="number"
-            min={0}
-            step={1}
-            value={maxJobMinutes}
-            onChange={(e) => changeMinutes("maxJobMinutes", e.target.value)}
-            placeholder="Global default"
-            className="w-32"
-          />
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label
+            <Input
+              id="repo-max-job-minutes"
+              type="number"
+              min={0}
+              step={1}
+              value={maxJobMinutes}
+              onChange={(e) => changeMinutes("maxJobMinutes", e.target.value)}
+              placeholder="Global default"
+            />
+          </Field>
+          <Field
+            label={
+              <LabelWithHelp
+                text="Max CI wait minutes"
+                help="How long to wait for CI before giving up. Leave empty to use the global default."
+              />
+            }
             htmlFor="repo-max-ci-wait-minutes"
-            className="text-xs font-medium text-muted-foreground"
           >
-            Max CI wait minutes
-          </label>
-          <Input
-            id="repo-max-ci-wait-minutes"
-            type="number"
-            min={0}
-            step={1}
-            value={maxCiWaitMinutes}
-            onChange={(e) => changeMinutes("maxCiWaitMinutes", e.target.value)}
-            placeholder="Global default"
-            className="w-32"
-          />
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label
+            <Input
+              id="repo-max-ci-wait-minutes"
+              type="number"
+              min={0}
+              step={1}
+              value={maxCiWaitMinutes}
+              onChange={(e) => changeMinutes("maxCiWaitMinutes", e.target.value)}
+              placeholder="Global default"
+            />
+          </Field>
+          <Field
+            label={
+              <LabelWithHelp
+                text="Merge gate minutes"
+                help="Hold the auto-merge after green CI so late bot or human reviews can land first. 0 merges immediately."
+              />
+            }
             htmlFor="repo-merge-gate-minutes"
-            className="text-xs font-medium text-muted-foreground"
           >
-            Merge gate minutes
-          </label>
-          <Input
-            id="repo-merge-gate-minutes"
-            type="number"
-            min={0}
-            step={1}
-            value={mergeGateMinutes}
-            onChange={(e) => changeMergeGate(e.target.value)}
-            placeholder="0 = merge on green"
-            className="w-32"
-          />
+            <Input
+              id="repo-merge-gate-minutes"
+              type="number"
+              min={0}
+              step={1}
+              value={mergeGateMinutes}
+              onChange={(e) => changeMergeGate(e.target.value)}
+              placeholder="0 = merge on green"
+            />
+          </Field>
         </div>
+      </Fieldset>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="repo-agent-select" className="text-xs font-medium text-muted-foreground">
-            Agent
-          </label>
-          <AgentSelect id="repo-agent-select" value={agent} onChange={changeAgent} />
+      <Fieldset
+        icon={ShieldCheck}
+        legend="Gates"
+        description="Checks that hold work before it lands."
+      >
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <span className="flex items-center gap-2">
+            <label htmlFor="repo-adr-gate" className="flex items-center gap-2 text-sm">
+              <Switch
+                id="repo-adr-gate"
+                checked={adrGating}
+                onChange={changeGating}
+                aria-label="ADR gate"
+              />
+              ADR gate
+            </label>
+            <HelpTip content="Hold the merge while ADRs await review — the job parks as needs-human until pending decisions are approved." />
+          </span>
+          <span className="flex items-center gap-2">
+            <label htmlFor="repo-sequential" className="flex items-center gap-2 text-sm">
+              <Switch
+                id="repo-sequential"
+                checked={sequential}
+                onChange={changeSequential}
+                aria-label="Sequential (wait for merge)"
+              />
+              Sequential
+            </label>
+            <HelpTip content="Process one issue at a time — wait for the open PR to merge before starting the next job." />
+          </span>
+          <span aria-live="polite" className="ml-auto text-xs text-muted-foreground">
+            {pending ? "Saving…" : saved ? "Saved" : ""}
+          </span>
         </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="repo-model-select" className="text-xs font-medium text-muted-foreground">
-            Model
-          </label>
-          <ModelSelect id="repo-model-select" value={model} onChange={change} agent={agent} />
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-        <label htmlFor="repo-adr-gate" className="flex items-center gap-2 text-sm">
-          <Switch
-            id="repo-adr-gate"
-            checked={adrGating}
-            onChange={changeGating}
-            aria-label="ADR gate"
-          />
-          ADR gate
-        </label>
-        <label htmlFor="repo-sequential" className="flex items-center gap-2 text-sm">
-          <Switch
-            id="repo-sequential"
-            checked={sequential}
-            onChange={changeSequential}
-            aria-label="Sequential (wait for merge)"
-          />
-          Sequential (wait for merge)
-        </label>
-        <span aria-live="polite" className="ml-auto text-xs text-muted-foreground">
-          {pending ? "Saving…" : saved ? "Saved" : ""}
-        </span>
-      </div>
+      </Fieldset>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { DollarSign } from "lucide-react";
+import { DollarSign, ListChecks } from "lucide-react";
 import { CostExportControls } from "@/components/cost-export-controls";
 import { PageHeader } from "@/components/page-header";
 import { BarList } from "@/components/ui/bar-list";
@@ -89,7 +89,12 @@ export default function CostsPage() {
           <div className="mt-4 border-t border-card-border pt-3">
             <h4 className="mb-2 text-sm font-semibold text-muted-foreground">Top jobs</h4>
             {topItems.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No jobs with recorded cost.</p>
+              <EmptyState
+                compact
+                icon={ListChecks}
+                title="No job costs yet"
+                description="Jobs with recorded cost will rank here."
+              />
             ) : (
               <BarList items={topItems} money />
             )}
@@ -110,7 +115,7 @@ export default function CostsPage() {
             />
           ) : (
             <>
-              <Sparkline data={sparkData} width={300} height={56} tone="chart-1" />
+              <Sparkline data={sparkData} width={300} height={56} tone="chart-1" average />
               <ul className="mt-3 flex flex-col gap-1 text-sm">
                 {last7.map((d) => (
                   <li

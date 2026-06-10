@@ -6,6 +6,7 @@ import { useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Field } from "@/components/ui/field";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Select } from "@/components/ui/select";
@@ -255,7 +256,12 @@ export function PromptEditor({
           </CardHeader>
           <CardContent className="px-5 pb-5">
             {versions.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No saved versions yet.</p>
+              <EmptyState
+                compact
+                icon={History}
+                title="No versions yet"
+                description="Past versions appear here after you save changes."
+              />
             ) : (
               <ul className="flex flex-col gap-1">
                 {versions.map((v) => {

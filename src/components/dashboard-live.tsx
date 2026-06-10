@@ -148,7 +148,7 @@ export function DashboardLive({
                   {formatUsd(summary.spendToday)} today
                 </span>
               </div>
-              <Sparkline data={spendSeries} width={300} height={44} tone="chart-1" />
+              <Sparkline data={spendSeries} width={300} height={44} tone="chart-1" average />
             </div>
           </Card>
 

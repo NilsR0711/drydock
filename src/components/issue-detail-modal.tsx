@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -145,10 +146,10 @@ export function IssueDetailModal({
 
           {/* Per-job model/agent override (issue #101) */}
           <div className="rounded-xl border border-card-border bg-secondary/40 p-4">
-            <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <Settings2 className="h-3.5 w-3.5" />
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+              <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
               Run settings
-            </p>
+            </h3>
             <div className="flex flex-wrap items-end gap-2">
               <Field label="Agent" htmlFor="modal-agent-select">
                 <AgentSelect
@@ -246,10 +247,10 @@ export function IssueDetailModal({
           </Button>
 
           <div>
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <Tag className="h-3.5 w-3.5" />
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+              <Tag className="h-3.5 w-3.5 text-muted-foreground" />
               Labels
-            </p>
+            </h3>
             <div className="flex flex-wrap items-center gap-1.5">
               {detail.labels.map((l) => (
                 <button
@@ -297,10 +298,10 @@ export function IssueDetailModal({
 
           {subtasks.length > 0 && (
             <div>
-              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <ListChecks className="h-3.5 w-3.5" />
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                <ListChecks className="h-3.5 w-3.5 text-muted-foreground" />
                 Subtasks ({subtasks.filter((s) => s.status === "done").length}/{subtasks.length})
-              </p>
+              </h3>
               <ol className="space-y-1.5">
                 {subtasks.map((s) => {
                   const display = SUBTASK_DISPLAY[s.status] ?? {
@@ -331,10 +332,10 @@ export function IssueDetailModal({
           )}
 
           <div>
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <MessageSquare className="h-3.5 w-3.5" />
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+              <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
               Comments
-            </p>
+            </h3>
             <ul className="space-y-2">
               {detail.comments.map((c) => (
                 <li
@@ -348,7 +349,14 @@ export function IssueDetailModal({
                 </li>
               ))}
               {detail.comments.length === 0 && (
-                <li className="text-sm text-muted-foreground">No comments yet.</li>
+                <li>
+                  <EmptyState
+                    compact
+                    icon={MessageSquare}
+                    title="No comments yet"
+                    description="Discussion from GitHub shows up here."
+                  />
+                </li>
               )}
             </ul>
             <Textarea
