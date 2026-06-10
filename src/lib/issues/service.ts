@@ -225,12 +225,18 @@ export async function applyIssueLabels(
     setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, false, db);
 }
 
-/** Persist a new manual ordering. `orderedNumbers` is the full list, first = highest. */
+/**
+ * Persist a new manual ordering. `orderedNumbers` is the full list, first =
+ * highest. Runs in a transaction so a failure mid-way never leaves a torn
+ * priority state.
+ */
 export function reorderIssues(repoId: number, orderedNumbers: number[], db: DB = getDb()): void {
-  orderedNumbers.forEach((number, index) => {
-    db.update(issues)
-      .set({ priority: index })
-      .where(and(eq(issues.repoId, repoId), eq(issues.number, number)))
-      .run();
+  db.transaction((tx) => {
+    orderedNumbers.forEach((number, index) => {
+      tx.update(issues)
+        .set({ priority: index })
+        .where(and(eq(issues.repoId, repoId), eq(issues.number, number)))
+        .run();
+    });
   });
 }

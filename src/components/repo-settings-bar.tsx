@@ -15,6 +15,8 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
   const [agent, setAgent] = useState(repo.agent as AgentId);
   const [model, setModel] = useState(repo.defaultModel);
   const [limit, setLimit] = useState(repo.dailyCostLimitUsd);
+  const [maxJobMinutes, setMaxJobMinutes] = useState(repo.maxJobMinutes?.toString() ?? "");
+  const [maxCiWaitMinutes, setMaxCiWaitMinutes] = useState(repo.maxCiWaitMinutes?.toString() ?? "");
   const [adrGating, setAdrGating] = useState(repo.adrGating);
   const [sequential, setSequential] = useState(repo.sequential);
   const [pending, start] = useTransition();
@@ -57,6 +59,15 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
     persist({ dailyCostLimitUsd: value });
   }
 
+  // Empty input clears the per-repo override (null = use the global default).
+  function changeMinutes(field: "maxJobMinutes" | "maxCiWaitMinutes", value: string) {
+    if (field === "maxJobMinutes") setMaxJobMinutes(value);
+    else setMaxCiWaitMinutes(value);
+    const minutes = value === "" ? null : Number(value);
+    if (minutes !== null && (!Number.isInteger(minutes) || minutes < 0)) return;
+    persist({ [field]: minutes });
+  }
+
   function changeGating(value: boolean) {
     setAdrGating(value);
     persist({ adrGating: value });
@@ -89,6 +100,44 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
             value={limit}
             onChange={(e) => changeLimit(Number(e.target.value))}
             className="w-28"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="repo-max-job-minutes"
+            className="text-xs font-medium text-muted-foreground"
+          >
+            Max job minutes
+          </label>
+          <Input
+            id="repo-max-job-minutes"
+            type="number"
+            min={0}
+            step={1}
+            value={maxJobMinutes}
+            onChange={(e) => changeMinutes("maxJobMinutes", e.target.value)}
+            placeholder="Global default"
+            className="w-32"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="repo-max-ci-wait-minutes"
+            className="text-xs font-medium text-muted-foreground"
+          >
+            Max CI wait minutes
+          </label>
+          <Input
+            id="repo-max-ci-wait-minutes"
+            type="number"
+            min={0}
+            step={1}
+            value={maxCiWaitMinutes}
+            onChange={(e) => changeMinutes("maxCiWaitMinutes", e.target.value)}
+            placeholder="Global default"
+            className="w-32"
           />
         </div>
 
