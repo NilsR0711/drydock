@@ -64,6 +64,7 @@ export const repoInputSchema = z.object({
   autoLabelWhitelist: jsonStringArray('["bug","enhancement","documentation","ready"]'),
   priorityAuthors: jsonStringArray("[]"),
   trustedReviewers: jsonStringArray("[]"),
+  trustedBots: jsonStringArray("[]"),
   ignoredBots: jsonStringArray('["dependabot[bot]","github-actions[bot]","codecov[bot]"]'),
   minAuthorAssociation: z.enum(["approved", "any"]).default("approved"),
   maxAttempts: z.number().int().positive().default(3),

@@ -154,7 +154,11 @@ async function defaultProcessJob(repo: Repo, job: Job, forge: ForgeClient): Prom
   await processPrFeedback(job.id, job.prNumber, {
     forge,
     db,
-    gate: { trustedReviewers: cfg.trustedReviewers, ignoredBots: cfg.ignoredBots },
+    gate: {
+      trustedReviewers: cfg.trustedReviewers,
+      trustedBots: cfg.trustedBots,
+      ignoredBots: cfg.ignoredBots,
+    },
     includeProgressReplies: cfg.includeProgressReplies,
     applyFeedback,
   });

@@ -24,7 +24,7 @@ beforeEach(() => {
 });
 
 /** A trusted-reviewer gate used across the suite. */
-const gate = { trustedReviewers: ["alice"], ignoredBots: ["dependabot[bot]"] };
+const gate = { trustedReviewers: ["alice"], trustedBots: [], ignoredBots: ["dependabot[bot]"] };
 
 let threadSeq = 0;
 function thread(
