@@ -142,6 +142,11 @@ export const jobs = sqliteTable(
     costUsd: real("cost_usd").notNull().default(0),
     ciRetryCount: integer("ci_retry_count").notNull().default(0),
     errorMessage: text("error_message"),
+    // Provider-limit park marker (issue #166, ADR 030): the ProviderLimitKind
+    // that parked this job in `waiting_limit`. A set value plus a recorded
+    // sessionId makes the next run resume the session (`--resume`) instead of
+    // starting from scratch; cleared when the run restarts.
+    limitKind: text("limit_kind"),
     // Lease-based queue (issue #23). A claimed job carries a lease token held by
     // exactly one worker; heartbeats push leaseExpiresAt forward. attempts counts
     // claims (for backoff/maxAttempts), availableAt gates when a deferred/backed-off

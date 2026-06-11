@@ -33,6 +33,11 @@ export const settingsSchema = z.object({
   // off (no ceiling) — the default when unset. A per-repo override may tighten
   // or relax it.
   maxJobCostUsd: z.number().nonnegative().default(0),
+  // Auto-wait on Claude usage limits (issue #166, ADR 030). When a Claude
+  // session fails because the account's usage/rate limit is exhausted, the job
+  // parks in `waiting_limit` and resumes automatically once the window resets,
+  // instead of landing in needs_human. Off restores the pre-#166 behavior.
+  claudeLimitAutoWait: z.boolean().default(true),
   // Global kill-switch for opt-in release management (issue #59, ADR 028). Off by
   // default; both this and a repo's own `releaseEnabled` must be on for the
   // release pipeline to run for that repo. Cutting a public release is hard to
