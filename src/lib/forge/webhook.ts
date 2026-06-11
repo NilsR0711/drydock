@@ -80,8 +80,9 @@ export function classifyWebhookEvent(platform: string, event: string | null): We
 /** What a check/review delivery should wake (issue #180). */
 export interface WebhookNudge {
   kind: "checks" | "review";
-  /** Affected PR/MR numbers; empty when the payload names none (e.g. a fork
-   * PR's check suite, or a branch pipeline) — the caller broadcasts then. */
+  /** Affected PR/MR numbers. Empty only for `checks`, where a payload may
+   * legitimately name none (a fork PR's check suite, a branch pipeline) and
+   * the caller broadcasts; a `review` nudge always carries the PR. */
   prNumbers: number[];
 }
 
@@ -128,8 +129,9 @@ export function extractWebhookNudge(
       return { kind: "checks", prNumbers: iids };
     }
     // An MR note is GitLab's review comment; notes on issues/commits/snippets
-    // stay on the issue-sync path only.
-    if (event === "Note Hook" && attrs?.noteable_type === "MergeRequest") {
+    // stay on the issue-sync path only. A review always belongs to an MR, so a
+    // payload that names none is malformed — fail closed, no nudge.
+    if (event === "Note Hook" && attrs?.noteable_type === "MergeRequest" && iids.length > 0) {
       return { kind: "review", prNumbers: iids };
     }
     return null;
@@ -142,14 +144,17 @@ export function extractWebhookNudge(
     return { kind: "checks", prNumbers: prNumbers(container?.pull_requests) };
   }
   // A submitted review / created review comment is new feedback; edits,
-  // dismissals and deletions never carry anything the sweep must act on.
+  // dismissals and deletions never carry anything the sweep must act on. A
+  // review always belongs to a PR — unlike a fork PR's check suite there is no
+  // legitimate payload without one — so a missing number is malformed and
+  // fails closed instead of sweeping the whole repo.
   if (
     (event === "pull_request_review" && action === "submitted") ||
     (event === "pull_request_review_comment" && action === "created")
   ) {
     const pr = (payload.pull_request as { number?: unknown } | undefined)?.number;
-    const nums = typeof pr === "number" && Number.isInteger(pr) && pr > 0 ? [pr] : [];
-    return { kind: "review", prNumbers: nums };
+    if (typeof pr !== "number" || !Number.isInteger(pr) || pr <= 0) return null;
+    return { kind: "review", prNumbers: [pr] };
   }
   return null;
 }

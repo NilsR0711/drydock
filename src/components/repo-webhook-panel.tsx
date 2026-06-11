@@ -138,9 +138,9 @@ export function RepoWebhookPanel({ repo }: { repo: Repo }) {
             this secret and content type <code className="font-mono">application/json</code>
           </>
         )}
-        . Issue events drive the sync; finished check{isGitlab ? " (pipeline)" : ""} and review
-        events wake the CI babysitter and the review-feedback sweep, so merges and feedback land
-        within seconds instead of at the next poll. Drydock binds{" "}
+        . Issue events drive the sync. Finished check{isGitlab ? " (pipeline)" : ""} events wake the
+        CI babysitter, and review events trigger the review-feedback sweep, so merges and feedback
+        land within seconds instead of at the next poll. Drydock binds{" "}
         <code className="font-mono">127.0.0.1</code>, so expose the URL through a tunnel or
         forwarder (e.g. <code className="font-mono">cloudflared</code>,{" "}
         <code className="font-mono">ngrok</code>) to receive deliveries. Each delivery is{" "}

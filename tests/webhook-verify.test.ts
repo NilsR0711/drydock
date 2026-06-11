@@ -171,6 +171,19 @@ describe("extractWebhookNudge — github reviews", () => {
     });
   });
 
+  it("treats a review payload without a PR number as malformed (fail-closed)", () => {
+    expect(
+      extractWebhookNudge("github", "pull_request_review", JSON.stringify({ action: "submitted" })),
+    ).toBeNull();
+    expect(
+      extractWebhookNudge(
+        "github",
+        "pull_request_review_comment",
+        JSON.stringify({ action: "created", pull_request: { number: "42" } }),
+      ),
+    ).toBeNull();
+  });
+
   it("ignores edited/dismissed/deleted review actions", () => {
     const edited = JSON.stringify({ action: "edited", pull_request: { number: 42 } });
     expect(extractWebhookNudge("github", "pull_request_review", edited)).toBeNull();
@@ -224,6 +237,11 @@ describe("extractWebhookNudge — gitlab", () => {
       const body = JSON.stringify({ object_attributes: { noteable_type: type } });
       expect(extractWebhookNudge("gitlab", "Note Hook", body)).toBeNull();
     }
+  });
+
+  it("treats an MR note without an iid as malformed (fail-closed)", () => {
+    const body = JSON.stringify({ object_attributes: { noteable_type: "MergeRequest" } });
+    expect(extractWebhookNudge("gitlab", "Note Hook", body)).toBeNull();
   });
 });
 

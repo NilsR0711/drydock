@@ -219,6 +219,19 @@ describe("POST /api/webhooks/[repoId]", () => {
     expect(runner).not.toHaveBeenCalled();
   });
 
+  it("never sweeps for a signed review event without a PR number (fail-closed)", async () => {
+    const id = seedRepo();
+    const body = JSON.stringify({ action: "submitted" });
+    const res = await post(id, body, {
+      "x-github-event": "pull_request_review",
+      "x-hub-signature-256": ghSig(SECRET, body),
+    });
+
+    expect(res.status).toBe(202);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sweepRunner).not.toHaveBeenCalled();
+  });
+
   it("coalesces a review burst into one sweep", async () => {
     const id = seedRepo();
     for (let i = 0; i < 3; i++) {
