@@ -263,4 +263,16 @@ describe("runDoctorCommand", () => {
     expect(code).toBe(0);
     expect(io.out.join("\n")).toMatch(/^warn\s+instance lock/m);
   });
+
+  it("warns when the lock file exists but cannot be read", async () => {
+    const io = captureIo();
+    const deps = healthyDeps(io);
+    // A directory as the lock path stands in for any non-ENOENT read error.
+    deps.lockPath = dir;
+
+    const code = await runDoctorCommand(deps);
+
+    expect(code).toBe(0);
+    expect(io.out.join("\n")).toMatch(/^warn\s+instance lock\s+.*unreadable/m);
+  });
 });

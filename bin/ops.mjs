@@ -42,20 +42,23 @@ function defaultPidAlive(pid) {
 }
 
 /**
- * Inspect the instance lock file: free (absent), held (live pid), or stale
- * (dead pid or unreadable content). Mirrors the staleness rules of the
- * server's `acquireInstanceLock`.
+ * Inspect the instance lock file: free (absent), held (live pid), stale (dead
+ * pid or corrupt content), or unknown (the file exists but cannot be read,
+ * e.g. EACCES/EIO). Unknown is fail-closed: callers guarding destructive
+ * operations must treat it like held, never like free. Mirrors the staleness
+ * rules of the server's `acquireInstanceLock`.
  *
  * @param {string} lockPath
  * @param {{ pidAlive?: (pid: number) => boolean }} [deps]
- * @returns {{ state: "free" | "held" | "stale", pid?: number }}
+ * @returns {{ state: "free" | "held" | "stale" | "unknown", pid?: number }}
  */
 export function readLockState(lockPath, { pidAlive = defaultPidAlive } = {}) {
   let raw;
   try {
     raw = readFileSync(lockPath, "utf8");
-  } catch {
-    return { state: "free" };
+  } catch (err) {
+    if (err && typeof err === "object" && err.code === "ENOENT") return { state: "free" };
+    return { state: "unknown" };
   }
   try {
     const { pid } = JSON.parse(raw);
@@ -126,14 +129,18 @@ export async function runBackupCommand(
     error(`Backup target already exists: ${target}`);
     return 1;
   }
-  mkdirSync(dirname(target), { recursive: true });
-
-  const Database = await loadDatabase();
-  const db = new Database(dbPath, { readonly: true });
   try {
-    await db.backup(target);
-  } finally {
-    db.close();
+    mkdirSync(dirname(target), { recursive: true });
+    const Database = await loadDatabase();
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      await db.backup(target);
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    error(`Backup failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
   }
   log(`Backed up ${dbPath} → ${target}`);
   return 0;
@@ -189,13 +196,31 @@ export async function runRestoreCommand(
     );
     return 1;
   }
+  if (lock.state === "unknown") {
+    error(
+      `The instance lock at ${lockPath} exists but could not be read, so a live ` +
+        `drydock process cannot be ruled out — fix the lock file's permissions ` +
+        `(or remove it if no instance is running) and retry.`,
+    );
+    return 1;
+  }
 
-  mkdirSync(dirname(dbPath), { recursive: true });
   const tmp = `${dbPath}.restore-tmp`;
-  copyFileSync(sourcePath, tmp);
-  rmSync(`${dbPath}-wal`, { force: true });
-  rmSync(`${dbPath}-shm`, { force: true });
-  renameSync(tmp, dbPath);
+  try {
+    mkdirSync(dirname(dbPath), { recursive: true });
+    copyFileSync(sourcePath, tmp);
+    rmSync(`${dbPath}-wal`, { force: true });
+    rmSync(`${dbPath}-shm`, { force: true });
+    renameSync(tmp, dbPath);
+  } catch (err) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // Best-effort cleanup: reporting the original failure matters more.
+    }
+    error(`Restore failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
   log(`Restored ${sourcePath} → ${dbPath}`);
   return 0;
 }
@@ -472,6 +497,12 @@ export async function runDoctorCommand({
       name: "instance lock",
       status: "warn",
       detail: "stale lock file (holder is dead); the next start takes it over",
+    });
+  } else if (lock.state === "unknown") {
+    results.push({
+      name: "instance lock",
+      status: "warn",
+      detail: `lock file at ${lockPath} is unreadable — check its permissions`,
     });
   } else {
     results.push({ name: "instance lock", status: "ok", detail: "no instance running" });

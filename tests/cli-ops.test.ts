@@ -89,6 +89,12 @@ describe("readLockState", () => {
     writeFileSync(path, "not json");
     expect(readLockState(path, { pidAlive: () => true })).toEqual({ state: "stale" });
   });
+
+  it("reports unknown (fail-closed) when the lock file exists but cannot be read", () => {
+    // A directory as the lock path makes readFileSync throw EISDIR — a
+    // portable stand-in for any non-ENOENT read error such as EACCES/EIO.
+    expect(readLockState(dir, { pidAlive: () => true })).toEqual({ state: "unknown" });
+  });
 });
 
 describe("timestampedBackupName", () => {
@@ -195,6 +201,17 @@ describe("runBackupCommand", () => {
     expect(code).toBe(1);
     expect(readFileSync(target, "utf8")).toBe("precious bytes");
     expect(io.err.join("\n")).toMatch(/exists/i);
+  });
+
+  it("returns 1 instead of throwing when the source is not a readable database", async () => {
+    const dbPath = join(dir, "not-a-db.db");
+    writeFileSync(dbPath, "definitely not sqlite");
+    const io = captureIo();
+
+    const code = await runBackupCommand(join(dir, "snap.db"), { dbPath, dataDir: dir, ...io });
+
+    expect(code).toBe(1);
+    expect(io.err.join("\n")).toMatch(/backup failed/i);
   });
 });
 
@@ -312,5 +329,38 @@ describe("runRestoreCommand", () => {
     expect(code).toBe(1);
     expect(readMarker(dbPath)).toBe("old");
     expect(io.err.join("\n")).toMatch(/not a valid sqlite/i);
+  });
+
+  it("refuses (fail-closed) when the lock file exists but cannot be read", async () => {
+    const dbPath = join(dir, "drydock.db");
+    createDb(dbPath, "old");
+    const backup = join(dir, "backup.db");
+    createDb(backup, "restored");
+    const io = captureIo();
+
+    // The lock path points at a directory, so reading it fails with EISDIR —
+    // an unknown lock state must block the restore, not bypass the guard.
+    const code = await runRestoreCommand(backup, { dbPath, lockPath: dir, ...io });
+
+    expect(code).toBe(1);
+    expect(readMarker(dbPath)).toBe("old");
+    expect(io.err.join("\n")).toMatch(/lock/i);
+  });
+
+  it("returns 1 instead of throwing when the target cannot be written", async () => {
+    const backup = join(dir, "backup.db");
+    createDb(backup, "restored");
+    const blocker = join(dir, "blocker");
+    writeFileSync(blocker, "a plain file where a directory is needed");
+    const io = captureIo();
+
+    const code = await runRestoreCommand(backup, {
+      dbPath: join(blocker, "drydock.db"),
+      lockPath: join(dir, "instance.lock"),
+      ...io,
+    });
+
+    expect(code).toBe(1);
+    expect(io.err.join("\n")).toMatch(/restore failed/i);
   });
 });
