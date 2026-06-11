@@ -73,6 +73,7 @@ describe("settings", () => {
       "pr_merged",
       "release_published",
       "cost_limit",
+      "claude_limit",
       "automation_paused",
     ]);
   });

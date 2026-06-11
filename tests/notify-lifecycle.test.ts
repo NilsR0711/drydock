@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import {
   type EdgeState,
+  notifyClaudeLimitEdge,
   notifyCostLimitEdge,
   notifyDraining,
   notifyPauseTransition,
@@ -40,6 +41,36 @@ describe("notifyCostLimitEdge", () => {
   it("does not notify while under the limit", async () => {
     const state: EdgeState = { active: false };
     await notifyCostLimitEdge(false, state, db, transports);
+    expect(postJson).not.toHaveBeenCalled();
+  });
+});
+
+describe("notifyClaudeLimitEdge (issue #166)", () => {
+  it("notifies once on entering the blocked state, not per tick", async () => {
+    const state: EdgeState = { active: false };
+    await notifyClaudeLimitEdge(true, state, db, transports);
+    await notifyClaudeLimitEdge(true, state, db, transports);
+    expect(postJson).toHaveBeenCalledTimes(1);
+    const body = JSON.stringify(postJson.mock.calls[0]?.[1] ?? {});
+    expect(body).toMatch(/usage limit/i);
+  });
+
+  it("notifies once more when the limit clears, then re-arms", async () => {
+    const state: EdgeState = { active: false };
+    await notifyClaudeLimitEdge(true, state, db, transports);
+    await notifyClaudeLimitEdge(false, state, db, transports);
+    expect(postJson).toHaveBeenCalledTimes(2);
+    const exitBody = JSON.stringify(postJson.mock.calls[1]?.[1] ?? {});
+    expect(exitBody).toMatch(/resum/i);
+    // Quiet while unblocked; a fresh breach notifies again.
+    await notifyClaudeLimitEdge(false, state, db, transports);
+    await notifyClaudeLimitEdge(true, state, db, transports);
+    expect(postJson).toHaveBeenCalledTimes(3);
+  });
+
+  it("stays silent when never blocked", async () => {
+    const state: EdgeState = { active: false };
+    await notifyClaudeLimitEdge(false, state, db, transports);
     expect(postJson).not.toHaveBeenCalled();
   });
 });

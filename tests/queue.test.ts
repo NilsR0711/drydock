@@ -207,3 +207,23 @@ describe("enqueueJob (dedupe)", () => {
     expect(enqueueJob({ repoId, issueNumber: 7 }, db)).toBeDefined();
   });
 });
+
+describe("claimNext agent exclusion (issue #166)", () => {
+  it("skips jobs of an excluded agent and claims the next eligible one", () => {
+    const claude = createJob({ repoId, issueNumber: 80, agent: "claude" }, db);
+    const codex = createJob({ repoId, issueNumber: 81, agent: "codex" }, db);
+    const claimed = claimNext({ excludeAgents: ["claude"] }, db);
+    expect(claimed?.id).toBe(codex.id);
+    expect(getJob(claude.id, db)?.status).toBe("queued");
+  });
+
+  it("claims nothing when every queued job is excluded", () => {
+    createJob({ repoId, issueNumber: 82, agent: "claude" }, db);
+    expect(claimNext({ excludeAgents: ["claude"] }, db)).toBeUndefined();
+  });
+
+  it("claims normally with an empty exclusion list", () => {
+    const job = createJob({ repoId, issueNumber: 83, agent: "claude" }, db);
+    expect(claimNext({ excludeAgents: [] }, db)?.id).toBe(job.id);
+  });
+});

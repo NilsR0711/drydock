@@ -283,6 +283,16 @@ export function finalizeHealingAttempt(
     .run();
 }
 
+/**
+ * Remove an attempt whose fix session never ran because a provider limit
+ * aborted it before any work happened (issue #166). It changed nothing and
+ * must not consume the per-session or per-fingerprint heal budgets — the
+ * retry happens automatically once the limit window clears.
+ */
+export function voidHealingAttempt(attemptId: number, db: DB = getDb()): void {
+  db.delete(healingAttempts).where(eq(healingAttempts.id, attemptId)).run();
+}
+
 export function listHealingAttempts(sessionId: number, db: DB = getDb()): HealingAttempt[] {
   return db.select().from(healingAttempts).where(eq(healingAttempts.sessionId, sessionId)).all();
 }
