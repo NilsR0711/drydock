@@ -75,6 +75,7 @@ describe("settings", () => {
       "cost_limit",
       "claude_limit",
       "codex_limit",
+      "openrouter_limit",
       "automation_paused",
     ]);
   });
@@ -101,6 +102,49 @@ describe("settings", () => {
     const s = getSettings(db);
     expect(s.paused).toBe(true);
     expect(s.dailyCostLimitUsd).toBe(25);
+  });
+});
+
+describe("openrouter settings (issue #169)", () => {
+  it("defaults to disabled with an empty key and sane sync interval", () => {
+    const s = getSettings(db);
+    expect(s.openrouterEnabled).toBe(false);
+    expect(s.openrouterApiKey).toBe("");
+    expect(s.openrouterCatalogRefreshHours).toBe(6);
+    expect(s.openrouterDefaultModel).toBe("");
+    expect(s.openrouterFreeModelsOnly).toBe(false);
+    expect(s.openrouterSiteUrl).toBe("");
+    expect(s.openrouterAppName).toBe("Drydock");
+    expect(s.openrouterLimitAutoWait).toBe(true);
+  });
+
+  it("persists the OpenRouter configuration", () => {
+    saveSettings(
+      {
+        openrouterEnabled: true,
+        openrouterApiKey: "sk-or-v1-test",
+        openrouterCatalogRefreshHours: 12,
+        openrouterDefaultModel: "meta-llama/llama-3.3-70b-instruct:free",
+        openrouterFreeModelsOnly: true,
+      },
+      db,
+    );
+    const s = getSettings(db);
+    expect(s.openrouterEnabled).toBe(true);
+    expect(s.openrouterApiKey).toBe("sk-or-v1-test");
+    expect(s.openrouterCatalogRefreshHours).toBe(12);
+    expect(s.openrouterDefaultModel).toBe("meta-llama/llama-3.3-70b-instruct:free");
+    expect(s.openrouterFreeModelsOnly).toBe(true);
+  });
+
+  it("rejects a refresh interval below 15 minutes", () => {
+    expect(() => saveSettings({ openrouterCatalogRefreshHours: 0.1 }, db)).toThrow();
+    saveSettings({ openrouterCatalogRefreshHours: 0.25 }, db);
+    expect(getSettings(db).openrouterCatalogRefreshHours).toBe(0.25);
+  });
+
+  it("keeps defaultAgent restricted to the CLI agents", () => {
+    expect(() => saveSettings({ defaultAgent: "openrouter" as unknown as "claude" }, db)).toThrow();
   });
 });
 

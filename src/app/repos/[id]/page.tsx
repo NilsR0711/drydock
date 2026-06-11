@@ -34,6 +34,7 @@ import { getDb } from "@/lib/db/client";
 import { dailyCosts, todayCost } from "@/lib/db/cost-queries";
 import { getRepoWorkspace } from "@/lib/db/queries";
 import { jobEvents, jobs } from "@/lib/db/schema";
+import { listOpenRouterModels } from "@/lib/openrouter/catalog";
 import { recentHealingSessions } from "@/lib/orchestrator/ci-healing";
 import { recentDeploymentHealingSessions } from "@/lib/orchestrator/deployment-healing";
 import { recentReleaseRuns } from "@/lib/release/release-service";
@@ -47,6 +48,18 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
   if (!ws) notFound();
   const settings = getSettings();
   const db = getDb();
+
+  // Synced OpenRouter catalog for the agent/model pickers (issue #169). The
+  // global free-models-only policy narrows what can be selected here.
+  const openrouterPicker = {
+    enabled: settings.openrouterEnabled,
+    models: listOpenRouterModels({ db, freeOnly: settings.openrouterFreeModelsOnly }).map((m) => ({
+      id: m.id,
+      label: m.name,
+      isFree: m.isFree,
+    })),
+    defaultModel: settings.openrouterDefaultModel,
+  };
 
   const todayUsd = todayCost(db, ws.repo.id);
   const daily = dailyCosts(db, ws.repo.id).map((d) => ({ day: d.day, costUsd: d.costUsd }));
@@ -170,7 +183,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
               <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
                 <Settings className="h-3.5 w-3.5 text-muted-foreground" /> Repository settings
               </h3>
-              <RepoSettingsBar repo={ws.repo} />
+              <RepoSettingsBar repo={ws.repo} openrouter={openrouterPicker} />
             </div>
             <RepoAutomationBar repo={ws.repo} />
             <RepoWebhookPanel repo={ws.repo} />

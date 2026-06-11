@@ -493,6 +493,40 @@ export const oneShotCosts = sqliteTable(
 export type OneShotCost = typeof oneShotCosts.$inferSelect;
 export type NewOneShotCost = typeof oneShotCosts.$inferInsert;
 
+/**
+ * Local mirror of the OpenRouter model catalog (issue #169). Synced from
+ * `GET /api/v1/models` on an interval; rows for models that disappear from the
+ * API are soft-deleted via `removedAt` so historical jobs keep their labels.
+ * Pricing is stored as USD per token, exactly as the API reports it.
+ */
+export const openrouterModels = sqliteTable(
+  "openrouter_models",
+  {
+    /** OpenRouter model id, e.g. "meta-llama/llama-3.3-70b-instruct:free". */
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    contextLength: integer("context_length").notNull().default(0),
+    promptCostPerToken: real("prompt_cost_per_token").notNull().default(0),
+    completionCostPerToken: real("completion_cost_per_token").notNull().default(0),
+    /** JSON array of supported request parameters (e.g. ["tools","max_tokens"]). */
+    supportedParameters: text("supported_parameters").notNull().default("[]"),
+    /** Epoch seconds after which OpenRouter retires the model; null = no sunset. */
+    expirationDate: integer("expiration_date"),
+    isFree: integer("is_free", { mode: "boolean" }).notNull().default(false),
+    supportsTools: integer("supports_tools", { mode: "boolean" }).notNull().default(false),
+    /** Epoch seconds when the model vanished from the API; null = still listed. */
+    removedAt: integer("removed_at"),
+    syncedAt: integer("synced_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    freeIdx: index("openrouter_models_free_idx").on(t.isFree),
+    removedIdx: index("openrouter_models_removed_idx").on(t.removedAt),
+  }),
+);
+
+export type OpenRouterModel = typeof openrouterModels.$inferSelect;
+
 export type Repo = typeof repos.$inferSelect;
 export type NewRepo = typeof repos.$inferInsert;
 export type Job = typeof jobs.$inferSelect;

@@ -172,7 +172,9 @@ export function clearProviderLimit(agent: string, db: DB = getDb()): void {
  */
 export function limitAutoWaitEnabled(agent: AgentId, db: DB = getDb()): boolean {
   const settings = getSettings(db);
-  return agent === "codex" ? settings.codexLimitAutoWait : settings.claudeLimitAutoWait;
+  if (agent === "codex") return settings.codexLimitAutoWait;
+  if (agent === "openrouter") return settings.openrouterLimitAutoWait;
+  return settings.claudeLimitAutoWait;
 }
 
 /** The active latch for `agent`, gated by its operator auto-wait toggle. */

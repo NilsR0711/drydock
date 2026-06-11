@@ -52,6 +52,11 @@ const PROVIDER_LIMIT_MESSAGES = {
     blocked: "⏳ Codex usage limit reached — Codex jobs are parked until the quota resets.",
     cleared: "▶️ Codex capacity available again — parked jobs are resuming.",
   },
+  openrouter: {
+    event: "openrouter_limit",
+    blocked: "⏳ OpenRouter limit reached — OpenRouter jobs are parked until the window resets.",
+    cleared: "▶️ OpenRouter available again — parked jobs are resuming.",
+  },
 } as const satisfies Record<
   AgentId,
   { event: NotificationEvent; blocked: string; cleared: string }
