@@ -167,9 +167,11 @@ export interface PublishReleaseDeps {
  * `evaluating → proposed → publishing → published`, or `→ skipped` when the auto
  * path's evaluation declines a release. The manual path forces a release
  * (defaulting to a patch bump) and bypasses the "should release?" gate, but still
- * reuses the same evaluation for its title/notes. Idempotent: an existing release
- * for the computed tag is treated as already published and never recreated. Any
- * failure lands the run in `error`, which is retryable.
+ * reuses the same evaluation for its title/notes — except when nothing was merged
+ * since the last release, in which case it is skipped rather than cutting an
+ * empty release. Idempotent: an existing release for the computed tag is treated
+ * as already published and never recreated. Any failure lands the run in
+ * `error`, which is retryable.
  */
 export async function publishRelease(runId: number, deps: PublishReleaseDeps): Promise<ReleaseRun> {
   const db = deps.db ?? getDb();
@@ -181,6 +183,16 @@ export async function publishRelease(runId: number, deps: PublishReleaseDeps): P
   transitionReleaseRun(runId, "evaluating", {}, db);
   try {
     const { fromTag, releases, prs } = await gatherWindow(deps.forge);
+
+    // A manual run with nothing merged since the last release is skipped
+    // instead of force-cutting an empty patch release (e.g. a double submit
+    // whose first run already published the window). A retried manual run that
+    // already anchored a tag proceeds, so the tag-existence idempotency check
+    // below can still settle it as published.
+    if (mode === "manual" && prs.length === 0 && !run.tag) {
+      return transitionReleaseRun(runId, "skipped", { fromTag }, db);
+    }
+
     const evaluation = await deps.generate({ fromTag, prs });
 
     // Auto path requires a usable evaluation; manual forces a release regardless.

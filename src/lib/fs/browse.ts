@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
@@ -20,10 +20,26 @@ function isGitRepo(dir: string): boolean {
   return existsSync(join(dir, ".git"));
 }
 
-/** Returns the configured browse root (always resolved, no trailing sep). */
+/**
+ * Canonicalize a path: resolve `..` segments AND symlinks. `resolve()` alone is
+ * not enough for a containment check — it never follows symlinks, while the
+ * readdir/stat calls below do, so a symlink inside the root could otherwise
+ * smuggle an out-of-root directory past a lexical prefix check. A path that
+ * cannot be canonicalized (e.g. it does not exist) keeps its lexical form; it
+ * cannot escape because listing it yields nothing.
+ */
+function canonicalize(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** Returns the configured browse root (always canonicalized, no trailing sep). */
 function browseRoot(): string {
   const raw = process.env.DRYDOCK_BROWSE_ROOT?.trim();
-  return resolve(raw || homedir());
+  return canonicalize(resolve(raw || homedir()));
 }
 
 /**
@@ -41,11 +57,14 @@ function isWithinRoot(child: string, root: string): boolean {
  *
  * Browsing is confined to `DRYDOCK_BROWSE_ROOT` (default: home directory).
  * Any path outside the root throws so the Server Action cannot be used as a
- * filesystem enumeration oracle.
+ * filesystem enumeration oracle. Both the target and the root are
+ * canonicalized (symlinks resolved) before the containment check, and listed
+ * entries whose symlink target escapes the root are skipped, so a symlink
+ * inside the root cannot be used to enumerate directories outside it.
  */
 export function browseDirectory(target?: string): BrowseResult {
   const root = browseRoot();
-  const path = resolve(target?.trim() ? target : root);
+  const path = canonicalize(resolve(target?.trim() ? target : root));
 
   if (!isWithinRoot(path, root)) {
     throw new Error(
@@ -60,9 +79,12 @@ export function browseDirectory(target?: string): BrowseResult {
     if (name.startsWith(".")) continue;
     const full = join(path, name);
     try {
+      // statSync/readdirSync follow symlinks, so confine by the entry's REAL
+      // path: a symlink pointing outside the browse root is not listed.
+      if (!isWithinRoot(realpathSync(full), root)) continue;
       if (!statSync(full).isDirectory()) continue;
     } catch {
-      continue; // permission denied / vanished
+      continue; // permission denied / vanished / broken symlink
     }
     entries.push({ name, path: full, isGitRepo: isGitRepo(full) });
   }

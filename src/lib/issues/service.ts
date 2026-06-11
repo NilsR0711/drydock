@@ -1,9 +1,11 @@
 import { and, asc, eq, inArray, max } from "drizzle-orm";
+import { isAgentId } from "@/lib/agents/registry";
 import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import { type Issue, issues } from "@/lib/db/schema";
 import { getForge } from "@/lib/forge/registry";
 import type { GhIssue } from "@/lib/github/gh";
+import { isKnownModelId } from "@/lib/models";
 
 const QUEUE_LABEL_OPTS = {
   color: "1f6feb",
@@ -75,12 +77,17 @@ export function syncIssuesFromGh(repoId: number, fetched: GhIssue[], db: DB = ge
   }
 }
 
-/** Add or remove the queue label in the locally cached labels JSON for one issue. */
-export function setQueueLabelLocal(
+/**
+ * Mirror label adds/removals into the locally cached labels JSON for one issue,
+ * so a label change applied on the forge is visible on the issue board without
+ * waiting for the next sync sweep. Removals win over adds for the same label,
+ * matching the forge call order (add first, then remove).
+ */
+export function mirrorLabelsLocal(
   repoId: number,
   number: number,
-  queueLabel: string,
-  inQueue: boolean,
+  add: string[],
+  remove: string[],
   db: DB = getDb(),
 ): void {
   const row = db
@@ -96,14 +103,25 @@ export function setQueueLabelLocal(
   } catch {
     labels = [];
   }
-  const has = labels.includes(queueLabel);
-  let next = labels;
-  if (inQueue && !has) next = [...labels, queueLabel];
-  if (!inQueue && has) next = labels.filter((l) => l !== queueLabel);
+  const merged = [...labels];
+  for (const l of add) if (!merged.includes(l)) merged.push(l);
+  const removeSet = new Set(remove);
+  const next = merged.filter((l) => !removeSet.has(l));
   db.update(issues)
     .set({ labels: JSON.stringify(next) })
     .where(eq(issues.id, row.id))
     .run();
+}
+
+/** Add or remove the queue label in the locally cached labels JSON for one issue. */
+export function setQueueLabelLocal(
+  repoId: number,
+  number: number,
+  queueLabel: string,
+  inQueue: boolean,
+  db: DB = getDb(),
+): void {
+  mirrorLabelsLocal(repoId, number, inQueue ? [queueLabel] : [], inQueue ? [] : [queueLabel], db);
 }
 
 /**
@@ -119,6 +137,22 @@ export async function syncRepoIssues(repoId: number, db: DB = getDb()): Promise<
   return listIssues(repoId, db);
 }
 
+/** Persist (or clear) the per-issue model/agent overrides the driver consumes. */
+function setIssueOverrides(
+  repoId: number,
+  issueNumber: number,
+  opts: { model?: string; agent?: string },
+  db: DB,
+): void {
+  db.update(issues)
+    .set({
+      modelOverride: opts.model ?? null,
+      agentOverride: opts.agent ?? null,
+    })
+    .where(and(eq(issues.repoId, repoId), eq(issues.number, issueNumber)))
+    .run();
+}
+
 /** Add the repo's queue label to an issue (forge + local cache); returns issues. */
 export async function queueIssue(
   repoId: number,
@@ -127,19 +161,20 @@ export async function queueIssue(
   db: DB = getDb(),
 ): Promise<Issue[]> {
   const repo = requireRepo(repoId, db);
+  if (opts.model !== undefined && !isKnownModelId(opts.model)) {
+    throw new Error(`unknown model id: ${opts.model}`);
+  }
+  if (opts.agent !== undefined && !isAgentId(opts.agent)) {
+    throw new Error(`unknown agent: ${opts.agent}`);
+  }
   const gh = getForge(repo);
   await gh.ensureLabel(repo.queueLabel, QUEUE_LABEL_OPTS);
   await gh.addLabels(issueNumber, [repo.queueLabel]);
   setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true, db);
-  if (opts.model !== undefined || opts.agent !== undefined) {
-    db.update(issues)
-      .set({
-        modelOverride: opts.model ?? null,
-        agentOverride: opts.agent ?? null,
-      })
-      .where(and(eq(issues.repoId, repoId), eq(issues.number, issueNumber)))
-      .run();
-  }
+  // Always write both override columns so the persisted override reflects the
+  // LATEST queue operation: re-queuing with the repo defaults clears a stale
+  // override from an earlier queue instead of silently keeping it.
+  setIssueOverrides(repoId, issueNumber, opts, db);
   return listIssues(repoId, db);
 }
 
@@ -152,6 +187,8 @@ export async function dequeueIssue(
   const repo = requireRepo(repoId, db);
   await getForge(repo).removeLabels(issueNumber, [repo.queueLabel]);
   setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, false, db);
+  // A dequeued issue keeps no override; the next queue operation sets its own.
+  setIssueOverrides(repoId, issueNumber, {}, db);
   return listIssues(repoId, db);
 }
 
@@ -188,6 +225,7 @@ export async function bulkDequeueIssues(
   for (const number of issueNumbers) {
     await gh.removeLabels(number, [repo.queueLabel]);
     setQueueLabelLocal(repoId, number, repo.queueLabel, false, db);
+    setIssueOverrides(repoId, number, {}, db);
   }
   return listIssues(repoId, db);
 }
@@ -206,7 +244,7 @@ export async function bulkApplyLabel(
   return listIssues(repoId, db);
 }
 
-/** Add and/or remove labels on an issue (forge + local cache for the queue label). */
+/** Add and/or remove labels on an issue (forge + local cache). */
 export async function applyIssueLabels(
   repoId: number,
   issueNumber: number,
@@ -219,10 +257,10 @@ export async function applyIssueLabels(
   if (add.includes(repo.queueLabel)) await gh.ensureLabel(repo.queueLabel, QUEUE_LABEL_OPTS);
   if (add.length) await gh.addLabels(issueNumber, add);
   if (remove.length) await gh.removeLabels(issueNumber, remove);
-  if (add.includes(repo.queueLabel))
-    setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, true, db);
-  if (remove.includes(repo.queueLabel))
-    setQueueLabelLocal(repoId, issueNumber, repo.queueLabel, false, db);
+  // Mirror EVERY label change into the local cache (not just the queue label),
+  // so the revalidated issue board reflects the edit immediately instead of
+  // showing stale labels until the next sync sweep.
+  mirrorLabelsLocal(repoId, issueNumber, add, remove, db);
 }
 
 /**

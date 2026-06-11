@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -103,6 +103,29 @@ describe("browseDirectory – path confinement", () => {
 
     // Home dir itself is now outside the custom root
     expect(() => browseDirectory(homedir())).toThrow(/outside/i);
+  });
+
+  it("skips entries whose symlink target escapes the browse root", () => {
+    const root = mkdtempSync(join(homedir(), "ac-browse-"));
+    const outside = mkdtempSync(join(homedir(), "ac-browse-outside-"));
+    mkdirSync(join(outside, "secret"), { recursive: true });
+    mkdirSync(join(root, "inside"), { recursive: true });
+    symlinkSync(outside, join(root, "leak"));
+    process.env.DRYDOCK_BROWSE_ROOT = root;
+
+    const names = browseDirectory(root).entries.map((e) => e.name);
+    expect(names).toContain("inside");
+    expect(names).not.toContain("leak");
+  });
+
+  it("rejects browsing through a symlink that points outside the root", () => {
+    const root = mkdtempSync(join(homedir(), "ac-browse-"));
+    const outside = mkdtempSync(join(homedir(), "ac-browse-outside-"));
+    symlinkSync(outside, join(root, "leak"));
+    process.env.DRYDOCK_BROWSE_ROOT = root;
+
+    // The target canonicalizes to a path outside the root and must be refused.
+    expect(() => browseDirectory(join(root, "leak"))).toThrow(/outside/i);
   });
 
   it("suppresses parent at the browse root boundary", () => {

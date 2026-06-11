@@ -8,8 +8,7 @@ import { type DB, getDb } from "@/lib/db/client";
 import { issues, jobEvents, jobs, repos, settings } from "@/lib/db/schema";
 import { __setForgeFactory } from "@/lib/forge/registry";
 import { type ToolDef, tools } from "@/lib/mcp/tools";
-import { setDrainMode } from "@/lib/orchestrator/runtime";
-import { saveSettings } from "@/lib/settings/service";
+import { getSettings, saveSettings } from "@/lib/settings/service";
 
 function tool(name: string): ToolDef {
   const t = tools.find((x) => x.name === name);
@@ -47,14 +46,12 @@ describe("MCP tool registry", () => {
     db.delete(issues).run();
     db.delete(repos).run();
     db.delete(settings).run();
-    saveSettings({ paused: false, dailyCostLimitUsd: 10 }, db);
-    setDrainMode(false);
+    saveSettings({ paused: false, draining: false, dailyCostLimitUsd: 10 }, db);
     gh = fakeGh();
     __setForgeFactory(() => gh as never);
   });
 
   afterEach(() => {
-    setDrainMode(false);
     __setForgeFactory(null);
   });
 
@@ -219,9 +216,15 @@ describe("MCP tool registry", () => {
     expect(result.paused).toBe(true);
   });
 
-  it("set_drain_mode toggles the runtime drain flag", async () => {
+  it("set_drain_mode persists the drain flag in settings (cross-process)", async () => {
     const result = (await run("set_drain_mode", { on: true }, db)) as { draining: boolean };
     expect(result.draining).toBe(true);
+    // DB-backed, not in-memory: the orchestrator process polls settings, so the
+    // flag must land there to have any effect (the MCP server is its own process).
+    expect(getSettings(db).draining).toBe(true);
+    const off = (await run("set_drain_mode", { on: false }, db)) as { draining: boolean };
+    expect(off.draining).toBe(false);
+    expect(getSettings(db).draining).toBe(false);
   });
 
   it("get_logs replays persisted job events", async () => {
@@ -248,7 +251,7 @@ describe("MCP tool registry", () => {
     it("add_to_queue is refused while draining", async () => {
       const repoId = seedRepo(db);
       db.insert(issues).values({ repoId, number: 3, title: "i", labels: "[]", priority: 0 }).run();
-      setDrainMode(true);
+      saveSettings({ draining: true }, db);
       await expect(run("add_to_queue", { repoId, issueNumber: 3 }, db)).rejects.toThrow(/drain/i);
     });
 
@@ -259,7 +262,7 @@ describe("MCP tool registry", () => {
         .values({ repoId, issueNumber: 5, status: "needs_human", agent: "claude" })
         .returning()
         .get();
-      setDrainMode(true);
+      saveSettings({ draining: true }, db);
       await expect(run("requeue_job", { jobId: job.id }, db)).rejects.toThrow(/drain/i);
     });
 

@@ -86,6 +86,39 @@ describe("issue queue service (forge orchestration)", () => {
     expect(gh.removeLabels).toHaveBeenCalledWith(3, ["wontfix"]);
   });
 
+  it("applyIssueLabels mirrors non-queue label adds into the local cache", async () => {
+    const repoId = seedRepo();
+    seedIssue(repoId, 3);
+
+    await applyIssueLabels(repoId, 3, ["bug"], []);
+
+    const cached = listIssues(repoId).find((i) => i.number === 3);
+    expect(JSON.parse(cached?.labels ?? "[]")).toContain("bug");
+  });
+
+  it("applyIssueLabels mirrors non-queue label removals into the local cache", async () => {
+    const repoId = seedRepo();
+    getDb()
+      .insert(issues)
+      .values({ repoId, number: 3, title: "seed", labels: '["bug","enhancement"]', priority: 0 })
+      .run();
+
+    await applyIssueLabels(repoId, 3, [], ["bug"]);
+
+    const cached = listIssues(repoId).find((i) => i.number === 3);
+    expect(JSON.parse(cached?.labels ?? "[]")).toEqual(["enhancement"]);
+  });
+
+  it("bulkApplyLabel shows the applied label in the returned issue list (no stale board)", async () => {
+    const repoId = seedRepo();
+    seedIssue(repoId, 3);
+    seedIssue(repoId, 4);
+
+    const result = await bulkApplyLabel(repoId, [3, 4], "enhancement");
+
+    for (const i of result) expect(JSON.parse(i.labels)).toContain("enhancement");
+  });
+
   it("applyIssueLabels ensures the queue label only when it is being added", async () => {
     const repoId = seedRepo();
     seedIssue(repoId, 3);
@@ -168,5 +201,61 @@ describe("issue queue service (forge orchestration)", () => {
 
     expect(gh.addLabels).not.toHaveBeenCalled();
     expect(result).toHaveLength(1);
+  });
+
+  describe("per-issue model/agent overrides", () => {
+    function overridesOf(repoId: number, number: number) {
+      const row = listIssues(repoId).find((i) => i.number === number);
+      return { model: row?.modelOverride ?? null, agent: row?.agentOverride ?? null };
+    }
+
+    it("queueIssue persists both overrides", async () => {
+      const repoId = seedRepo();
+      seedIssue(repoId, 3);
+      await queueIssue(repoId, 3, { model: "claude-haiku-4-5", agent: "codex" });
+      expect(overridesOf(repoId, 3)).toEqual({ model: "claude-haiku-4-5", agent: "codex" });
+    });
+
+    it("re-queuing with defaults clears a stale override (latest queue op wins)", async () => {
+      const repoId = seedRepo();
+      seedIssue(repoId, 3);
+      await queueIssue(repoId, 3, { model: "claude-haiku-4-5", agent: "codex" });
+      await queueIssue(repoId, 3);
+      expect(overridesOf(repoId, 3)).toEqual({ model: null, agent: null });
+    });
+
+    it("queueIssue with only one override clears the persisted sibling", async () => {
+      const repoId = seedRepo();
+      seedIssue(repoId, 3);
+      await queueIssue(repoId, 3, { agent: "codex" });
+      await queueIssue(repoId, 3, { model: "claude-haiku-4-5" });
+      expect(overridesOf(repoId, 3)).toEqual({ model: "claude-haiku-4-5", agent: null });
+    });
+
+    it("dequeueIssue clears persisted overrides", async () => {
+      const repoId = seedRepo();
+      seedIssue(repoId, 3);
+      await queueIssue(repoId, 3, { model: "claude-haiku-4-5", agent: "codex" });
+      await dequeueIssue(repoId, 3);
+      expect(overridesOf(repoId, 3)).toEqual({ model: null, agent: null });
+    });
+
+    it("bulkDequeueIssues clears persisted overrides", async () => {
+      const repoId = seedRepo();
+      seedIssue(repoId, 3);
+      await queueIssue(repoId, 3, { model: "claude-haiku-4-5" });
+      await bulkDequeueIssues(repoId, [3]);
+      expect(overridesOf(repoId, 3)).toEqual({ model: null, agent: null });
+    });
+
+    it("queueIssue rejects an unknown model id or agent", async () => {
+      const repoId = seedRepo();
+      seedIssue(repoId, 3);
+      await expect(queueIssue(repoId, 3, { model: "claude-fake-99" })).rejects.toThrow(
+        /unknown model/i,
+      );
+      await expect(queueIssue(repoId, 3, { agent: "gemini" })).rejects.toThrow(/unknown agent/i);
+      expect(gh.addLabels).not.toHaveBeenCalled();
+    });
   });
 });

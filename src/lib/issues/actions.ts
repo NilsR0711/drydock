@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { isAgentId } from "@/lib/agents/registry";
 import { getRepo } from "@/lib/db/queries";
 import { getForge } from "@/lib/forge/registry";
 import {
@@ -14,7 +15,8 @@ import {
   syncRepoIssues,
 } from "@/lib/issues/service";
 import { listSubtasks } from "@/lib/issues/subtasks";
-import { createJob } from "@/lib/orchestrator/jobs";
+import { isKnownModelId } from "@/lib/models";
+import { enqueueJob } from "@/lib/orchestrator/queue";
 
 /** Fetch all open issues from GitHub and cache them (backlog + queue). */
 export async function syncRepoIssuesAction(repoId: number) {
@@ -37,12 +39,25 @@ export async function startIssueAction(
 ) {
   const repo = getRepo(repoId);
   if (!repo) throw new Error(`repo ${repoId} not found`);
-  const job = createJob({
+  if (opts.model !== undefined && !isKnownModelId(opts.model)) {
+    throw new Error(`unknown model id: ${opts.model}`);
+  }
+  if (opts.agent !== undefined && !isAgentId(opts.agent)) {
+    throw new Error(`unknown agent: ${opts.agent}`);
+  }
+  // Same dedupe-guarded path as the driver loop (issue #23): a manual start
+  // must not create a second live job for an issue — a double click, or
+  // starting an issue the scheduler already enqueued, would otherwise spawn
+  // two competing worktrees/PRs for the same issue.
+  const job = enqueueJob({
     repoId,
     issueNumber,
     model: opts.model ?? repo.defaultModel,
-    agent: opts.agent,
+    agent: opts.agent ?? repo.agent,
   });
+  if (!job) {
+    throw new Error(`A job for issue #${issueNumber} is already active.`);
+  }
   revalidatePath(`/repos/${repoId}`);
   return job;
 }

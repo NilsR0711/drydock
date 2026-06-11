@@ -15,6 +15,7 @@ import {
   withReleaseEvaluator,
 } from "@/lib/orchestrator/release-driver";
 import {
+  activeReleaseRun,
   createReleaseRun,
   type ReleaseRunSummary,
   recentReleaseRuns,
@@ -71,6 +72,15 @@ export async function previewReleaseAction(repoId: number): Promise<ReleasePrevi
 /** Manually cut a release for a repo, reusing the evaluation pipeline (forced). */
 export async function publishReleaseAction(repoId: number): Promise<ReleaseRunSummary[]> {
   const { db, repo, forge, provider, command, model } = releaseContext(repoId);
+  // Manual runs are never deduped by trigger SHA, so guard here: a second
+  // concurrent run (double submit, second tab, or a race with the auto sweep)
+  // would cut a duplicate or empty release for the same PR window.
+  const active = activeReleaseRun(repo.id, db);
+  if (active) {
+    throw new Error(
+      `A release run is already in progress for this repo (run ${active.id}, ${active.status}).`,
+    );
+  }
   const run = createReleaseRun({ repoId: repo.id, mode: "manual" }, db);
   await withReleaseEvaluator({ provider, command, model }, (generate) =>
     publishRelease(run.id, { repo, forge, db, generate }),

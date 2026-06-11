@@ -133,7 +133,7 @@ export function RepoStatusCard({ repo }: { repo: RepoDashboardRow }) {
         onOpenChange={setConfirmRemove}
         onConfirm={remove}
         title="Remove repository?"
-        description={`This stops watching ${repo.name}. Existing jobs are unaffected.`}
+        description={`This stops watching ${repo.name} and deletes its local job history. Repos with active jobs cannot be removed — abort or finish them first.`}
         confirmLabel="Remove"
         variant="destructive"
         pending={pending}

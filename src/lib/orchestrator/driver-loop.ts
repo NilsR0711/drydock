@@ -33,6 +33,7 @@ import { driveReleaseManagement } from "./release-management-driver";
 import { driveReviewFeedback } from "./review-feedback-driver";
 import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
+import { reconcileExternalAborts } from "./singleton";
 import { JOB_STATES, TERMINAL_STATES } from "./state-machine";
 import { buildSubtaskGenerator, decomposeRepo } from "./subtask-driver";
 
@@ -265,6 +266,18 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   // uses requeueExpiredLeases({}) which requeues all working jobs; here we
   // only reclaim leases whose expiry has actually passed mid-run.
   requeueExpiredLeases({ expiredBefore: Math.floor(Date.now() / 1000) }, db);
+
+  // Kill agent subprocesses whose job row another process (e.g. the MCP
+  // server's abort_job) flipped to `aborted`: the abort registry is in-memory,
+  // so a cross-process abort can only be signalled through the DB.
+  try {
+    const killed = reconcileExternalAborts(db);
+    if (killed.length > 0) {
+      console.log(`[driver] aborted ${killed.length} externally-aborted job(s)`);
+    }
+  } catch (err) {
+    logError("[driver] external-abort reconcile failed", err);
+  }
 
   const max = getSettings(db).maxParallelJobs;
   const worker = workerId();

@@ -10,7 +10,6 @@ import {
 } from "@/lib/issues/service";
 import { isKnownModelId } from "@/lib/models";
 import { getJob, listJobs, transitionJob } from "@/lib/orchestrator/jobs";
-import { isDraining, setDrainMode } from "@/lib/orchestrator/runtime";
 import { isGitRepoPath } from "@/lib/repos/path";
 import { addRepo } from "@/lib/repos/service";
 import { getSettings, jobsAllowed, repoJobsAllowed, saveSettings } from "@/lib/settings/service";
@@ -57,10 +56,14 @@ function redactSettings(settings: Record<string, unknown>): Record<string, unkno
  * The same gate the driver loop applies before starting work: refuse to
  * initiate new work while the orchestrator is draining, globally paused, over
  * the daily cost limit, or the repo is over its own limit (issue #21 safety).
+ * All gates are DB-backed: the MCP server runs as its own process, so the
+ * orchestrator's in-memory state is invisible here.
  */
 function assertWorkAllowed(repoId: number, db: DB): void {
-  if (isDraining()) throw new Error("Drydock is draining; not accepting new work");
   const global = jobsAllowed(db);
+  if (global.reason === "draining") {
+    throw new Error("Drydock is draining; not accepting new work");
+  }
   if (!global.allowed) throw new Error(`work blocked by gate: ${global.reason}`);
   const repo = repoJobsAllowed(repoId, db);
   if (!repo.allowed) throw new Error(`work blocked by gate: ${repo.reason}`);
@@ -218,12 +221,18 @@ export const tools: ToolDef[] = [
   },
   {
     name: "abort_job",
-    description: "Permanently abort a job that will not be retried.",
+    description:
+      "Permanently abort a job that will not be retried. A running agent subprocess is " +
+      "terminated by the orchestrator on its next poll tick (the MCP server runs in its own " +
+      "process and signals the abort through the database).",
     inputSchema: jobIdShape,
     handler: (args, { db }) => {
       const { jobId } = parseArgs(jobIdShape, args);
       const job = getJob(jobId, db);
       if (!job) throw new Error(`job ${jobId} not found`);
+      // Flipping the row to `aborted` IS the cross-process abort signal: the
+      // orchestrator's driver tick reconciles aborted rows against its
+      // in-process abort registry and kills the live subprocess.
       return transitionJob(jobId, "aborted", {}, db);
     },
   },
@@ -248,12 +257,16 @@ export const tools: ToolDef[] = [
   {
     name: "set_drain_mode",
     description:
-      "Enable or disable drain mode (stop picking up new work; let in-flight jobs finish).",
+      "Enable or disable drain mode (stop picking up new work; let in-flight jobs finish). " +
+      "Persisted in settings so it reaches the orchestrator process and survives restarts; " +
+      "disable it by calling with on=false.",
     inputSchema: drainShape,
-    handler: (args) => {
+    handler: (args, { db }) => {
       const { on } = parseArgs(drainShape, args);
-      setDrainMode(on);
-      return { draining: isDraining() };
+      // DB-backed (like `paused`): the orchestrator runs in another process and
+      // polls settings each tick, so an in-memory flag here would be a no-op.
+      const merged = saveSettings({ draining: on }, db);
+      return { draining: merged.draining };
     },
   },
   {
