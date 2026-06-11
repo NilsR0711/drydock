@@ -172,6 +172,8 @@ Usage:
   drydock restore <path> Replace the database with a backup (server must be stopped)
   drydock doctor         Health checks: gh/claude/codex auth, GitLab tokens, disk
                          space, DB integrity, instance lock; exits non-zero on failure
+  drydock service install|uninstall
+                         Run the dock at login via launchd (macOS) / systemd (Linux)
 
 Options:
   -p, --port <number>   Port to listen on (default: ${DEFAULT_PORT})
@@ -431,6 +433,19 @@ async function main(argv) {
           dbPath: resolveDbPath(),
           dataDir: resolveDataDir(),
           lockPath: resolveLockPath(),
+        }),
+      );
+      return;
+    }
+    case "service": {
+      const { runServiceCommand } = await import("./ops.mjs");
+      process.exit(
+        await runServiceCommand(directive.action, {
+          platform: process.platform,
+          home: homedir(),
+          nodePath: process.execPath,
+          binPath: fileURLToPath(import.meta.url),
+          dataDir: resolveDataDir(),
         }),
       );
       return;

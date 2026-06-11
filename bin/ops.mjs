@@ -15,6 +15,7 @@ import {
   rmSync,
   statfsSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -484,5 +485,193 @@ export async function runDoctorCommand({
     error(`doctor: ${failed} probe(s) failed.`);
     return 1;
   }
+  return 0;
+}
+
+// --- service install/uninstall ----------------------------------------------
+
+/** Reverse-DNS label shared by the launchd plist filename and its job label. */
+export const SERVICE_LABEL = "com.drydock.serve";
+
+/** systemd user unit filename. */
+const SYSTEMD_UNIT = "drydock.service";
+
+/** @param {string} value */
+function escapeXml(value) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/**
+ * launchd agent plist that starts `node <bin> serve` at login. KeepAlive on
+ * unsuccessful exit only: a crash restarts the dock, a clean stop stays down.
+ * Node's absolute path is embedded because launchd does not inherit a login
+ * shell's PATH (nvm and friends).
+ *
+ * @param {{ nodePath: string, binPath: string, logPath: string }} opts
+ */
+export function buildLaunchdPlist({ nodePath, binPath, logPath }) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${SERVICE_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${escapeXml(nodePath)}</string>
+    <string>${escapeXml(binPath)}</string>
+    <string>serve</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${escapeXml(logPath)}</string>
+  <key>StandardErrorPath</key>
+  <string>${escapeXml(logPath)}</string>
+</dict>
+</plist>
+`;
+}
+
+/**
+ * systemd user unit that starts `node <bin> serve` at login. Paths are quoted
+ * for systemd's ExecStart word splitting; journald captures the output, so no
+ * log path is needed.
+ *
+ * @param {{ nodePath: string, binPath: string }} opts
+ */
+export function buildSystemdUnit({ nodePath, binPath }) {
+  return `[Unit]
+Description=Drydock — autonomously turn GitHub issues into pull requests
+After=network-online.target
+
+[Service]
+ExecStart="${nodePath}" "${binPath}" serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+`;
+}
+
+/**
+ * Where the platform's service definition lives, or null when the platform has
+ * no supported user-level service manager.
+ *
+ * @param {string} platform process.platform value
+ * @param {string} home
+ * @returns {string | null}
+ */
+export function servicePath(platform, home) {
+  if (platform === "darwin") return join(home, "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`);
+  if (platform === "linux") return join(home, ".config", "systemd", "user", SYSTEMD_UNIT);
+  return null;
+}
+
+/**
+ * `drydock service install|uninstall`: generate and load a launchd agent
+ * (macOS) or systemd user unit (Linux) that runs `drydock serve` at login.
+ * Install is idempotent — it unloads any previous definition before loading
+ * the fresh one. Uninstalling a service that was never installed is a no-op.
+ *
+ * @param {"install" | "uninstall"} action
+ * @param {{ platform: string, home: string, nodePath: string, binPath: string, dataDir: string,
+ *           uid?: number,
+ *           runner?: (cmd: string, args: string[]) => Promise<{ exitCode: number, stdout: string, stderr: string }>,
+ *           log?: (line: string) => void, error?: (line: string) => void }} deps
+ * @returns {Promise<number>} exit code
+ */
+export async function runServiceCommand(
+  action,
+  {
+    platform,
+    home,
+    nodePath,
+    binPath,
+    dataDir,
+    uid = typeof process.getuid === "function" ? process.getuid() : 0,
+    runner = defaultRunner,
+    log = console.log,
+    error = console.error,
+  },
+) {
+  const definitionPath = servicePath(platform, home);
+  if (!definitionPath) {
+    error(
+      `\`drydock service\` is not supported on ${platform} — only macOS (launchd) and Linux (systemd) are.`,
+    );
+    return 1;
+  }
+
+  // Tolerate "was not loaded" responses; only the final load/enable must succeed.
+  const run = async (cmd, args) => {
+    try {
+      return await runner(cmd, args);
+    } catch (err) {
+      return { exitCode: 127, stdout: "", stderr: String(err) };
+    }
+  };
+
+  if (action === "uninstall") {
+    if (!existsSync(definitionPath)) {
+      log(`Service is not installed (no file at ${definitionPath}).`);
+      return 0;
+    }
+    if (platform === "darwin") {
+      await run("launchctl", ["bootout", `gui/${uid}/${SERVICE_LABEL}`]);
+    } else {
+      await run("systemctl", ["--user", "disable", "--now", SYSTEMD_UNIT]);
+    }
+    rmSync(definitionPath, { force: true });
+    if (platform === "linux") await run("systemctl", ["--user", "daemon-reload"]);
+    log(`Service uninstalled (${definitionPath} removed).`);
+    return 0;
+  }
+
+  mkdirSync(dirname(definitionPath), { recursive: true });
+  if (platform === "darwin") {
+    const logPath = join(dataDir, "drydock.log");
+    writeFileSync(definitionPath, buildLaunchdPlist({ nodePath, binPath, logPath }));
+    // Unload any previous incarnation so a re-install picks up the new plist.
+    await run("launchctl", ["bootout", `gui/${uid}/${SERVICE_LABEL}`]);
+    const res = await run("launchctl", ["bootstrap", `gui/${uid}`, definitionPath]);
+    if (res.exitCode !== 0) {
+      error(
+        `launchctl bootstrap failed (exit ${res.exitCode}): ${firstLine(res.stderr || res.stdout)}`,
+      );
+      error(`The plist was written to ${definitionPath}; load it manually or re-run install.`);
+      return 1;
+    }
+    log(`Service installed: ${definitionPath} (label ${SERVICE_LABEL}). Logs: ${logPath}`);
+    return 0;
+  }
+
+  writeFileSync(definitionPath, buildSystemdUnit({ nodePath, binPath }));
+  const reload = await run("systemctl", ["--user", "daemon-reload"]);
+  const enable =
+    reload.exitCode === 0
+      ? await run("systemctl", ["--user", "enable", "--now", SYSTEMD_UNIT])
+      : reload;
+  if (enable.exitCode !== 0) {
+    error(
+      `systemctl --user failed (exit ${enable.exitCode}): ${firstLine(enable.stderr || enable.stdout)}`,
+    );
+    error(`The unit was written to ${definitionPath}; enable it manually or re-run install.`);
+    return 1;
+  }
+  log(
+    `Service installed: ${definitionPath}. It starts at login; for boot without login run \`loginctl enable-linger\`.`,
+  );
   return 0;
 }
