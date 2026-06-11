@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { CODEX_PRICING } from "@/lib/agents/codex";
-import { DEFAULT_MODEL, defaultModelForAgent, MODELS, modelsForAgent } from "@/lib/models";
+import {
+  DEFAULT_MODEL,
+  defaultModelForAgent,
+  MODELS,
+  modelsForAgent,
+  nextStrongerModel,
+} from "@/lib/models";
 import { PRICING } from "@/lib/orchestrator/pricing";
 
 describe("models", () => {
@@ -47,5 +53,40 @@ describe("models", () => {
   it("resolves a default model per agent", () => {
     expect(defaultModelForAgent("claude")).toBe("claude-opus-4-8");
     expect(modelsForAgent("codex").some((m) => m.id === defaultModelForAgent("codex"))).toBe(true);
+  });
+});
+
+describe("nextStrongerModel", () => {
+  it("escalates one rung up the claude ladder", () => {
+    expect(nextStrongerModel("claude", "claude-haiku-4-5")).toBe("claude-sonnet-4-5");
+    expect(nextStrongerModel("claude", "claude-sonnet-4-5")).toBe("claude-sonnet-4-6");
+    expect(nextStrongerModel("claude", "claude-sonnet-4-6")).toBe("claude-opus-4-7");
+  });
+
+  it("escalates one rung up the codex ladder", () => {
+    expect(nextStrongerModel("codex", "gpt-5-mini")).toBe("gpt-5");
+    expect(nextStrongerModel("codex", "gpt-5")).toBe("gpt-5-codex");
+  });
+
+  it("caps at the strongest model of the agent", () => {
+    expect(nextStrongerModel("claude", "claude-opus-4-8")).toBeNull();
+    expect(nextStrongerModel("codex", "gpt-5-codex")).toBeNull();
+  });
+
+  it("returns null for a model the agent does not list", () => {
+    // A codex id on a claude job (or vice versa) has no defined rung.
+    expect(nextStrongerModel("claude", "gpt-5-mini")).toBeNull();
+    expect(nextStrongerModel("codex", "claude-haiku-4-5")).toBeNull();
+    expect(nextStrongerModel("claude", "totally-unknown")).toBeNull();
+  });
+
+  it("returns null without a current model", () => {
+    expect(nextStrongerModel("claude", null)).toBeNull();
+    expect(nextStrongerModel("claude", undefined)).toBeNull();
+    expect(nextStrongerModel("claude", "")).toBeNull();
+  });
+
+  it("returns null for openrouter (no static catalog to rank)", () => {
+    expect(nextStrongerModel("openrouter", "meta-llama/llama-3.3-70b-instruct:free")).toBeNull();
   });
 });
