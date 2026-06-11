@@ -170,11 +170,12 @@ stateDiagram-v2
 
 `aborted` (manual) and `interrupted` (crash recovery) can be reached from any in-flight state;
 `needs_human` and `interrupted` jobs can be re-queued. Terminal states are `merged` and `aborted`.
-`waiting_limit` parks a job whose Claude session hit the account's usage/rate limit
-([ADR&nbsp;030](docs/adr/030-provider-limit-auto-wait.md)): Drydock latches the provider, stops
-starting new Claude sessions, and re-queues the parked job automatically once the window resets —
-resuming the stored session (`--resume`) where one exists. Auth/billing errors still escalate to
-`needs_human`.
+`waiting_limit` parks a job whose agent session hit the provider's usage/rate limit — Claude
+(Anthropic usage windows, API 429/529) and Codex (ChatGPT-plan limits, OpenAI 429/5xx) alike
+([ADR&nbsp;030](docs/adr/030-provider-limit-auto-wait.md)): Drydock latches that provider, stops
+starting new sessions for it (the other agent keeps running), and re-queues the parked job
+automatically once the window resets — resuming the stored session (`claude --resume` /
+`codex exec resume`) where one exists. Auth/billing errors still escalate to `needs_human`.
 
 ## Install
 
@@ -263,7 +264,7 @@ Drydock is configured at runtime from the **Settings** page and per-repo control
 ¹ A source checkout (`pnpm dev`/`pnpm start`) defaults `DRYDOCK_DB` to `data/drydock.db` in the
 project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 
-**Settings (global):** pause switch · release management kill-switch (master on/off for the opt-in release pipeline) · daily cost limit · max job cost (per-job USD ceiling that aborts a runaway session mid-stream; 0 = off) · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · auto-wait on Claude usage limits (park limit-hit jobs and resume them automatically when the quota resets; default on) · `claude`/`gh` CLI paths · notification channels (Telegram / Slack / email) and per-event opt-in.
+**Settings (global):** pause switch · release management kill-switch (master on/off for the opt-in release pipeline) · daily cost limit · max job cost (per-job USD ceiling that aborts a runaway session mid-stream; 0 = off) · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · auto-wait on Claude and Codex usage limits (per-agent toggles: park limit-hit jobs and resume them automatically when the quota resets; default on) · `claude`/`gh` CLI paths · notification channels (Telegram / Slack / email) and per-event opt-in.
 **Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · default model · serial vs. parallel processing · queue label (default `drydock:queue`) · optional job/CI timeout overrides.
 
 ## Screens
