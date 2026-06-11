@@ -39,6 +39,9 @@ const resultEvent = z.object({
   subtype: z.string().optional(),
   session_id: z.string().optional(),
   is_error: z.boolean().optional(),
+  // Final answer / error text. On limit failures the CLI puts the limit
+  // message here (e.g. `Claude AI usage limit reached|<epoch>`, issue #166).
+  result: z.string().optional(),
   total_cost_usd: z.number().optional(),
   usage: usageSchema.optional(),
 });
@@ -80,6 +83,8 @@ export interface ParsedEvent {
   cacheReadInputTokens: number;
   costUsd?: number;
   isError: boolean;
+  /** Final result text, present on `result` events that carry one (issue #166). */
+  resultText?: string;
   /** The original event as emitted by the agent CLI (shape varies per agent). */
   raw: unknown;
 }
@@ -136,6 +141,7 @@ function toParsed(event: StreamEvent): ParsedEvent {
     base.chunks = extractContent(event.message.content);
   } else {
     base.sessionId = event.session_id;
+    base.resultText = event.result;
     base.costUsd = event.total_cost_usd;
     base.inputTokens = event.usage?.input_tokens ?? 0;
     base.outputTokens = event.usage?.output_tokens ?? 0;
@@ -179,6 +185,10 @@ export class StreamJsonParser {
   totalCacheCreationInputTokens = 0;
   totalCacheReadInputTokens = 0;
   costUsd = 0;
+  /** Final result text from the stream's result event, when it carried one. */
+  resultText?: string;
+  /** Whether the stream's result event was flagged as an error (issue #166). */
+  resultIsError = false;
   /** Invoked for every line that fails to parse; the line is then skipped. */
   onParseError?: (error: ParseError) => void;
 
@@ -230,6 +240,8 @@ export class StreamJsonParser {
       if (parsed.cacheReadInputTokens > 0)
         this.totalCacheReadInputTokens = parsed.cacheReadInputTokens;
       if (parsed.costUsd !== undefined) this.costUsd = parsed.costUsd;
+      if (parsed.resultText !== undefined) this.resultText = parsed.resultText;
+      this.resultIsError = parsed.isError;
     } else {
       this.totalInputTokens += parsed.inputTokens;
       this.totalOutputTokens += parsed.outputTokens;

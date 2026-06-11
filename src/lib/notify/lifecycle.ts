@@ -38,6 +38,32 @@ export async function notifyCostLimitEdge(
   }
 }
 
+const CLAUDE_LIMIT_MESSAGE =
+  "⏳ Claude usage limit reached — Claude jobs are parked until the quota resets.";
+const CLAUDE_LIMIT_CLEARED_MESSAGE = "▶️ Claude quota available again — parked jobs are resuming.";
+
+/**
+ * Two-sided edge notification for the Claude usage-limit latch (issue #166):
+ * one message when the latch first blocks, one when it clears and parked work
+ * resumes. Re-arms after each clear like the cost-limit edge.
+ */
+export async function notifyClaudeLimitEdge(
+  blocked: boolean,
+  state: EdgeState,
+  db: DB = getDb(),
+  transports: NotifyTransports = defaultTransports,
+): Promise<void> {
+  if (blocked) {
+    if (state.active) return;
+    state.active = true;
+    await dispatch("claude_limit", CLAUDE_LIMIT_MESSAGE, db, transports);
+  } else {
+    if (!state.active) return;
+    state.active = false;
+    await dispatch("claude_limit", CLAUDE_LIMIT_CLEARED_MESSAGE, db, transports);
+  }
+}
+
 /** Notify only when pause flips from off to on (a settings change). */
 export async function notifyPauseTransition(
   before: boolean,

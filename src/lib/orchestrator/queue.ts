@@ -33,6 +33,11 @@ export function backoffSeconds(attempts: number, baseSec = 5, capSec = 300): num
 export interface ClaimOptions {
   /** Restrict the claim to these repo ids (e.g. the repos a tick deems eligible). */
   repoIds?: number[];
+  /**
+   * Skip jobs of these agents (issue #166): while a provider's limit latch is
+   * blocking, its jobs stay queued and other agents' work proceeds.
+   */
+  excludeAgents?: string[];
   /** Lease duration in ms (default DEFAULT_LEASE_MS). */
   leaseMs?: number;
   /** Worker identity to stamp on the lease (default workerId()). */
@@ -49,7 +54,7 @@ export interface ClaimOptions {
  * Returns the claimed job, or undefined when nothing is eligible.
  */
 export function claimNext(opts: ClaimOptions = {}, db: DB = getDb()): Job | undefined {
-  const { repoIds } = opts;
+  const { repoIds, excludeAgents } = opts;
   if (repoIds && repoIds.length === 0) return undefined;
   const leaseMs = opts.leaseMs ?? DEFAULT_LEASE_MS;
   const worker = opts.worker ?? workerId();
@@ -67,6 +72,9 @@ export function claimNext(opts: ClaimOptions = {}, db: DB = getDb()): Job | unde
           eq(jobs.status, "queued"),
           or(isNull(jobs.availableAt), lte(jobs.availableAt, now)),
           repoIds ? inArray(jobs.repoId, repoIds) : undefined,
+          excludeAgents && excludeAgents.length > 0
+            ? notInArray(jobs.agent, excludeAgents)
+            : undefined,
         ),
       )
       .orderBy(sql`COALESCE(${issues.priority}, 1e9)`, jobs.createdAt)

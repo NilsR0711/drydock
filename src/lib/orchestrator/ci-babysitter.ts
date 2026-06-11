@@ -1,7 +1,10 @@
+import { WAITABLE_LIMIT_KINDS } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import type { Job } from "@/lib/db/schema";
 import { followupIssues } from "@/lib/db/schema";
 import type { ForgeClient, PrCheck } from "@/lib/forge/types";
+import { getSettings } from "@/lib/settings/service";
+import type { SessionLimitInfo } from "./agent-session";
 import { classifyFailure } from "./ci-failure-classifier";
 import { buildFixPrompt, DEFAULT_EVIDENCE_LINES, extractEvidence } from "./ci-fix-prompt";
 import {
@@ -17,8 +20,10 @@ import {
   transitionHealingSession,
   verifyHeal,
   verifyRerun,
+  voidHealingAttempt,
 } from "./ci-healing";
 import { getJob, recordEvent, transitionJob } from "./jobs";
+import { claudeLimitBlocked, clearProviderLimit, latchProviderLimit } from "./provider-limit";
 
 export type CiOutcome = "pending" | "passed" | "failed";
 
@@ -50,6 +55,8 @@ export interface ResumeOutcome {
   noChanges?: boolean;
   /** True when an outside actor settled the job while the fix session ran. */
   settledExternally?: boolean;
+  /** Provider limit/auth condition classified from the fix session (issue #166). */
+  limit?: SessionLimitInfo;
 }
 
 /** Why a resume cannot have advanced the PR, or null when it may have. */
@@ -107,6 +114,66 @@ export interface BabysitterDeps {
    * pending/failed during the window resets the gate.
    */
   mergeGateMs?: number;
+  /**
+   * Whether the job's provider is currently limit-latched (issue #166); while
+   * true, CI fixes are deferred (within the CI wait budget) instead of bouncing
+   * off the spawn guard. Defaults to the Claude latch for claude jobs.
+   */
+  limitBlocked?: () => boolean;
+}
+
+/** Default latch probe: only claude jobs are gated today (issue #166). */
+function defaultLimitBlocked(job: Job, db: DB): () => boolean {
+  return () => job.agent === "claude" && !!claudeLimitBlocked(db);
+}
+
+/**
+ * Handle a provider limit/auth condition from a CI-fix session (issue #166).
+ * Returns the updated job to continue polling with (transient limit: latch,
+ * restore the retry budget, back to ci_running), the parked job for an
+ * auth/billing escalation, or null when the outcome carried no limit signal
+ * (or auto-wait is off) and the normal failure path applies.
+ */
+function handleFixLimit(
+  job: Job,
+  prNumber: number,
+  outcome: ResumeOutcome,
+  db: DB,
+): { job: Job; done: boolean } | null {
+  const limit = outcome.limit;
+  if (!limit) return null;
+  if (limit.kind === "auth" || limit.kind === "billing") {
+    const label = limit.kind === "auth" ? "authentication" : "billing";
+    const message = `CI fix blocked by a provider ${label} error: ${limit.rawSnippet}`.slice(
+      0,
+      500,
+    );
+    recordEvent(job.id, "status", { reason: message, prNumber }, db);
+    return { job: transitionJob(job.id, "needs_human", { errorMessage: message }, db), done: true };
+  }
+  if (!WAITABLE_LIMIT_KINDS.includes(limit.kind) || !getSettings(db).claudeLimitAutoWait) {
+    return null;
+  }
+  // A latch bounce is not a fresh strike — the window is already recorded.
+  if (!limit.latched) latchProviderLimit(limit, db);
+  recordEvent(
+    job.id,
+    "status",
+    { reason: `${limit.agent}_${limit.kind} during CI fix`, prNumber },
+    db,
+  );
+  // The attempt never reached the PR; give the retry back and wait out the
+  // latch from ci_running (the deferral gate above owns the waiting). Floored
+  // at 0 so an unexpected call path can never push the counter negative.
+  return {
+    job: transitionJob(
+      job.id,
+      "ci_running",
+      { ciRetryCount: Math.max(0, job.ciRetryCount - 1) },
+      db,
+    ),
+    done: false,
+  };
 }
 
 /**
@@ -215,6 +282,8 @@ export async function ciBabysitter(
   const now = deps.now ?? Date.now;
   const deadline = now() + ciWaitMs;
   const gate = createMergeGate(deps.mergeGateMs ?? 0, now);
+  const limitBlocked = deps.limitBlocked ?? defaultLimitBlocked(jobArg, db);
+  let limitWaitLogged = false;
 
   let job = jobArg;
   let polls = 0;
@@ -255,6 +324,33 @@ export async function ciBabysitter(
 
     // failed
     gate.reset();
+    // Claude limit latch (issue #166): a CI-fix resume would only bounce off
+    // the spawn guard while blocked. Keep polling — bounded by the CI wait
+    // budget — instead of burning the retry budget or paging a human.
+    if (limitBlocked()) {
+      if (now() >= deadline) {
+        return escalateCiTimeout(
+          job,
+          prNumber,
+          ciWaitMs,
+          deps,
+          db,
+          "the provider usage limit blocked the CI fix",
+        );
+      }
+      if (!limitWaitLogged) {
+        recordEvent(
+          job.id,
+          "status",
+          { reason: "ci fix deferred: provider limit latched", prNumber },
+          db,
+        );
+        limitWaitLogged = true;
+      }
+      await sleep(pollMs);
+      continue;
+    }
+    limitWaitLogged = false;
     job = transitionJob(job.id, "ci_failed", { prNumber }, db);
     if (job.ciRetryCount >= MAX_CI_RETRIES) {
       return escalateToHuman(job, prNumber, `CI failed ${MAX_CI_RETRIES} times.`, deps, db);
@@ -279,6 +375,14 @@ export async function ciBabysitter(
     // tail (issue #62), so the resume prompt targets the actual failure.
     const { evidence } = extractEvidence(failedLog, DEFAULT_EVIDENCE_LINES);
     const fixOutcome = await deps.resumeSession(job, sessionId, evidence);
+    // Provider limit/auth from the fix session (issue #166): a transient limit
+    // restores the retry budget and waits out the latch; auth/billing parks.
+    const limited = handleFixLimit(job, prNumber, fixOutcome, db);
+    if (limited) {
+      job = limited.job;
+      if (limited.done) return job;
+      continue;
+    }
     // A failed resume cannot have moved the PR head; escalate with the real
     // reason instead of burning the remaining retries on no-op sessions.
     const failure = resumeFailureReason(fixOutcome);
@@ -286,6 +390,8 @@ export async function ciBabysitter(
       recordEvent(job.id, "status", { reason: failure, prNumber }, db);
       return transitionJob(job.id, "needs_human", { errorMessage: failure }, db);
     }
+    // A successful claude fix ends the provider-limit streak (issue #166).
+    if (job.agent === "claude") clearProviderLimit("claude", db);
     job = transitionJob(job.id, "ci_running", {}, db);
     // loop again to re-poll the now-updated PR
   }
@@ -327,6 +433,7 @@ async function autoHealLoop(
   const ciWaitMs = deps.ciWaitMs ?? Number.POSITIVE_INFINITY;
   const deadline = now() + ciWaitMs;
   const gate = createMergeGate(deps.mergeGateMs ?? 0, now);
+  const limitBlocked = deps.limitBlocked ?? defaultLimitBlocked(jobArg, db);
 
   let job = jobArg;
   let pending: PendingHeal | undefined;
@@ -422,6 +529,25 @@ async function autoHealLoop(
       transitionHealingSession(finishedSession, "cooldown", db);
     }
 
+    // Claude limit latch (issue #166): no heal attempt can run while blocked —
+    // its fix session would only bounce off the spawn guard. Wait it out
+    // within the CI wait budget before opening a session or planning. Any
+    // previously pending attempt was already finalized by the block above.
+    if (limitBlocked()) {
+      if (now() >= deadline) {
+        return escalateCiTimeout(
+          job,
+          prNumber,
+          ciWaitMs,
+          deps,
+          db,
+          "the provider usage limit blocked auto-heal",
+        );
+      }
+      await sleep(pollMs);
+      continue;
+    }
+
     const session = openHealingSession(job.id, prNumber, headSha, db);
     const failedLog = await deps.gh.failedRunLog(prNumber);
     const classified = failing.map((c) => classifyFailure(heal.provider, c, failedLog));
@@ -510,8 +636,22 @@ async function autoHealLoop(
             maxLines: budgets.maxEvidenceLines,
           });
           const fixOutcome = await deps.resumeSession(job, sessionId, prompt);
+          // Provider limit/auth from the fix session (issue #166): the attempt
+          // never ran against the quota window, so it must not consume heal
+          // budgets nor hold the in-flight slot. Transient limits return the
+          // job to ci_running and wait out the latch via the gate above.
+          const limited = handleFixLimit(job, prNumber, fixOutcome, db);
+          if (limited) {
+            voidHealingAttempt(attempt.id, db);
+            closeHealingSession(session.id, limited.done ? "escalated" : "superseded", db);
+            job = limited.job;
+            if (limited.done) return job;
+            continue;
+          }
           failure = resumeFailureReason(fixOutcome);
           if (!failure) {
+            // A successful claude fix ends the provider-limit streak.
+            if (job.agent === "claude") clearProviderLimit("claude", db);
             transitionHealingSession(session.id, "awaiting_ci", db);
             job = transitionJob(job.id, "ci_running", {}, db);
           }

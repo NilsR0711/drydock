@@ -1,8 +1,10 @@
+import { eq } from "drizzle-orm";
 import { listAdrs } from "@/lib/adr/service";
 import { getAgentProvider } from "@/lib/agents/registry";
 import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
+import { jobs } from "@/lib/db/schema";
 import { getForge } from "@/lib/forge/registry";
 import { EmptyCommitError, type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { listIssues } from "@/lib/issues/service";
@@ -15,10 +17,16 @@ import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates"
 import { agentInstructionsPromptSection } from "@/lib/repos/agent-instructions";
 import { getSettings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
-import { type AgentSessionResult, resumeAgentSession, spawnAgentSession } from "./agent-session";
+import {
+  type AgentSessionResult,
+  resumeAgentSession,
+  type SessionLimitInfo,
+  spawnAgentSession,
+} from "./agent-session";
 import { ciBabysitter, type ResumeOutcome, resumeFailureReason } from "./ci-babysitter";
 import { getJob, recordEvent, transitionJob } from "./jobs";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
+import { clearProviderLimit, latchProviderLimit } from "./provider-limit";
 import { InvalidTransitionError } from "./state-machine";
 import {
   markSubtasksDone,
@@ -52,6 +60,11 @@ export interface RunJobDeps {
   runPlan?: (job: Job, prompt: string, cwd: string) => Promise<{ text: string; exitCode: number }>;
   /** Post a comment on the job's issue; injectable for tests. */
   commentIssue?: (issueNumber: number, body: string) => Promise<void>;
+  /**
+   * Resume the stored session of a limit-parked job (issue #166); injectable
+   * for tests. Defaults to resumeAgentSession on the job's own model.
+   */
+  resumeLimitSession?: (job: Job, prompt: string, cwd: string) => Promise<AgentSessionResult>;
 }
 
 /** Keeps an unexpectedly verbose plan from flooding the work prompt. */
@@ -77,6 +90,18 @@ export function planPromptSection(plan: string): string {
 
 /** Event-aware notification sink: routes a lifecycle event + message downstream. */
 type NotifyEvent = (event: NotificationEvent, text: string) => Promise<void>;
+
+/** Operator-facing description of a parked job's limit kind (issue #166). */
+export function limitParkMessage(kind: SessionLimitInfo["kind"]): string {
+  switch (kind) {
+    case "rate_limit":
+      return "Claude API rate limit hit — waiting for the window to clear";
+    case "overloaded":
+      return "Anthropic API overloaded — waiting before retrying";
+    default:
+      return "Claude usage limit reached — waiting for the quota to reset";
+  }
+}
 
 /**
  * Build the babysitter's CI-fix resume callback. The fix session must run in
@@ -107,6 +132,7 @@ export function buildCiFixResume(opts: {
       timedOut: result.timedOut,
       costExceeded: result.costExceeded,
       spawnError: result.spawnError,
+      limit: result.limit,
     };
     if (resumeFailureReason(outcome)) return outcome;
     // An abort that landed while the fix session ran must win: never push an
@@ -212,6 +238,67 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   const commentIssue =
     deps.commentIssue ??
     ((issueNumber: number, body: string) => forge.commentIssue(issueNumber, body));
+  // Limit-resume runner (issue #166): continues a limit-parked job's stored
+  // session on the job's own model and turn budget — this is the main work
+  // resuming, not a cheap CI fix.
+  const resumeLimitSession =
+    deps.resumeLimitSession ??
+    ((j: Job, prompt: string, cwd: string) => {
+      // The limit-resume branch only fires with a recorded session id; guard
+      // anyway so a concurrently cleared row fails loudly instead of passing
+      // null into the CLI's --resume flag.
+      if (!j.sessionId) throw new Error(`job ${j.id} has no session id to resume after a limit`);
+      return resumeAgentSession(j, j.sessionId, "", cwd, {
+        db,
+        provider,
+        command,
+        timeoutMs,
+        costCapUsd: maxJobCostUsd,
+        resumePrompt: prompt,
+        resumeModel: j.model ?? repo.defaultModel,
+        resumeMaxTurns: j.maxTurns,
+      });
+    });
+
+  /**
+   * Park the job on a transient provider limit (issue #166): latch the
+   * provider globally (unless this was already a latch bounce), record the
+   * explicit reason, flip to waiting_limit with the resume marker, and leave a
+   * best-effort breadcrumb on the issue. The driver requeues the job once the
+   * window clears.
+   */
+  const parkOnLimit = async (limit: SessionLimitInfo): Promise<Job> => {
+    const blockedUntil = limit.latched
+      ? (limit.resetAt ?? Math.floor(Date.now() / 1000) + 60)
+      : latchProviderLimit(limit, db).latch.blockedUntil;
+    recordEvent(
+      job.id,
+      "status",
+      { reason: `${limit.agent}_${limit.kind}`, blockedUntil, snippet: limit.rawSnippet },
+      db,
+    );
+    if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
+    const parked = transitionJob(
+      job.id,
+      "waiting_limit",
+      {
+        errorMessage: limitParkMessage(limit.kind),
+        availableAt: blockedUntil,
+        limitKind: limit.kind,
+      },
+      db,
+    );
+    try {
+      const resumesAt = new Date(blockedUntil * 1000).toISOString().slice(0, 16).replace("T", " ");
+      await commentIssue(
+        job.issueNumber,
+        `⏳ Drydock paused this job: ${limitParkMessage(limit.kind)}. It will retry automatically (next attempt around ${resumesAt} UTC).`,
+      );
+    } catch (err) {
+      logError(`[run-job] limit-park comment failed for job ${job.id}`, err);
+    }
+    return parked;
+  };
   // Declared before the babysitter deps so the CI-fix resume closure can read
   // the worktree created below; it stays alive for the whole babysitter call.
   let wt: Worktree | undefined;
@@ -270,76 +357,117 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     wt = await worktrees.prepare(repo, job.id, job.issueNumber);
     recordEvent(job.id, "worktree", { path: wt.path, branch: wt.branch }, db);
 
-    let prompt = renderTemplate(resolveTemplateContent(repo.id, TEMPLATE_NAMES.main, db), {
-      ISSUE_NUM: job.issueNumber,
-      BRANCH: wt.branch,
-      REPO_NAME: repo.name,
-    });
-
-    // Decomposed issues (issue #19, opt-in): surface the ordered subtasks in the
-    // prompt and mark them in progress so the UI reflects work starting. The
-    // subtasks were prepared by the decomposition sweep; here we only consume
-    // them, leaving non-decomposed issues entirely unaffected.
-    if (repo.autoDecompose) {
-      const subtasks = listSubtasks(repo.id, job.issueNumber, db);
-      if (subtasks.length > 0) {
-        prompt += subtaskPromptSection(
-          subtasks.map((s) => ({ title: s.title, status: s.status as SubtaskStatus })),
-        );
-        markSubtasksWorking(repo.id, job.issueNumber, db);
-      }
+    // Limit-resume (issue #166): a job parked on a provider limit resumes its
+    // stored session (`--resume`) instead of starting from scratch, keeping
+    // the conversation context. The marker is cleared up front: if this run
+    // hits the limit again the park branch re-sets it; any other outcome must
+    // not look limit-parked.
+    const limitResume = !!job.limitKind && !!job.sessionId && provider.supportsResume;
+    if (job.limitKind) {
+      db.update(jobs).set({ limitKind: null }).where(eq(jobs.id, job.id)).run();
     }
 
-    // Per-repo custom agent instructions (issue #56, opt-in): append the
-    // operator's free-text guidance as a dedicated, length-capped section.
-    // Empty/unset leaves the prompt untouched.
-    prompt += agentInstructionsPromptSection(repo.agentInstructions);
-
-    // Opt-in plan-first stage (issue #160): a read-only one-shot pass produces
-    // an implementation plan that is posted on the issue (audit trail) and
-    // embedded in the implementation prompt. Best-effort by construction: a
-    // non-zero exit, an empty plan, or a failed comment falls back to the
-    // normal single-stage run rather than failing the job.
-    if (repo.planFirst) {
-      const planPrompt = renderTemplate(resolveTemplateContent(repo.id, TEMPLATE_NAMES.plan, db), {
+    // Builds the full first-run prompt (issue context, subtasks, custom
+    // instructions, optional plan stage) and spawns a fresh session. A closure
+    // so the limit-resume path below skips it entirely — the resumed session
+    // already carries all of this context.
+    const runFreshSession = async (worktree: Worktree): Promise<AgentSessionResult> => {
+      let prompt = renderTemplate(resolveTemplateContent(repo.id, TEMPLATE_NAMES.main, db), {
         ISSUE_NUM: job.issueNumber,
-        BRANCH: wt.branch,
+        BRANCH: worktree.branch,
         REPO_NAME: repo.name,
       });
-      try {
-        const plan = await runPlan(getJob(job.id, db) as Job, planPrompt, wt.path);
-        const planText = plan.text.trim();
-        if (plan.exitCode === 0 && planText.length > 0) {
-          recordEvent(job.id, "status", { reason: "plan stage complete" }, db);
-          prompt += planPromptSection(planText);
-          try {
-            await commentIssue(
-              job.issueNumber,
-              `**Implementation plan** (job ${job.id}):\n\n${planText}`,
+
+      // Decomposed issues (issue #19, opt-in): surface the ordered subtasks in the
+      // prompt and mark them in progress so the UI reflects work starting. The
+      // subtasks were prepared by the decomposition sweep; here we only consume
+      // them, leaving non-decomposed issues entirely unaffected.
+      if (repo.autoDecompose) {
+        const subtasks = listSubtasks(repo.id, job.issueNumber, db);
+        if (subtasks.length > 0) {
+          prompt += subtaskPromptSection(
+            subtasks.map((s) => ({ title: s.title, status: s.status as SubtaskStatus })),
+          );
+          markSubtasksWorking(repo.id, job.issueNumber, db);
+        }
+      }
+
+      // Per-repo custom agent instructions (issue #56, opt-in): append the
+      // operator's free-text guidance as a dedicated, length-capped section.
+      // Empty/unset leaves the prompt untouched.
+      prompt += agentInstructionsPromptSection(repo.agentInstructions);
+
+      // Opt-in plan-first stage (issue #160): a read-only one-shot pass produces
+      // an implementation plan that is posted on the issue (audit trail) and
+      // embedded in the implementation prompt. Best-effort by construction: a
+      // non-zero exit, an empty plan, or a failed comment falls back to the
+      // normal single-stage run rather than failing the job.
+      if (repo.planFirst) {
+        const planPrompt = renderTemplate(
+          resolveTemplateContent(repo.id, TEMPLATE_NAMES.plan, db),
+          {
+            ISSUE_NUM: job.issueNumber,
+            BRANCH: worktree.branch,
+            REPO_NAME: repo.name,
+          },
+        );
+        try {
+          const plan = await runPlan(getJob(job.id, db) as Job, planPrompt, worktree.path);
+          const planText = plan.text.trim();
+          if (plan.exitCode === 0 && planText.length > 0) {
+            recordEvent(job.id, "status", { reason: "plan stage complete" }, db);
+            prompt += planPromptSection(planText);
+            try {
+              await commentIssue(
+                job.issueNumber,
+                `**Implementation plan** (job ${job.id}):\n\n${planText}`,
+              );
+            } catch (err) {
+              logError(`[run-job] plan comment failed for job ${job.id}`, err);
+            }
+          } else {
+            recordEvent(
+              job.id,
+              "status",
+              { reason: "plan stage failed, continuing without a plan", exitCode: plan.exitCode },
+              db,
             );
-          } catch (err) {
-            logError(`[run-job] plan comment failed for job ${job.id}`, err);
           }
-        } else {
+        } catch (err) {
+          logError(`[run-job] plan stage failed for job ${job.id}`, err);
           recordEvent(
             job.id,
             "status",
-            { reason: "plan stage failed, continuing without a plan", exitCode: plan.exitCode },
+            { reason: "plan stage failed, continuing without a plan" },
             db,
           );
         }
-      } catch (err) {
-        logError(`[run-job] plan stage failed for job ${job.id}`, err);
-        recordEvent(
-          job.id,
-          "status",
-          { reason: "plan stage failed, continuing without a plan" },
-          db,
-        );
       }
-    }
 
-    const session = await runSession(getJob(job.id, db) as Job, prompt, wt.path);
+      return runSession(getJob(job.id, db) as Job, prompt, worktree.path);
+    };
+
+    let session: AgentSessionResult;
+    if (limitResume) {
+      recordEvent(
+        job.id,
+        "status",
+        { reason: "resuming session after provider limit", sessionId: job.sessionId },
+        db,
+      );
+      if (repo.autoDecompose) markSubtasksWorking(repo.id, job.issueNumber, db);
+      const resumePrompt = renderTemplate(
+        resolveTemplateContent(repo.id, TEMPLATE_NAMES.limitResume, db),
+        {
+          ISSUE_NUM: job.issueNumber,
+          BRANCH: wt.branch,
+          REPO_NAME: repo.name,
+        },
+      );
+      session = await resumeLimitSession(getJob(job.id, db) as Job, resumePrompt, wt.path);
+    } else {
+      session = await runFreshSession(wt);
+    }
     // Defense in depth against concurrent aborts (abort action, emergency
     // stop, graceful shutdown): the kill races the session result, so re-read
     // the job and never commit, push, or open a PR for one that has settled.
@@ -382,6 +510,36 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         db,
       );
     }
+    // Provider limit/auth conditions (issue #166), checked before the generic
+    // exit-code branch so they never degrade into "exited non-zero". Transient
+    // limits park the job for automatic resume; auth/billing need an operator.
+    if (session.limit) {
+      const limit = session.limit;
+      if (limit.kind === "auth" || limit.kind === "billing") {
+        if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
+        const label = limit.kind === "auth" ? "authentication" : "billing";
+        return transitionJob(
+          job.id,
+          "needs_human",
+          {
+            errorMessage: `${provider.label} ${label} error: ${limit.rawSnippet}`.slice(0, 500),
+          },
+          db,
+        );
+      }
+      // Re-read the toggle: the session may have run for many minutes, and an
+      // operator flipping auto-wait mid-session must take effect immediately.
+      if (!getSettings(db).claudeLimitAutoWait) {
+        if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
+        return transitionJob(
+          job.id,
+          "needs_human",
+          { errorMessage: `${limitParkMessage(limit.kind)} (auto-wait is disabled)` },
+          db,
+        );
+      }
+      return await parkOnLimit(limit);
+    }
     if (session.exitCode !== 0) {
       if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
       return transitionJob(
@@ -391,6 +549,10 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         db,
       );
     }
+
+    // A successful session ends the provider-limit streak (issue #166): the
+    // next limit detection starts a fresh backoff instead of compounding.
+    if (provider.id === "claude") clearProviderLimit("claude", db);
 
     // Per-repo ADR gate: hold the merge while ADRs await review (SPEC opt-in).
     if (repo.adrGating) {
@@ -462,6 +624,10 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // ci_failed is included so a throw between the babysitter's ci_failed and
     // retrying transitions parks the job for a human instead of stranding it
     // in a non-terminal state forever (which would block sequential repos).
+    // waiting_limit is deliberately NOT included: a job that parked on a
+    // provider limit is in a self-recovering state — the driver requeues it
+    // when the latch clears — and a late throw must not degrade it to
+    // needs_human (issue #166).
     if (["working", "ci_running", "ci_failed", "retrying"].includes(current.status)) {
       if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
       try {

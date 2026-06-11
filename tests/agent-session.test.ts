@@ -9,7 +9,9 @@ import { jobs } from "@/lib/db/schema";
 import type { StreamCallbacks, StreamHandle, StreamRunner } from "@/lib/exec/stream-runner";
 import { resumeAgentSession, spawnAgentSession } from "@/lib/orchestrator/agent-session";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
+import { latchProviderLimit } from "@/lib/orchestrator/provider-limit";
 import { addRepo } from "@/lib/repos/service";
+import { saveSettings } from "@/lib/settings/service";
 import { LogBroker } from "@/lib/stream/broker";
 import { StreamJsonParser } from "@/lib/stream/parser";
 
@@ -33,6 +35,8 @@ function captureRunner(out: string, captured: Captured, exitCode = 0): StreamRun
     return { done: Promise.resolve(exitCode), abort: () => {} };
   };
 }
+
+const nowSec = () => Math.floor(Date.now() / 1000);
 
 let db: DB;
 let repoId: number;
@@ -662,5 +666,186 @@ describe("resumeAgentSession cumulative cost guard (issue #94)", () => {
     });
     expect(res.costExceeded).toBe(false);
     expect(aborted).toBe(false);
+  });
+});
+
+describe("provider limit detection (issue #166)", () => {
+  function limitFixture(): string {
+    return readFileSync(
+      fileURLToPath(new URL("./fixtures/stream-json/usage-limit.ndjson", import.meta.url)),
+      "utf8",
+    );
+  }
+
+  it("classifies a usage-limit failure from the stream's result event", async () => {
+    const job = createJob({ repoId, issueNumber: 20, agent: "claude" }, db);
+    const captured: Captured = {};
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner(limitFixture(), captured, 1),
+    });
+    expect(res.exitCode).toBe(1);
+    expect(res.limit).toMatchObject({
+      agent: "claude",
+      kind: "usage_limit",
+      resetAt: 1749924000,
+    });
+  });
+
+  it("classifies a rate-limit failure from stderr", async () => {
+    const job = createJob({ repoId, issueNumber: 21, agent: "claude" }, db);
+    const runner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks): StreamHandle => {
+      cb.onStderr?.('API Error: 429 {"type":"error","error":{"type":"rate_limit_error"}}');
+      return { done: Promise.resolve(1), abort: () => {} };
+    };
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner,
+    });
+    expect(res.limit?.kind).toBe("rate_limit");
+  });
+
+  it("reports no limit for a successful session or a generic failure", async () => {
+    const ok = createJob({ repoId, issueNumber: 22, agent: "codex" }, db);
+    const okRes = await spawnAgentSession(getJob(ok.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner(codexFixture(), {}),
+    });
+    expect(okRes.limit).toBeUndefined();
+
+    const generic = createJob({ repoId, issueNumber: 23, agent: "claude" }, db);
+    const genericRunner: StreamRunner = (_c, _a, _w, cb: StreamCallbacks): StreamHandle => {
+      cb.onStderr?.("TypeError: boom");
+      return { done: Promise.resolve(1), abort: () => {} };
+    };
+    const genericRes = await spawnAgentSession(getJob(generic.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: genericRunner,
+    });
+    expect(genericRes.limit).toBeUndefined();
+  });
+
+  it("does not classify timeout aborts as provider limits", async () => {
+    const job = createJob({ repoId, issueNumber: 24, agent: "claude" }, db);
+    let resolveDone: (code: number) => void;
+    const done = new Promise<number>((res) => {
+      resolveDone = res;
+    });
+    const hangingRunner: StreamRunner = () => ({
+      done,
+      abort: () => resolveDone(1),
+    });
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: hangingRunner,
+      timeoutMs: 20,
+    });
+    expect(res.timedOut).toBe(true);
+    expect(res.limit).toBeUndefined();
+  });
+
+  it("refuses to spawn a claude session while the latch is blocking", async () => {
+    latchProviderLimit(
+      { agent: "claude", kind: "usage_limit", rawSnippet: "limit", resetAt: nowSec() + 3600 },
+      db,
+    );
+    const job = createJob({ repoId, issueNumber: 25, agent: "claude" }, db);
+    const captured: Captured = {};
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner("", captured, 0),
+    });
+    expect(captured.cmd).toBeUndefined(); // no subprocess was started
+    expect(res.exitCode).not.toBe(0);
+    expect(res.limit?.kind).toBe("usage_limit");
+    expect(res.limit?.latched).toBe(true);
+  });
+
+  it("still spawns non-claude sessions while claude is latched", async () => {
+    latchProviderLimit(
+      { agent: "claude", kind: "usage_limit", rawSnippet: "limit", resetAt: nowSec() + 3600 },
+      db,
+    );
+    const job = createJob({ repoId, issueNumber: 26, agent: "codex" }, db);
+    const captured: Captured = {};
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner(codexFixture(), captured),
+    });
+    expect(captured.cmd).toBe("codex");
+    expect(res.limit).toBeUndefined();
+  });
+
+  it("spawns normally when the auto-wait toggle is off", async () => {
+    latchProviderLimit(
+      { agent: "claude", kind: "usage_limit", rawSnippet: "limit", resetAt: nowSec() + 3600 },
+      db,
+    );
+    saveSettings({ claudeLimitAutoWait: false }, db);
+    const job = createJob({ repoId, issueNumber: 27, agent: "claude" }, db);
+    const captured: Captured = {};
+    await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner("", captured, 0),
+    });
+    expect(captured.cmd).toBe("claude");
+  });
+
+  it("detects limits and honours the spawn guard on the resume path too", async () => {
+    const job = createJob({ repoId, issueNumber: 28, agent: "claude" }, db);
+    const runner: StreamRunner = (_c, _a, _w, cb: StreamCallbacks): StreamHandle => {
+      cb.onStderr?.("Claude AI usage limit reached|1749924000");
+      return { done: Promise.resolve(1), abort: () => {} };
+    };
+    const res = await resumeAgentSession(getJob(job.id, db) as never, "sess-1", "log", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner,
+    });
+    expect(res.limit?.kind).toBe("usage_limit");
+
+    latchProviderLimit(
+      { agent: "claude", kind: "usage_limit", rawSnippet: "limit", resetAt: nowSec() + 3600 },
+      db,
+    );
+    const captured: Captured = {};
+    const guarded = await resumeAgentSession(
+      getJob(job.id, db) as never,
+      "sess-1",
+      "log",
+      "/tmp/r",
+      { db, broker: new LogBroker(db), runner: captureRunner("", captured, 0) },
+    );
+    expect(captured.cmd).toBeUndefined();
+    expect(guarded.limit?.latched).toBe(true);
+  });
+});
+
+describe("resume overrides for the limit-resume path (issue #166)", () => {
+  it("uses the injected prompt, model, and turn budget instead of the CI-fix defaults", async () => {
+    const job = createJob({ repoId, issueNumber: 29, agent: "claude" }, db);
+    const captured: Captured = {};
+    await resumeAgentSession(getJob(job.id, db) as never, "sess-9", "ignored-log", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner("", captured, 0),
+      resumePrompt: "continue the interrupted work",
+      resumeModel: "claude-opus-4-8",
+      resumeMaxTurns: 40,
+    });
+    const args = captured.args ?? [];
+    expect(captured.cmd).toBe("claude");
+    expect(args[args.indexOf("-p") + 1]).toBe("continue the interrupted work");
+    expect(args[args.indexOf("--resume") + 1]).toBe("sess-9");
+    expect(args[args.indexOf("--model") + 1]).toBe("claude-opus-4-8");
+    expect(args[args.indexOf("--max-turns") + 1]).toBe("40");
   });
 });

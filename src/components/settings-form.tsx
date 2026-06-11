@@ -143,6 +143,23 @@ export function SettingsForm({ initial }: { initial: Settings }) {
             />
           </div>
 
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">
+                Auto-wait on Claude usage limits
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Park jobs when the Claude quota is exhausted and resume them automatically once it
+                resets, instead of paging you.
+              </p>
+            </div>
+            <Switch
+              checked={s.claudeLimitAutoWait}
+              onChange={(v) => set("claudeLimitAutoWait", v)}
+              aria-label="Auto-wait on Claude usage limits"
+            />
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Poll interval (s)" hint="How often to check for new issues.">
               <Input

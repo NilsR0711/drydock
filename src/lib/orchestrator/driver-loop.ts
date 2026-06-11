@@ -13,12 +13,13 @@ import { evaluateIssue } from "@/lib/issues/evaluator";
 import { syncIssuesFromGh } from "@/lib/issues/service";
 import { type TriageResult, triageRepo } from "@/lib/issues/triage";
 import { logError } from "@/lib/log/logger";
-import { type EdgeState, notifyCostLimitEdge } from "@/lib/notify/lifecycle";
+import { type EdgeState, notifyClaudeLimitEdge, notifyCostLimitEdge } from "@/lib/notify/lifecycle";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
 import { driveDeploymentHealing } from "./deployment-healing-driver";
-import { listJobsByStatus } from "./jobs";
+import { listJobsByStatus, recordEvent, transitionJob } from "./jobs";
+import { claudeLimitBlocked } from "./provider-limit";
 import {
   claimNext,
   DEFAULT_LEASE_MS,
@@ -39,6 +40,8 @@ import { buildSubtaskGenerator, decomposeRepo } from "./subtask-driver";
 
 /** Latch so the daily cost-limit notification fires once per breach, not per tick. */
 const costLimitState: EdgeState = { active: false };
+/** Latch so the Claude-limit enter/exit notifications fire once per edge (issue #166). */
+const claudeLimitState: EdgeState = { active: false };
 
 export interface DriveTickDeps {
   db?: DB;
@@ -152,8 +155,17 @@ const OPEN_STATES = JOB_STATES.filter((s) => !TERMINAL_STATES.includes(s));
 // Non-terminal, already-started states. A repo with any such job is "in flight":
 // for sequential repos the next issue waits until this clears. Parked jobs
 // (needs_human/interrupted) are deliberately NOT in flight — they must not
-// block a sequential repo's pipeline while they wait on an operator.
-const IN_FLIGHT_STATES = ["working", "ci_running", "ci_failed", "retrying"] as const;
+// block a sequential repo's pipeline while they wait on an operator. A
+// limit-parked job (waiting_limit, issue #166) IS in flight: it resumes on its
+// own, mid-implementation, so a sequential repo must not start the next issue
+// around it.
+const IN_FLIGHT_STATES = [
+  "working",
+  "ci_running",
+  "ci_failed",
+  "retrying",
+  "waiting_limit",
+] as const;
 
 function hasOpenJob(db: DB, repoId: number, issueNumber: number): boolean {
   return listJobsByStatus([...OPEN_STATES], db).some(
@@ -163,6 +175,39 @@ function hasOpenJob(db: DB, repoId: number, issueNumber: number): boolean {
 
 function repoHasInFlightJob(db: DB, repoId: number): boolean {
   return listJobsByStatus([...IN_FLIGHT_STATES], db).some((j) => j.repoId === repoId);
+}
+
+/**
+ * Requeue jobs parked on the Claude usage limit once the latch has cleared
+ * (issue #166). The limitKind marker survives the requeue so run-job resumes
+ * the stored session; the breadcrumb comment on the issue is best-effort.
+ * Called only while no latch is blocking, so this tick's claim loop can pick
+ * the jobs straight back up.
+ */
+async function resumeLimitParkedJobs(repos: Repo[], deps: DriveTickDeps, db: DB): Promise<void> {
+  const parked = listJobsByStatus(["waiting_limit"], db).filter((j) => j.agent === "claude");
+  for (const job of parked) {
+    try {
+      transitionJob(job.id, "queued", { availableAt: null, errorMessage: null }, db);
+      recordEvent(job.id, "status", { reason: "claude_limit_cleared" }, db);
+    } catch (err) {
+      // A concurrent operator action (abort, manual requeue) settled the job
+      // between the list and the transition; skip it.
+      logError(`[driver] limit requeue failed for job ${job.id}`, err);
+      continue;
+    }
+    const repo = repos.find((r) => r.id === job.repoId);
+    if (!repo) continue;
+    try {
+      const forge = deps.forgeFor?.(repo) ?? getForge(repo);
+      await forge.commentIssue(
+        job.issueNumber,
+        `▶️ Claude quota available again — resuming job #${job.id}.`,
+      );
+    } catch (err) {
+      logError(`[driver] limit-resume comment failed for job ${job.id}`, err);
+    }
+  }
 }
 
 /**
@@ -279,6 +324,21 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
     logError("[driver] external-abort reconcile failed", err);
   }
 
+  // Claude usage-limit gate (issue #166): while the latch blocks, claude jobs
+  // stay queued (other agents proceed); once it clears, parked jobs requeue
+  // so this very tick's claim loop picks them straight back up. The edge
+  // notification fires once on entering and once on clearing.
+  const claudeLatch = claudeLimitBlocked(db);
+  void notifyClaudeLimitEdge(!!claudeLatch, claudeLimitState, db);
+  if (!claudeLatch) {
+    try {
+      await resumeLimitParkedJobs(repos, deps, db);
+    } catch (err) {
+      logError("[driver] limit-parked job resume sweep failed", err);
+    }
+  }
+  const excludeAgents = claudeLatch ? ["claude"] : undefined;
+
   const max = getSettings(db).maxParallelJobs;
   const worker = workerId();
   while (!isDraining() && jobsAllowed(db).allowed && activeJobCount() < max) {
@@ -294,7 +354,10 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
     // Atomically claim the globally highest-priority eligible job out of the
     // queue, stamping a lease. claimNext sets it to "working" (the working-state
     // guard in the agent session keeps spawning happy).
-    const claimed = claimNext({ repoIds: eligible, worker, leaseMs: DEFAULT_LEASE_MS }, db);
+    const claimed = claimNext(
+      { repoIds: eligible, worker, leaseMs: DEFAULT_LEASE_MS, excludeAgents },
+      db,
+    );
     if (!claimed) break;
     const jobId = claimed.id;
     const leaseToken = claimed.leaseToken as string;

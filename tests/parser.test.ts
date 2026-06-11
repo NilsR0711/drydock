@@ -92,6 +92,20 @@ describe("StreamJsonParser against fixtures", () => {
     expect(result?.isError).toBe(true);
   });
 
+  it("exposes the result event's text and error flag for failure classification (issue #166)", () => {
+    const p = new StreamJsonParser();
+    [...p.push(fixture("usage-limit.ndjson")), ...p.flush()];
+    expect(p.resultText).toBe("Claude AI usage limit reached|1749924000");
+    expect(p.resultIsError).toBe(true);
+  });
+
+  it("leaves resultText/resultIsError unset until a result arrives", () => {
+    const p = new StreamJsonParser();
+    p.push('{"type":"system","session_id":"s1"}\n');
+    expect(p.resultText).toBeUndefined();
+    expect(p.resultIsError).toBe(false);
+  });
+
   it("handles chunk boundaries that split a line", () => {
     const raw = fixture("success.ndjson");
     const mid = Math.floor(raw.length / 2);

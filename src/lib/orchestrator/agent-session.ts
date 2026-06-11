@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { getAgentProvider } from "@/lib/agents/registry";
-import type { AgentProvider } from "@/lib/agents/types";
+import type { AgentProvider, ProviderLimitInfo, StreamParser } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import type { Job } from "@/lib/db/schema";
 import { jobs } from "@/lib/db/schema";
@@ -9,6 +9,7 @@ import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
 import { getBroker, type LogBroker } from "@/lib/stream/broker";
 import { transitionJob } from "./jobs";
+import { claudeLimitBlocked } from "./provider-limit";
 import { clearAbort, registerAbort } from "./singleton";
 
 export interface AgentSessionDeps {
@@ -48,6 +49,16 @@ export interface AgentSessionDeps {
    * replacing the main session's numbers.
    */
   sideSession?: boolean;
+  /**
+   * Limit-resume path (issue #166): override the resume prompt instead of
+   * rendering the CI-fix template. A limit-parked job resumes its main work,
+   * not a CI fix, so it needs its own continuation prompt.
+   */
+  resumePrompt?: string;
+  /** Limit-resume path (issue #166): resume on this model instead of the provider's cheap resume model. */
+  resumeModel?: string;
+  /** Limit-resume path (issue #166): resume with this turn budget instead of the tight CI-fix budget. */
+  resumeMaxTurns?: number;
 }
 
 export interface AgentSessionResult {
@@ -66,12 +77,93 @@ export interface AgentSessionResult {
    * can surface a clear "failed to start <command>" diagnostic.
    */
   spawnError?: Error;
+  /**
+   * Set when the failed session was classified as a provider limit/auth
+   * condition (issue #166), or when the session was refused outright because
+   * the provider is already limit-latched (then `limit.latched` is true).
+   */
+  limit?: SessionLimitInfo;
+}
+
+/** ProviderLimitInfo plus whether it came from the latch, not a fresh failure. */
+export interface SessionLimitInfo extends ProviderLimitInfo {
+  /**
+   * True when the session never ran because the provider was already latched.
+   * Callers park the job without re-latching, so guard bounces don't count as
+   * fresh strikes and never extend the wait window.
+   */
+  latched?: boolean;
 }
 
 /** Sentinel exit code recorded when a session is killed by the wall-clock timeout. */
 const TIMED_OUT_EXIT = -1;
 /** Sentinel exit code recorded when a session is killed by the per-job cost cap. */
 const COST_EXCEEDED_EXIT = -2;
+/** Sentinel exit code for a session refused because the provider is limit-latched. */
+const LIMIT_BLOCKED_EXIT = -3;
+
+/** Cap on the retained stderr tail used for failure classification. */
+const STDERR_TAIL_MAX = 16_384;
+
+/**
+ * Pre-spawn gate (issue #166): while the provider's limit latch is blocking,
+ * refuse to start a session at all — every caller (driver jobs, CI fixes,
+ * review-feedback side sessions) would only burn a spawn against a quota that
+ * is known to be exhausted. Returns the refusal result, or undefined when the
+ * session may proceed. Only Claude has a latch today.
+ */
+function limitGateResult(
+  provider: AgentProvider,
+  job: Job,
+  broker: LogBroker,
+  db: DB,
+): AgentSessionResult | undefined {
+  if (provider.id !== "claude") return undefined;
+  const latch = claudeLimitBlocked(db);
+  if (!latch) return undefined;
+  broker.publish(job.id, {
+    type: "error",
+    payload: {
+      stderr: `session not started: ${provider.label} is limit-blocked (${latch.kind}) until ${new Date(latch.blockedUntil * 1000).toISOString()}`,
+    },
+  });
+  return {
+    exitCode: LIMIT_BLOCKED_EXIT,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    timedOut: false,
+    costExceeded: false,
+    limit: {
+      agent: provider.id,
+      kind: latch.kind,
+      resetAt: latch.blockedUntil,
+      rawSnippet: latch.rawSnippet,
+      latched: true,
+    },
+  };
+}
+
+/**
+ * Classify a finished, failed session against the provider's limit patterns
+ * (issue #166). Timeout/cost-cap aborts are Drydock's own doing, never a
+ * provider condition, so they are excluded up front.
+ */
+function classifySessionFailure(
+  provider: AgentProvider,
+  parser: StreamParser,
+  stderrTail: string,
+  outcome: { exitCode: number; timedOut: boolean; costExceeded: boolean },
+): ProviderLimitInfo | undefined {
+  if (outcome.timedOut || outcome.costExceeded) return undefined;
+  if (outcome.exitCode === 0 && !parser.resultIsError) return undefined;
+  return provider.classifyFailure?.({
+    exitCode: outcome.exitCode,
+    stderr: stderrTail,
+    resultText: parser.resultText,
+    resultIsError: parser.resultIsError,
+  });
+}
 
 interface CostGuard {
   /** Re-price the accumulated usage; resolves `tripped` once the cap is crossed. */
@@ -192,6 +284,11 @@ export async function spawnAgentSession(
   const parser = provider.createParser();
   parser.onParseError = (error) => broker.publish(job.id, { type: "parse_error", payload: error });
 
+  // Pre-spawn limit gate (issue #166): a latched provider refuses the session
+  // before any job-state or DB write happens.
+  const gated = limitGateResult(provider, job, broker, db);
+  if (gated) return gated;
+
   // Out-of-band side sessions never touch the job lifecycle: forcing `working`
   // would throw InvalidTransitionError for any job past `working` (the review
   // feedback driver runs on ci_running jobs, deployment healing on merged ones).
@@ -220,6 +317,8 @@ export async function spawnAgentSession(
     deps.costCapUsd && deps.costCapUsd > 0 ? makeCostGuard(deps.costCapUsd, liveCost) : undefined;
 
   const args = provider.buildStartArgs({ prompt, model, maxTurns: job.maxTurns });
+  // Tail of stderr, retained for provider-limit classification (issue #166).
+  let stderrTail = "";
   const handle = runner(command, args, cwd, {
     onStdout: (chunk) => {
       for (const event of parser.push(chunk)) {
@@ -227,7 +326,10 @@ export async function spawnAgentSession(
       }
       guard?.observe();
     },
-    onStderr: (chunk) => broker.publish(job.id, { type: "error", payload: { stderr: chunk } }),
+    onStderr: (chunk) => {
+      stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX);
+      broker.publish(job.id, { type: "error", payload: { stderr: chunk } });
+    },
   });
 
   registerAbort(job.id, handle.abort);
@@ -302,6 +404,11 @@ export async function spawnAgentSession(
     timedOut,
     costExceeded,
     spawnError,
+    limit: classifySessionFailure(provider, parser, stderrTail, {
+      exitCode,
+      timedOut,
+      costExceeded,
+    }),
   };
 }
 
@@ -323,16 +430,25 @@ export async function resumeAgentSession(
   const broker = deps.broker ?? getBroker();
   const provider = deps.provider ?? getAgentProvider(job.agent);
   const command = deps.command ?? provider.defaultCommand;
-  // Price what is actually executed: resumes always run the provider's resume
+  // Price what is actually executed: resumes default to the provider's resume
   // model (see the args below), never the job's start model. Pricing job.model
   // here would under-/over-count every estimated resume (codex has no stream
-  // cost at all, so the estimate is its only cost source).
-  const model = provider.resumeModel;
+  // cost at all, so the estimate is its only cost source). The limit-resume
+  // path (issue #166) overrides this — it continues the main work, not a CI
+  // fix — along with the prompt and turn budget.
+  const model = deps.resumeModel ?? provider.resumeModel;
+  const maxTurns = deps.resumeMaxTurns ?? provider.resumeMaxTurns;
   const parser = provider.createParser();
   parser.onParseError = (error) => broker.publish(job.id, { type: "parse_error", payload: error });
-  const prompt = renderTemplate(resolveTemplateContent(job.repoId, TEMPLATE_NAMES.ciFix, db), {
-    CI_LOG: failedLog,
-  });
+  const prompt =
+    deps.resumePrompt ??
+    renderTemplate(resolveTemplateContent(job.repoId, TEMPLATE_NAMES.ciFix, db), {
+      CI_LOG: failedLog,
+    });
+
+  // Pre-spawn limit gate (issue #166): same refusal as spawnAgentSession.
+  const gated = limitGateResult(provider, job, broker, db);
+  if (gated) return { ...gated, sessionId };
 
   // Per-job cost ceiling (issue #57, #94): seed the guard with whatever the job
   // already spent in prior sessions so the cap applies to the cumulative job
@@ -363,7 +479,7 @@ export async function resumeAgentSession(
         prompt,
         sessionId,
         model,
-        maxTurns: provider.resumeMaxTurns,
+        maxTurns,
       })
     : null;
   // Fallback: agents that can't resume retry from scratch with the fix prompt.
@@ -372,9 +488,11 @@ export async function resumeAgentSession(
     provider.buildStartArgs({
       prompt,
       model,
-      maxTurns: provider.resumeMaxTurns,
+      maxTurns,
     });
 
+  // Tail of stderr, retained for provider-limit classification (issue #166).
+  let stderrTail = "";
   const handle = runner(command, args, cwd, {
     onStdout: (chunk) => {
       for (const event of parser.push(chunk)) {
@@ -382,7 +500,10 @@ export async function resumeAgentSession(
       }
       guard?.observe();
     },
-    onStderr: (chunk) => broker.publish(job.id, { type: "error", payload: { stderr: chunk } }),
+    onStderr: (chunk) => {
+      stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX);
+      broker.publish(job.id, { type: "error", payload: { stderr: chunk } });
+    },
   });
   registerAbort(job.id, handle.abort);
   const { exitCode, timedOut, costExceeded } = await awaitBounded(handle, {
@@ -441,5 +562,10 @@ export async function resumeAgentSession(
     timedOut,
     costExceeded,
     spawnError,
+    limit: classifySessionFailure(provider, parser, stderrTail, {
+      exitCode,
+      timedOut,
+      costExceeded,
+    }),
   };
 }

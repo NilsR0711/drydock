@@ -23,8 +23,11 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const repo = getRepo(job.repoId);
   const events = getDb().select().from(jobEvents).where(eq(jobEvents.jobId, jobId)).all();
   const questions = job.prNumber != null ? listPrQuestions(job.id) : [];
-  const inFlight = ["working", "ci_running", "retrying"].includes(job.status);
+  // waiting_limit counts as in flight: the job is operationally live (the
+  // driver resumes it on its own) and must stay stoppable from the UI.
+  const inFlight = ["working", "ci_running", "retrying", "waiting_limit"].includes(job.status);
   const isError = job.status === "needs_human";
+  const isLimitParked = job.status === "waiting_limit";
 
   const repoName = repo?.name ?? `repo #${job.repoId}`;
   const end = job.finishedAt ?? Math.floor(Date.now() / 1000);
@@ -53,6 +56,25 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       {isError && (
         <Alert tone="destructive" title="Paused for a human">
           {job.errorMessage ?? "A guardrail stopped the run before anything risky was written."}
+        </Alert>
+      )}
+
+      {isLimitParked && (
+        <Alert tone="warning" title="Waiting on provider limit">
+          {job.errorMessage ?? "Provider usage limit reached — the job resumes automatically."}
+          {job.availableAt != null && (
+            <>
+              {" "}
+              Next attempt around{" "}
+              {new Date(job.availableAt * 1000).toLocaleString("en-US", {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              .
+            </>
+          )}
         </Alert>
       )}
 
