@@ -8,6 +8,7 @@ import { ciBabysitter } from "@/lib/orchestrator/ci-babysitter";
 import { activeHealingRunCount } from "@/lib/orchestrator/ci-healing";
 import { createJob, transitionJob } from "@/lib/orchestrator/jobs";
 import {
+  clearProviderLimit,
   getProviderLimitLatch,
   latchProviderLimit,
   providerLimitBlocked,
@@ -213,5 +214,114 @@ describe("ciBabysitter under the claude limit latch (issue #166)", () => {
     });
     expect(final.status).toBe("merged");
     expect(getProviderLimitLatch("claude", db)).toBeUndefined();
+  });
+});
+
+describe("ciBabysitter under the codex limit latch (issue #167)", () => {
+  function codexCiRunningJob(issue: number) {
+    const job = createJob({ repoId, issueNumber: issue, agent: "codex", model: "gpt-5-codex" }, db);
+    transitionJob(job.id, "working", {}, db);
+    return transitionJob(job.id, "ci_running", { prNumber: 5, sessionId: "th_1" }, db);
+  }
+
+  function codexLimit(overrides: Partial<SessionLimitInfo> = {}): SessionLimitInfo {
+    return {
+      agent: "codex",
+      kind: "usage_limit",
+      resetAt: nowSec() + 3600,
+      rawSnippet: "You've hit your usage limit",
+      ...overrides,
+    };
+  }
+
+  it("defers the codex CI fix via the default gate while the codex latch blocks", async () => {
+    latchProviderLimit(codexLimit(), db);
+    const job = codexCiRunningJob(10);
+    const { gh } = scriptedGh([
+      [{ name: "build", state: "FAILURE" }],
+      [{ name: "build", state: "FAILURE" }],
+      [{ name: "build", state: "SUCCESS" }],
+    ]);
+    const resumeSession = vi.fn(async () => ({ exitCode: 0 }));
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession,
+      // The latch clears while the babysitter sleeps out the deferral.
+      sleep: vi.fn(async () => clearProviderLimit("codex", db)),
+      maxPolls: 10,
+    });
+    expect(final.status).toBe("merged");
+    expect(resumeSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("a claude latch never defers a codex job's fix (default gate)", async () => {
+    latchProviderLimit(usageLimit(), db); // claude latch only
+    const job = codexCiRunningJob(11);
+    const { gh } = scriptedGh([
+      [{ name: "build", state: "FAILURE" }],
+      [{ name: "build", state: "SUCCESS" }],
+    ]);
+    const resumeSession = vi.fn(async () => ({ exitCode: 0 }));
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession,
+      sleep: vi.fn(),
+      maxPolls: 5,
+    });
+    expect(final.status).toBe("merged");
+    expect(resumeSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("parks the retry budget and latches codex when the codex fix hits the limit", async () => {
+    const job = codexCiRunningJob(12);
+    const { gh } = scriptedGh([[{ name: "build", state: "FAILURE" }]]);
+    const resumeSession = vi.fn(async () => ({ exitCode: 1, limit: codexLimit() }));
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession,
+      sleep: vi.fn(),
+      maxPolls: 3,
+    });
+    expect(final.status).toBe("ci_running");
+    expect(final.ciRetryCount).toBe(0);
+    expect(providerLimitBlocked("codex", db)?.kind).toBe("usage_limit");
+    expect(providerLimitBlocked("claude", db)).toBeUndefined();
+  });
+
+  it("treats a limited codex fix as a plain failure when codex auto-wait is disabled", async () => {
+    saveSettings({ codexLimitAutoWait: false }, db);
+    const job = codexCiRunningJob(13);
+    const { gh } = scriptedGh([[{ name: "build", state: "FAILURE" }]]);
+    const resumeSession = vi.fn(async () => ({ exitCode: 1, limit: codexLimit() }));
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession,
+      sleep: vi.fn(),
+      maxPolls: 3,
+    });
+    expect(final.status).toBe("needs_human");
+  });
+
+  it("clears the codex latch streak after a successful codex fix", async () => {
+    latchProviderLimit(codexLimit(), db);
+    const job = codexCiRunningJob(14);
+    const { gh } = scriptedGh([
+      [{ name: "build", state: "FAILURE" }],
+      [{ name: "build", state: "SUCCESS" }],
+    ]);
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: vi.fn(async () => ({ exitCode: 0 })),
+      sleep: vi.fn(),
+      maxPolls: 5,
+      limitBlocked: () => false,
+    });
+    expect(final.status).toBe("merged");
+    expect(getProviderLimitLatch("codex", db)).toBeUndefined();
   });
 });

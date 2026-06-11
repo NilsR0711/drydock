@@ -1,4 +1,5 @@
 import { getAgentProvider } from "@/lib/agents/registry";
+import type { AgentId } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
@@ -10,6 +11,7 @@ import { repoAutomation } from "@/lib/repos/automation";
 import { commandForAgent } from "./agent-command";
 import { spawnAgentSession } from "./agent-session";
 import { listJobs } from "./jobs";
+import { agentLimitBlocked } from "./provider-limit";
 import { type FeedbackApplyResult, processPrFeedback, type ReviewForge } from "./review-feedback";
 
 /**
@@ -51,8 +53,14 @@ export async function driveReviewFeedback(deps: DriveFeedbackDeps = {}): Promise
       const forge = deps.forgeFor?.(repo) ?? getForge(repo);
       if (!supportsReviewThreads(forge)) continue;
 
+      // Jobs whose agent is limit-latched are skipped (issue #167): their side
+      // sessions would only bounce off the pre-spawn guard and burn the item's
+      // fix-attempt budget; the next sweep picks them up once the latch clears.
       const candidates = listJobs(repo.id, db).filter(
-        (j) => j.prNumber != null && PR_OPEN_STATES.has(j.status),
+        (j) =>
+          j.prNumber != null &&
+          PR_OPEN_STATES.has(j.status) &&
+          !agentLimitBlocked(j.agent as AgentId, db),
       );
       for (const job of candidates) {
         try {

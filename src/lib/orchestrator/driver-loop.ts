@@ -1,5 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getAgentProvider } from "@/lib/agents/registry";
+import type { AgentId } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
 import { type Issue, issues, type Job, jobs, type Repo } from "@/lib/db/schema";
@@ -13,13 +14,17 @@ import { evaluateIssue } from "@/lib/issues/evaluator";
 import { syncIssuesFromGh } from "@/lib/issues/service";
 import { type TriageResult, triageRepo } from "@/lib/issues/triage";
 import { logError } from "@/lib/log/logger";
-import { type EdgeState, notifyClaudeLimitEdge, notifyCostLimitEdge } from "@/lib/notify/lifecycle";
+import {
+  type EdgeState,
+  notifyCostLimitEdge,
+  notifyProviderLimitEdge,
+} from "@/lib/notify/lifecycle";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
 import { driveDeploymentHealing } from "./deployment-healing-driver";
 import { listJobsByStatus, recordEvent, transitionJob } from "./jobs";
-import { claudeLimitBlocked } from "./provider-limit";
+import { agentLimitBlocked } from "./provider-limit";
 import {
   claimNext,
   DEFAULT_LEASE_MS,
@@ -40,8 +45,11 @@ import { buildSubtaskGenerator, decomposeRepo } from "./subtask-driver";
 
 /** Latch so the daily cost-limit notification fires once per breach, not per tick. */
 const costLimitState: EdgeState = { active: false };
-/** Latch so the Claude-limit enter/exit notifications fire once per edge (issue #166). */
-const claudeLimitState: EdgeState = { active: false };
+/** Latches so the per-agent limit enter/exit notifications fire once per edge (issues #166/#167). */
+const providerLimitStates: Record<AgentId, EdgeState> = {
+  claude: { active: false },
+  codex: { active: false },
+};
 
 export interface DriveTickDeps {
   db?: DB;
@@ -84,6 +92,7 @@ export function defaultDecompose(
     command: commandForAgent(provider, db),
     model: repo.defaultModel,
     cwd: repo.path,
+    db,
     runner: opts.runner,
   });
   return decomposeRepo(repo, forge, candidates, db, { generate });
@@ -178,18 +187,24 @@ function repoHasInFlightJob(db: DB, repoId: number): boolean {
 }
 
 /**
- * Requeue jobs parked on the Claude usage limit once the latch has cleared
- * (issue #166). The limitKind marker survives the requeue so run-job resumes
- * the stored session; the breadcrumb comment on the issue is best-effort.
- * Called only while no latch is blocking, so this tick's claim loop can pick
- * the jobs straight back up.
+ * Requeue jobs parked on `agent`'s usage limit once its latch has cleared
+ * (issues #166/#167). The limitKind marker survives the requeue so run-job
+ * resumes the stored session; the breadcrumb comment on the issue is
+ * best-effort. Called only while that agent's latch is not blocking, so this
+ * tick's claim loop can pick the jobs straight back up.
  */
-async function resumeLimitParkedJobs(repos: Repo[], deps: DriveTickDeps, db: DB): Promise<void> {
-  const parked = listJobsByStatus(["waiting_limit"], db).filter((j) => j.agent === "claude");
+async function resumeLimitParkedJobs(
+  agent: AgentId,
+  repos: Repo[],
+  deps: DriveTickDeps,
+  db: DB,
+): Promise<void> {
+  const label = agent === "codex" ? "Codex capacity" : "Claude quota";
+  const parked = listJobsByStatus(["waiting_limit"], db).filter((j) => j.agent === agent);
   for (const job of parked) {
     try {
       transitionJob(job.id, "queued", { availableAt: null, errorMessage: null }, db);
-      recordEvent(job.id, "status", { reason: "claude_limit_cleared" }, db);
+      recordEvent(job.id, "status", { reason: `${agent}_limit_cleared` }, db);
     } catch (err) {
       // A concurrent operator action (abort, manual requeue) settled the job
       // between the list and the transition; skip it.
@@ -202,7 +217,7 @@ async function resumeLimitParkedJobs(repos: Repo[], deps: DriveTickDeps, db: DB)
       const forge = deps.forgeFor?.(repo) ?? getForge(repo);
       await forge.commentIssue(
         job.issueNumber,
-        `▶️ Claude quota available again — resuming job #${job.id}.`,
+        `▶️ ${label} available again — resuming job #${job.id}.`,
       );
     } catch (err) {
       logError(`[driver] limit-resume comment failed for job ${job.id}`, err);
@@ -254,7 +269,10 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
         // Opt-in decomposition (issue #19): split large work-candidate issues
         // into tracked subtasks before they are worked. Bounded to issues that
         // are queued or carry a ready label, to cap the per-issue detail fetch.
-        if (cfg.autoDecompose) {
+        // Skipped while the repo's agent is limit-latched (issue #167): every
+        // one-shot would only bounce off the exhausted quota, and a limit
+        // failure mid-sweep must not stamp issues as non-decomposable.
+        if (cfg.autoDecompose && !agentLimitBlocked(repo.agent as AgentId, db)) {
           const candidates = fetched.filter((gh) => {
             const labelNames = gh.labels.map((l) => l.name);
             return (
@@ -262,7 +280,16 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
               labelNames.some((l) => cfg.readyLabels.includes(l))
             );
           });
-          if (candidates.length > 0) await decompose(repo, forge, candidates, db);
+          if (candidates.length > 0) {
+            try {
+              await decompose(repo, forge, candidates, db);
+            } catch (err) {
+              // A provider-limit abort latched the agent and stopped the sweep
+              // (issue #167); issue enqueueing below must still run — claimNext
+              // excludes the latched agent's jobs anyway.
+              logError(`[driver] decomposition sweep failed for ${repo.name}`, err);
+            }
+          }
         }
 
         for (const gh of fetched) {
@@ -324,20 +351,25 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
     logError("[driver] external-abort reconcile failed", err);
   }
 
-  // Claude usage-limit gate (issue #166): while the latch blocks, claude jobs
-  // stay queued (other agents proceed); once it clears, parked jobs requeue
-  // so this very tick's claim loop picks them straight back up. The edge
-  // notification fires once on entering and once on clearing.
-  const claudeLatch = claudeLimitBlocked(db);
-  void notifyClaudeLimitEdge(!!claudeLatch, claudeLimitState, db);
-  if (!claudeLatch) {
+  // Per-agent usage-limit gates (issues #166/#167): while an agent's latch
+  // blocks, its jobs stay queued (other agents proceed); once it clears,
+  // parked jobs requeue so this very tick's claim loop picks them straight
+  // back up. The edge notifications fire once on entering and once on clearing.
+  const latchedAgents: AgentId[] = [];
+  for (const agent of ["claude", "codex"] as const) {
+    const latch = agentLimitBlocked(agent, db);
+    void notifyProviderLimitEdge(agent, !!latch, providerLimitStates[agent], db);
+    if (latch) {
+      latchedAgents.push(agent);
+      continue;
+    }
     try {
-      await resumeLimitParkedJobs(repos, deps, db);
+      await resumeLimitParkedJobs(agent, repos, deps, db);
     } catch (err) {
-      logError("[driver] limit-parked job resume sweep failed", err);
+      logError(`[driver] ${agent} limit-parked job resume sweep failed`, err);
     }
   }
-  const excludeAgents = claudeLatch ? ["claude"] : undefined;
+  const excludeAgents = latchedAgents.length > 0 ? latchedAgents : undefined;
 
   const max = getSettings(db).maxParallelJobs;
   const worker = workerId();

@@ -1,4 +1,6 @@
+import type { AgentId } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
+import type { NotificationEvent } from "./events";
 import { defaultTransports, dispatch, type NotifyTransports } from "./notifier";
 
 /**
@@ -38,29 +40,44 @@ export async function notifyCostLimitEdge(
   }
 }
 
-const CLAUDE_LIMIT_MESSAGE =
-  "⏳ Claude usage limit reached — Claude jobs are parked until the quota resets.";
-const CLAUDE_LIMIT_CLEARED_MESSAGE = "▶️ Claude quota available again — parked jobs are resuming.";
+/** Per-agent enter/clear messages and event for the provider-limit edge. */
+const PROVIDER_LIMIT_MESSAGES = {
+  claude: {
+    event: "claude_limit",
+    blocked: "⏳ Claude usage limit reached — Claude jobs are parked until the quota resets.",
+    cleared: "▶️ Claude quota available again — parked jobs are resuming.",
+  },
+  codex: {
+    event: "codex_limit",
+    blocked: "⏳ Codex usage limit reached — Codex jobs are parked until the quota resets.",
+    cleared: "▶️ Codex capacity available again — parked jobs are resuming.",
+  },
+} as const satisfies Record<
+  AgentId,
+  { event: NotificationEvent; blocked: string; cleared: string }
+>;
 
 /**
- * Two-sided edge notification for the Claude usage-limit latch (issue #166):
- * one message when the latch first blocks, one when it clears and parked work
- * resumes. Re-arms after each clear like the cost-limit edge.
+ * Two-sided edge notification for an agent's usage-limit latch (issues
+ * #166/#167): one message when the latch first blocks, one when it clears and
+ * parked work resumes. Re-arms after each clear like the cost-limit edge.
  */
-export async function notifyClaudeLimitEdge(
+export async function notifyProviderLimitEdge(
+  agent: AgentId,
   blocked: boolean,
   state: EdgeState,
   db: DB = getDb(),
   transports: NotifyTransports = defaultTransports,
 ): Promise<void> {
+  const messages = PROVIDER_LIMIT_MESSAGES[agent];
   if (blocked) {
     if (state.active) return;
     state.active = true;
-    await dispatch("claude_limit", CLAUDE_LIMIT_MESSAGE, db, transports);
+    await dispatch(messages.event, messages.blocked, db, transports);
   } else {
     if (!state.active) return;
     state.active = false;
-    await dispatch("claude_limit", CLAUDE_LIMIT_CLEARED_MESSAGE, db, transports);
+    await dispatch(messages.event, messages.cleared, db, transports);
   }
 }
 

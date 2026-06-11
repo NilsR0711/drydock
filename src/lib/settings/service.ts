@@ -38,6 +38,9 @@ export const settingsSchema = z.object({
   // parks in `waiting_limit` and resumes automatically once the window resets,
   // instead of landing in needs_human. Off restores the pre-#166 behavior.
   claudeLimitAutoWait: z.boolean().default(true),
+  // Auto-wait on Codex usage limits (issue #167, ADR 030): the same park-and-
+  // resume treatment for OpenAI/ChatGPT-plan limits hit by the Codex CLI.
+  codexLimitAutoWait: z.boolean().default(true),
   // Global kill-switch for opt-in release management (issue #59, ADR 028). Off by
   // default; both this and a repo's own `releaseEnabled` must be on for the
   // release pipeline to run for that repo. Cutting a public release is hard to

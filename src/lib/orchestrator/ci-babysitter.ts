@@ -1,9 +1,8 @@
-import { WAITABLE_LIMIT_KINDS } from "@/lib/agents/types";
+import { type AgentId, WAITABLE_LIMIT_KINDS } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import type { Job } from "@/lib/db/schema";
 import { followupIssues } from "@/lib/db/schema";
 import type { ForgeClient, PrCheck } from "@/lib/forge/types";
-import { getSettings } from "@/lib/settings/service";
 import type { SessionLimitInfo } from "./agent-session";
 import { classifyFailure } from "./ci-failure-classifier";
 import { buildFixPrompt, DEFAULT_EVIDENCE_LINES, extractEvidence } from "./ci-fix-prompt";
@@ -23,7 +22,12 @@ import {
   voidHealingAttempt,
 } from "./ci-healing";
 import { getJob, recordEvent, transitionJob } from "./jobs";
-import { claudeLimitBlocked, clearProviderLimit, latchProviderLimit } from "./provider-limit";
+import {
+  agentLimitBlocked,
+  clearProviderLimit,
+  latchProviderLimit,
+  limitAutoWaitEnabled,
+} from "./provider-limit";
 
 export type CiOutcome = "pending" | "passed" | "failed";
 
@@ -115,16 +119,16 @@ export interface BabysitterDeps {
    */
   mergeGateMs?: number;
   /**
-   * Whether the job's provider is currently limit-latched (issue #166); while
-   * true, CI fixes are deferred (within the CI wait budget) instead of bouncing
-   * off the spawn guard. Defaults to the Claude latch for claude jobs.
+   * Whether the job's provider is currently limit-latched (issues #166/#167);
+   * while true, CI fixes are deferred (within the CI wait budget) instead of
+   * bouncing off the spawn guard. Defaults to the job's own agent latch.
    */
   limitBlocked?: () => boolean;
 }
 
-/** Default latch probe: only claude jobs are gated today (issue #166). */
+/** Default latch probe: the job's own agent latch, toggle-gated (issues #166/#167). */
 function defaultLimitBlocked(job: Job, db: DB): () => boolean {
-  return () => job.agent === "claude" && !!claudeLimitBlocked(db);
+  return () => !!agentLimitBlocked(job.agent as AgentId, db);
 }
 
 /**
@@ -151,7 +155,7 @@ function handleFixLimit(
     recordEvent(job.id, "status", { reason: message, prNumber }, db);
     return { job: transitionJob(job.id, "needs_human", { errorMessage: message }, db), done: true };
   }
-  if (!WAITABLE_LIMIT_KINDS.includes(limit.kind) || !getSettings(db).claudeLimitAutoWait) {
+  if (!WAITABLE_LIMIT_KINDS.includes(limit.kind) || !limitAutoWaitEnabled(limit.agent, db)) {
     return null;
   }
   // A latch bounce is not a fresh strike — the window is already recorded.
@@ -391,7 +395,7 @@ export async function ciBabysitter(
       return transitionJob(job.id, "needs_human", { errorMessage: failure }, db);
     }
     // A successful claude fix ends the provider-limit streak (issue #166).
-    if (job.agent === "claude") clearProviderLimit("claude", db);
+    clearProviderLimit(job.agent, db);
     job = transitionJob(job.id, "ci_running", {}, db);
     // loop again to re-poll the now-updated PR
   }
@@ -651,7 +655,7 @@ async function autoHealLoop(
           failure = resumeFailureReason(fixOutcome);
           if (!failure) {
             // A successful claude fix ends the provider-limit streak.
-            if (job.agent === "claude") clearProviderLimit("claude", db);
+            clearProviderLimit(job.agent, db);
             transitionHealingSession(session.id, "awaiting_ci", db);
             job = transitionJob(job.id, "ci_running", {}, db);
           }

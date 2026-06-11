@@ -799,6 +799,57 @@ describe("provider limit detection (issue #166)", () => {
     expect(captured.cmd).toBe("claude");
   });
 
+  it("refuses to spawn a codex session while the codex latch is blocking (issue #167)", async () => {
+    latchProviderLimit(
+      { agent: "codex", kind: "usage_limit", rawSnippet: "usage limit", resetAt: nowSec() + 3600 },
+      db,
+    );
+    const job = createJob({ repoId, issueNumber: 30, agent: "codex" }, db);
+    const captured: Captured = {};
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner("", captured, 0),
+    });
+    expect(captured.cmd).toBeUndefined(); // no subprocess was started
+    expect(res.exitCode).not.toBe(0);
+    expect(res.limit?.kind).toBe("usage_limit");
+    expect(res.limit?.agent).toBe("codex");
+    expect(res.limit?.latched).toBe(true);
+  });
+
+  it("still spawns claude sessions while codex is latched", async () => {
+    latchProviderLimit(
+      { agent: "codex", kind: "usage_limit", rawSnippet: "usage limit", resetAt: nowSec() + 3600 },
+      db,
+    );
+    const job = createJob({ repoId, issueNumber: 31, agent: "claude" }, db);
+    const captured: Captured = {};
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner("", captured, 0),
+    });
+    expect(captured.cmd).toBe("claude");
+    expect(res.limit).toBeUndefined();
+  });
+
+  it("spawns codex normally when the codex auto-wait toggle is off", async () => {
+    latchProviderLimit(
+      { agent: "codex", kind: "usage_limit", rawSnippet: "usage limit", resetAt: nowSec() + 3600 },
+      db,
+    );
+    saveSettings({ codexLimitAutoWait: false }, db);
+    const job = createJob({ repoId, issueNumber: 32, agent: "codex" }, db);
+    const captured: Captured = {};
+    await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner(codexFixture(), captured),
+    });
+    expect(captured.cmd).toBe("codex");
+  });
+
   it("detects limits and honours the spawn guard on the resume path too", async () => {
     const job = createJob({ repoId, issueNumber: 28, agent: "claude" }, db);
     const runner: StreamRunner = (_c, _a, _w, cb: StreamCallbacks): StreamHandle => {

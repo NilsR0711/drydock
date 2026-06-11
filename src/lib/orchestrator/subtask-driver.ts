@@ -1,4 +1,4 @@
-import type { AgentProvider } from "@/lib/agents/types";
+import { type AgentProvider, WAITABLE_LIMIT_KINDS } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import type { IssueSubtask, Repo } from "@/lib/db/schema";
 import type { CommandRunner } from "@/lib/exec/runner";
@@ -12,6 +12,7 @@ import {
 import { ensureSubtasks, listSubtasks, transitionSubtask } from "@/lib/issues/subtasks";
 import { logError } from "@/lib/log/logger";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
+import { latchProviderLimit, limitAutoWaitEnabled, ProviderLimitError } from "./provider-limit";
 import type { SubtaskStatus } from "./subtask-state";
 
 /**
@@ -63,7 +64,9 @@ function subtaskPrompt(input: DecomposeInput): string {
  * (issue #49) so a Codex repo decomposes via `codex exec` and a Claude repo via
  * `claude -p` — never a hardcoded Claude shape. Best-effort: a non-zero exit or
  * unparseable output yields no subtasks (the issue is then worked whole) rather
- * than an error.
+ * than an error — except a waitable provider limit (issue #167), which latches
+ * the agent and throws {@link ProviderLimitError} so the caller defers instead
+ * of stamping the issue as non-decomposable.
  */
 export function buildSubtaskGenerator(deps: {
   provider: AgentProvider;
@@ -75,7 +78,7 @@ export function buildSubtaskGenerator(deps: {
   runner?: CommandRunner;
 }): SubtaskGenerator {
   return async (input) => {
-    const { text, exitCode } = await runOneShotAndRecordCost({
+    const { text, exitCode, stderr } = await runOneShotAndRecordCost({
       provider: deps.provider,
       command: deps.command,
       model: deps.model,
@@ -86,7 +89,17 @@ export function buildSubtaskGenerator(deps: {
       runner: deps.runner,
       db: deps.db,
     });
-    if (exitCode !== 0) return [];
+    if (exitCode !== 0) {
+      const limit = deps.provider.classifyFailure?.({ exitCode, stderr, resultText: text });
+      if (limit && WAITABLE_LIMIT_KINDS.includes(limit.kind)) {
+        const db = deps.db ?? getDb();
+        if (limitAutoWaitEnabled(deps.provider.id, db)) {
+          latchProviderLimit(limit, db);
+          throw new ProviderLimitError(limit);
+        }
+      }
+      return [];
+    }
     return parseSubtaskList(text);
   };
 }
@@ -128,6 +141,10 @@ export async function decomposeRepo(
         await forge.commentIssue(detail.number, `${SUBTASK_COMMENT_HEADER}\n\n${checklist}`);
       }
     } catch (err) {
+      // A waitable provider limit aborts the whole sweep (issue #167): the
+      // agent is latched, every remaining candidate would bounce too, and the
+      // un-stamped issue is retried once the latch clears.
+      if (err instanceof ProviderLimitError) throw err;
       logError(`[subtasks] decomposition failed for ${repo.name}#${candidate.number}`, err);
     }
   }

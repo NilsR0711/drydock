@@ -3,6 +3,7 @@ import { createDb, type DB } from "@/lib/db/client";
 import type { Job, Repo } from "@/lib/db/schema";
 import type { ForgeClient, ReviewThread } from "@/lib/forge/types";
 import { createJob, transitionJob } from "@/lib/orchestrator/jobs";
+import { latchProviderLimit } from "@/lib/orchestrator/provider-limit";
 import { buildAgentApply, driveReviewFeedback } from "@/lib/orchestrator/review-feedback-driver";
 import { addRepo } from "@/lib/repos/service";
 
@@ -65,6 +66,27 @@ describe("driveReviewFeedback — selection", () => {
     await driveReviewFeedback({ db, forgeFor: () => forgeStub(true), processJob });
     expect(processJob).toHaveBeenCalledOnce();
     expect(processJob.mock.calls[0]?.[1]).toMatchObject({ id: job.id, prNumber: 5 });
+  });
+
+  it("skips jobs whose agent is limit-latched so side sessions never bounce (issue #167)", async () => {
+    const repo = addRepo({ path: "/r", name: "r", autoReviewFeedback: true }, db);
+    const codexJob = createJob({ repoId: repo.id, issueNumber: 1, agent: "codex" }, db);
+    transitionJob(codexJob.id, "working", {}, db);
+    transitionJob(codexJob.id, "ci_running", { prNumber: 5, branch: "b1" }, db);
+    const claudeJob = jobWithPr(repo, 2, 6);
+    latchProviderLimit(
+      {
+        agent: "codex",
+        kind: "usage_limit",
+        rawSnippet: "limit",
+        resetAt: Math.floor(Date.now() / 1000) + 3600,
+      },
+      db,
+    );
+    const processJob = vi.fn<(repo: Repo, job: Job) => Promise<void>>(async () => undefined);
+    await driveReviewFeedback({ db, forgeFor: () => forgeStub(true), processJob });
+    expect(processJob).toHaveBeenCalledOnce();
+    expect(processJob.mock.calls[0]?.[1]).toMatchObject({ id: claudeJob.id });
   });
 
   it("isolates a per-job failure so the sweep continues", async () => {

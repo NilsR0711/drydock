@@ -11,6 +11,8 @@ export interface OneShotResult {
   text: string;
   exitCode: number;
   costUsd: number;
+  /** The CLI's stderr output, retained for provider-limit classification (issue #167). */
+  stderr: string;
 }
 
 /**
@@ -48,7 +50,7 @@ export async function runOneShotAndRecordCost(opts: {
     const res = cmdOpts
       ? await runner(opts.command, plainArgs, opts.cwd, cmdOpts)
       : await runner(opts.command, plainArgs, opts.cwd);
-    return { text: res.stdout, exitCode: res.exitCode, costUsd: 0 };
+    return { text: res.stdout, exitCode: res.exitCode, costUsd: 0, stderr: res.stderr };
   }
 
   const res = cmdOpts
@@ -82,5 +84,5 @@ export async function runOneShotAndRecordCost(opts: {
       .run();
   }
 
-  return { text, exitCode: res.exitCode, costUsd };
+  return { text, exitCode: res.exitCode, costUsd, stderr: res.stderr };
 }
