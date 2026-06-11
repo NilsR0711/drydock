@@ -20,7 +20,8 @@ describe("agent registry", () => {
   it("validates agent ids", () => {
     expect(isAgentId("claude")).toBe(true);
     expect(isAgentId("codex")).toBe(true);
+    expect(isAgentId("openrouter")).toBe(true);
     expect(isAgentId("gemini")).toBe(false);
-    expect(AGENT_IDS).toEqual(["claude", "codex"]);
+    expect(AGENT_IDS).toEqual(["claude", "codex", "openrouter"]);
   });
 });

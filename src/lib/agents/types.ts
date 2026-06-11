@@ -1,7 +1,10 @@
 import type { ParsedEvent, ParseError } from "@/lib/stream/parser";
 
-/** Coding agents Drydock can drive. Each maps to a CLI and an AgentProvider. */
-export type AgentId = "claude" | "codex";
+/**
+ * Coding agents Drydock can drive. claude/codex map to local CLIs; openrouter
+ * talks to the hosted OpenRouter API over HTTP (issue #169, ADR 032).
+ */
+export type AgentId = "claude" | "codex" | "openrouter";
 
 /**
  * Incremental, stateful parser over an agent CLI's stdout stream. Both the
@@ -100,6 +103,13 @@ export interface ClassifyFailureInput {
  */
 export interface AgentProvider {
   readonly id: AgentId;
+  /**
+   * How the provider executes (issue #169): "cli" spawns a local binary and
+   * parses its stdout; "http" talks to a hosted API — the CLI arg/parser
+   * methods are unavailable and call sites must dispatch before using them.
+   * Omitted means "cli".
+   */
+  readonly kind?: "cli" | "http";
   /** Human-readable name for the UI. */
   readonly label: string;
   /** CLI binary name used when settings provide no explicit path. */

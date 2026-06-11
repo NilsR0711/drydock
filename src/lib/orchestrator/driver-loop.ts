@@ -49,6 +49,7 @@ const costLimitState: EdgeState = { active: false };
 const providerLimitStates: Record<AgentId, EdgeState> = {
   claude: { active: false },
   codex: { active: false },
+  openrouter: { active: false },
 };
 
 export interface DriveTickDeps {

@@ -317,6 +317,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               <AgentSelect
                 value={auditAgent}
                 onChange={(v) => {
+                  if (v === "openrouter") return; // PR audits run on the CLI agents only
                   const nextModel = defaultModelForAgent(v);
                   setAuditAgent(v);
                   setAuditModel(nextModel);

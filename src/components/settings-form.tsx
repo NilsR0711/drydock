@@ -231,7 +231,12 @@ export function SettingsForm({ initial }: { initial: Settings }) {
             <Field label="Default agent" hint="Used when a repo has none set.">
               <AgentSelect
                 value={s.defaultAgent}
-                onChange={(v: AgentId) => set("defaultAgent", v)}
+                onChange={(v: AgentId) => {
+                  // The global default stays a CLI agent; OpenRouter is chosen
+                  // per repo or job (issue #169).
+                  if (v === "openrouter") return;
+                  set("defaultAgent", v);
+                }}
               />
             </Field>
             <Field label="Default model" hint="Used when a repo has none set.">

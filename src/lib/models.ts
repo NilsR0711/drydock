@@ -32,6 +32,9 @@ export function modelsForAgent(agent: AgentId): ModelOption[] {
 
 /** First (preferred) model for an agent; used when switching agents in the UI. */
 export function defaultModelForAgent(agent: AgentId): string {
+  // OpenRouter has no static list — its models come from the synced catalog
+  // and the effective default resolves from settings at call time (issue #169).
+  if (agent === "openrouter") return "";
   return modelsForAgent(agent)[0]?.id ?? DEFAULT_MODEL;
 }
 

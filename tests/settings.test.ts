@@ -75,6 +75,7 @@ describe("settings", () => {
       "cost_limit",
       "claude_limit",
       "codex_limit",
+      "openrouter_limit",
       "automation_paused",
     ]);
   });
