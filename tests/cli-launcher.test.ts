@@ -83,6 +83,55 @@ describe("parseArgs", () => {
   it("lets --help take precedence over `update`", () => {
     expect(parseArgs(["update", "--help"])).toEqual({ mode: "help" });
   });
+
+  it("recognises an explicit `serve` subcommand with the usual flags", () => {
+    expect(parseArgs(["serve"])).toEqual({
+      mode: "serve",
+      host: "127.0.0.1",
+      port: 3737,
+      open: false,
+    });
+    expect(parseArgs(["serve", "--port", "8080"]).port).toBe(8080);
+  });
+
+  it("recognises `backup` without a path", () => {
+    expect(parseArgs(["backup"])).toEqual({ mode: "backup", path: undefined });
+  });
+
+  it("recognises `backup` with a target path", () => {
+    expect(parseArgs(["backup", "/tmp/snap.db"])).toEqual({ mode: "backup", path: "/tmp/snap.db" });
+  });
+
+  it("rejects extra arguments after `backup <path>`", () => {
+    expect(() => parseArgs(["backup", "a", "b"])).toThrow(/b/);
+  });
+
+  it("recognises `restore` with a backup path", () => {
+    expect(parseArgs(["restore", "/tmp/snap.db"])).toEqual({
+      mode: "restore",
+      path: "/tmp/snap.db",
+    });
+  });
+
+  it("rejects `restore` without a backup path", () => {
+    expect(() => parseArgs(["restore"])).toThrow(/path/i);
+  });
+
+  it("recognises `doctor` and rejects extra arguments", () => {
+    expect(parseArgs(["doctor"])).toEqual({ mode: "doctor" });
+    expect(() => parseArgs(["doctor", "now"])).toThrow(/now/);
+  });
+
+  it("recognises `service install` and `service uninstall`", () => {
+    expect(parseArgs(["service", "install"])).toEqual({ mode: "service", action: "install" });
+    expect(parseArgs(["service", "uninstall"])).toEqual({ mode: "service", action: "uninstall" });
+  });
+
+  it("rejects `service` without or with an unknown action", () => {
+    expect(() => parseArgs(["service"])).toThrow(/install|uninstall/);
+    expect(() => parseArgs(["service", "bogus"])).toThrow(/bogus/);
+    expect(() => parseArgs(["service", "install", "extra"])).toThrow(/extra/);
+  });
 });
 
 describe("isMainModule", () => {
