@@ -147,3 +147,17 @@ describe("CodeRabbit findings on PR #187 (issue #169)", () => {
     expect(Date.now() - started).toBeLessThan(5000);
   }, 10_000);
 });
+
+describe("CodeRabbit re-review on PR #187 (issue #169)", () => {
+  it("skips run_command outright when the session budget is exhausted", async () => {
+    const started = Date.now();
+    const res = await executeOpenRouterTool(
+      { id: "t", name: "run_command", arguments: JSON.stringify({ command: "sleep 30" }) },
+      cwd,
+      { timeoutMs: 0 },
+    );
+    expect(res.isError).toBe(true);
+    expect(res.content).toMatch(/budget/i);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+});

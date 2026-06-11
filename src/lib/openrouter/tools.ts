@@ -211,8 +211,13 @@ export const executeOpenRouterTool: ToolExecutor = async (call, cwd, opts) => {
         const { command, timeout_seconds } = runArgs.parse(args);
         // The session's remaining wall-clock budget caps the command's own
         // timeout, so a long tool run can never outlive the session deadline.
+        // An exhausted budget skips the spawn entirely (defense in depth — the
+        // session loop never hands down a non-positive budget itself).
+        if (opts?.timeoutMs !== undefined && opts.timeoutMs <= 0) {
+          return { content: "command skipped: session budget exhausted", isError: true };
+        }
         const budgetSec =
-          opts?.timeoutMs !== undefined && opts.timeoutMs > 0
+          opts?.timeoutMs !== undefined
             ? Math.max(1, Math.ceil(opts.timeoutMs / 1000))
             : Number.POSITIVE_INFINITY;
         const timeoutSec = Math.min(timeout_seconds ?? DEFAULT_COMMAND_TIMEOUT_SEC, budgetSec);
