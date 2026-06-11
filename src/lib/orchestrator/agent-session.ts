@@ -189,11 +189,19 @@ export async function spawnAgentSession(
   // Per-job cost ceiling (issue #57): price the accumulated usage live and trip
   // a guard that aborts the subprocess the first time it crosses the cap. Cost
   // comes from the stream when the agent reports it, otherwise the token
-  // estimate — the same source used for the final persisted cost below.
+  // estimate — the same source used for the final persisted cost below. Cache
+  // tokens are included: claude sessions are cache-dominated, so pricing only
+  // non-cache input/output would see a fraction of the real spend.
   const liveCost = () =>
     parser.costUsd > 0
       ? parser.costUsd
-      : provider.estimateCost(model, parser.totalInputTokens, parser.totalOutputTokens);
+      : provider.estimateCost(
+          model,
+          parser.totalInputTokens,
+          parser.totalOutputTokens,
+          parser.totalCacheCreationInputTokens,
+          parser.totalCacheReadInputTokens,
+        );
   const guard =
     deps.costCapUsd && deps.costCapUsd > 0 ? makeCostGuard(deps.costCapUsd, liveCost) : undefined;
 
@@ -237,7 +245,13 @@ export async function spawnAgentSession(
   const costUsd =
     parser.costUsd > 0
       ? parser.costUsd
-      : provider.estimateCost(model, parser.totalInputTokens, parser.totalOutputTokens);
+      : provider.estimateCost(
+          model,
+          parser.totalInputTokens,
+          parser.totalOutputTokens,
+          parser.totalCacheCreationInputTokens,
+          parser.totalCacheReadInputTokens,
+        );
 
   db.update(jobs)
     .set({
@@ -279,7 +293,11 @@ export async function resumeAgentSession(
   const broker = deps.broker ?? getBroker();
   const provider = deps.provider ?? getAgentProvider(job.agent);
   const command = deps.command ?? provider.defaultCommand;
-  const model = job.model ?? provider.resumeModel;
+  // Price what is actually executed: resumes always run the provider's resume
+  // model (see the args below), never the job's start model. Pricing job.model
+  // here would under-/over-count every estimated resume (codex has no stream
+  // cost at all, so the estimate is its only cost source).
+  const model = provider.resumeModel;
   const parser = provider.createParser();
   parser.onParseError = (error) => broker.publish(job.id, { type: "parse_error", payload: error });
   const prompt = renderTemplate(resolveTemplateContent(job.repoId, TEMPLATE_NAMES.ciFix, db), {
@@ -298,7 +316,13 @@ export async function resumeAgentSession(
     const thisInvocation =
       parser.costUsd > 0
         ? parser.costUsd
-        : provider.estimateCost(model, parser.totalInputTokens, parser.totalOutputTokens);
+        : provider.estimateCost(
+            model,
+            parser.totalInputTokens,
+            parser.totalOutputTokens,
+            parser.totalCacheCreationInputTokens,
+            parser.totalCacheReadInputTokens,
+          );
     return priorCostUsd + thisInvocation;
   };
   const guard =
@@ -308,7 +332,7 @@ export async function resumeAgentSession(
     ? provider.buildResumeArgs({
         prompt,
         sessionId,
-        model: provider.resumeModel,
+        model,
         maxTurns: provider.resumeMaxTurns,
       })
     : null;
@@ -317,7 +341,7 @@ export async function resumeAgentSession(
     resumeArgs ??
     provider.buildStartArgs({
       prompt,
-      model: provider.resumeModel,
+      model,
       maxTurns: provider.resumeMaxTurns,
     });
 
@@ -357,7 +381,13 @@ export async function resumeAgentSession(
   const costUsd =
     parser.costUsd > 0
       ? parser.costUsd
-      : provider.estimateCost(model, parser.totalInputTokens, parser.totalOutputTokens);
+      : provider.estimateCost(
+          model,
+          parser.totalInputTokens,
+          parser.totalOutputTokens,
+          parser.totalCacheCreationInputTokens,
+          parser.totalCacheReadInputTokens,
+        );
 
   // Persist usage additively: a resume continues the same job, so its cost and
   // tokens accumulate on top of whatever the initial session already recorded.

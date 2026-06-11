@@ -17,6 +17,10 @@ export interface StreamParser {
   readonly model?: string;
   readonly totalInputTokens: number;
   readonly totalOutputTokens: number;
+  /** Cache-write tokens accumulated from the stream; 0 for agents without cache reporting. */
+  readonly totalCacheCreationInputTokens: number;
+  /** Cache-read tokens accumulated from the stream; 0 for agents without cache reporting. */
+  readonly totalCacheReadInputTokens: number;
   /** Cost in USD reported by the stream, or 0 when the agent omits it. */
   readonly costUsd: number;
   /**
@@ -83,6 +87,17 @@ export interface AgentProvider {
   buildStreamOneShotArgs(opts: OneShotArgsOptions): string[] | null;
   /** Create a fresh incremental parser for this agent's stdout. */
   createParser(): StreamParser;
-  /** Estimate cost in USD from token counts (used when the stream omits it). */
-  estimateCost(model: string | null | undefined, inputTokens: number, outputTokens: number): number;
+  /**
+   * Estimate cost in USD from token counts (used when the stream omits it).
+   * Cache token counts are optional; providers without cache pricing (codex)
+   * ignore them. Claude streams are cache-dominated, so omitting them would
+   * undercount the live cost-cap guard and the persisted fallback cost.
+   */
+  estimateCost(
+    model: string | null | undefined,
+    inputTokens: number,
+    outputTokens: number,
+    cacheCreationTokens?: number,
+    cacheReadTokens?: number,
+  ): number;
 }

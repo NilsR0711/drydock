@@ -172,6 +172,13 @@ export class CodexStreamParser {
   model?: string;
   totalInputTokens = 0;
   totalOutputTokens = 0;
+  /**
+   * Codex reports `cached_input_tokens` as part of `input_tokens` and its
+   * pricing table carries no cache rates, so cache totals stay 0 — they exist
+   * to satisfy the StreamParser contract used for claude cache pricing.
+   */
+  totalCacheCreationInputTokens = 0;
+  totalCacheReadInputTokens = 0;
   /** Codex omits USD cost from its stream; always 0 (cost is estimated). */
   costUsd = 0;
   /** Invoked for every line that fails to parse; the line is then skipped. */

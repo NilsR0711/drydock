@@ -177,6 +177,81 @@ describe("spawnAgentSession", () => {
     expect(aborted).toBe(false);
   });
 
+  // Claude usage event carrying cache tokens alongside regular output tokens.
+  // Claude sessions are cache-dominated: `input_tokens` excludes cached input,
+  // so an estimate ignoring cache tokens sees a fraction of the real spend.
+  function assistantCacheUsage(outputTokens: number, cacheWrite: number, cacheRead: number) {
+    return `${JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "working" }],
+        usage: {
+          output_tokens: outputTokens,
+          cache_creation_input_tokens: cacheWrite,
+          cache_read_input_tokens: cacheRead,
+        },
+      },
+    })}\n`;
+  }
+
+  // Prices output AND cache-write tokens at $0.001, cache reads at $0.0001.
+  const cachePricedProvider: AgentProvider = {
+    ...codexProvider,
+    createParser: () => new StreamJsonParser(),
+    estimateCost: (_m, _in, out, cacheWrite = 0, cacheRead = 0) =>
+      out * 0.001 + cacheWrite * 0.001 + cacheRead * 0.0001,
+  };
+
+  it("trips the per-job cost cap on cache-dominated traffic", async () => {
+    const job = createJob({ repoId, issueNumber: 12, agent: "codex" }, db);
+    let aborted = false;
+    const hangingRunner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks) => {
+      // 10 output tok ($0.01) + 990 cache-write tok ($0.99): only over the
+      // $0.50 cap when cache tokens reach the estimate.
+      cb.onStdout(assistantCacheUsage(10, 990, 0));
+      let resolveDone: (code: number) => void;
+      const done = new Promise<number>((res) => {
+        resolveDone = res;
+      });
+      return {
+        done,
+        abort: () => {
+          aborted = true;
+          resolveDone(0); // resolve done when aborted so drain completes immediately
+        },
+      };
+    };
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      provider: cachePricedProvider,
+      runner: hangingRunner,
+      costCapUsd: 0.5,
+    });
+    expect(res.costExceeded).toBe(true);
+    expect(aborted).toBe(true);
+  });
+
+  it("includes cache tokens in the fallback cost when no result event arrives", async () => {
+    const job = createJob({ repoId, issueNumber: 13, agent: "codex" }, db);
+    const runner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks): StreamHandle => {
+      // Session "crashes" after one usage event — no result event, so the
+      // persisted cost is the token estimate and must price cache traffic:
+      // 100 out ($0.10) + 200 cache-write ($0.20) + 300 cache-read ($0.03).
+      cb.onStdout(assistantCacheUsage(100, 200, 300));
+      return { done: Promise.resolve(1), abort: () => {} };
+    };
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      provider: cachePricedProvider,
+      runner,
+    });
+    expect(res.costUsd).toBeCloseTo(0.33, 5);
+    expect(getJob(job.id, db)?.costUsd).toBeCloseTo(0.33, 5);
+  });
+
   it("treats a zero/unset cap as no per-job ceiling (issue #57)", async () => {
     const job = createJob({ repoId, issueNumber: 10, agent: "codex" }, db);
     let aborted = false;
@@ -284,6 +359,42 @@ describe("resumeAgentSession fallback", () => {
     });
     expect(res.costExceeded).toBe(true);
     expect(aborted).toBe(true);
+  });
+
+  it("prices a resume at the provider's resume model, not the job's start model", async () => {
+    // Resumes always execute provider.resumeModel (see buildResumeArgs), so the
+    // estimate must price that model too — pricing job.model would under- or
+    // over-count every estimated resume (codex never reports stream cost, so
+    // the estimate is its only cost source).
+    const pricedModels: (string | null | undefined)[] = [];
+    const provider: AgentProvider = {
+      ...codexProvider,
+      resumeModel: "resume-model",
+      createParser: () => new StreamJsonParser(),
+      estimateCost: (m, _in, out) => {
+        pricedModels.push(m);
+        return out * 0.001;
+      },
+    };
+    const job = createJob({ repoId, issueNumber: 14, agent: "codex", model: "start-model" }, db);
+    const captured: Captured = {};
+    const assistant = `${JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "fixing" }],
+        usage: { output_tokens: 10 },
+      },
+    })}\n`;
+    await resumeAgentSession(getJob(job.id, db) as never, "th-1", "CI log", "/work", {
+      db,
+      broker: new LogBroker(db),
+      provider,
+      runner: captureRunner(assistant, captured),
+    });
+    expect(captured.args).toContain("resume-model");
+    expect(pricedModels.length).toBeGreaterThan(0);
+    expect(pricedModels.every((m) => m === "resume-model")).toBe(true);
   });
 
   it("bounds a never-resolving resume runner and aborts it (issue #47)", async () => {
