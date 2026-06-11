@@ -4,8 +4,10 @@ import { type DB, getDb } from "@/lib/db/client";
 import { jobs, type Repo, repos } from "@/lib/db/schema";
 import { isValidForgeBaseUrl } from "@/lib/forge/url-guard";
 import { isKnownModelId } from "@/lib/models";
+import { getOpenRouterModel, isModelAvailable } from "@/lib/openrouter/catalog";
 import { TERMINAL_STATES } from "@/lib/orchestrator/state-machine";
 import { AGENT_INSTRUCTIONS_MAX_CHARS } from "@/lib/repos/agent-instructions";
+import { getSettings } from "@/lib/settings/service";
 
 /**
  * A label/author list column: callers pass a `string[]`, but we persist it as a
@@ -26,12 +28,11 @@ export const repoInputSchema = z.object({
   queueLabel: z.string().min(1).default("drydock:queue"),
   workingLabel: z.string().min(1).default("drydock:working"),
   needsHumanLabel: z.string().min(1).default("drydock:needs-human"),
-  defaultModel: z
-    .string()
-    .min(1)
-    .refine(isKnownModelId, { message: "unknown model id" })
-    .default("claude-opus-4-8"),
-  agent: z.enum(["claude", "codex"]).default("claude"),
+  // Model ids are validated against the agent after parsing (see
+  // assertModelAllowedForAgent): CLI agents check the static MODELS list,
+  // openrouter checks the synced catalog (issue #169).
+  defaultModel: z.string().min(1).default("claude-opus-4-8"),
+  agent: z.enum(["claude", "codex", "openrouter"]).default("claude"),
   platform: z.enum(["github", "gitlab"]).default("github"),
   // A self-hosted forge API base URL. Validated as an absolute http(s) URL so a
   // bogus/attacker-influenced scheme (file:, javascript:, relative) can never be
@@ -102,14 +103,67 @@ export const repoInputSchema = z.object({
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 
+/**
+ * Validate the agent/model pair (issue #169): CLI agents must use a model
+ * from the static MODELS list (issue #93); openrouter ids must exist in the
+ * synced catalog, still be available (not removed/expired), and honor the
+ * global free-models-only policy. Runs after Zod parsing because the check is
+ * cross-field and (for openrouter) needs the database.
+ */
+function assertModelAllowedForAgent(agent: string, model: string, db: DB): void {
+  if (agent === "openrouter") {
+    const row = getOpenRouterModel(model, db);
+    if (!row || !isModelAvailable(row)) {
+      throw new Error(
+        `OpenRouter model "${model}" is not in the synced catalog (or no longer available) — refresh the catalog in Settings or pick a different model`,
+      );
+    }
+    if (getSettings(db).openrouterFreeModelsOnly && !row.isFree) {
+      throw new Error(
+        `OpenRouter model "${model}" is not free and the free-models-only policy is enabled`,
+      );
+    }
+    return;
+  }
+  if (!isKnownModelId(model)) throw new Error("unknown model id");
+}
+
 export function addRepo(input: RepoInput, db: DB = getDb()): Repo {
   const data = repoInputSchema.parse(input);
+  assertModelAllowedForAgent(data.agent, data.defaultModel, db);
   const inserted = db.insert(repos).values(data).returning().get();
   return inserted;
 }
 
 export function updateRepo(id: number, input: Partial<RepoInput>, db: DB = getDb()): Repo {
-  const data = repoInputSchema.partial().parse(input);
+  const parsed = repoInputSchema.partial().parse(input);
+  // `.partial()` does not make `.default()`ed fields truly optional: Zod
+  // treats a defaulted field as already-optional and fills the default for
+  // every omitted key, so writing `parsed` verbatim would reset all defaulted
+  // columns on each partial update. Keep only the keys the caller sent —
+  // an omitted field must stay untouched (see the jsonStringArray contract).
+  const data = Object.fromEntries(
+    Object.entries(parsed).filter(
+      ([key]) => key in input && input[key as keyof RepoInput] !== undefined,
+    ),
+  ) as Partial<typeof parsed>;
+  // Re-validate the effective agent/model pair whenever either side changes,
+  // so switching agents can never leave the repo on a model the new agent
+  // cannot run (issue #169).
+  if (data.agent !== undefined || data.defaultModel !== undefined) {
+    const current = db.select().from(repos).where(eq(repos.id, id)).get();
+    if (!current) throw new Error(`repo ${id} not found`);
+    assertModelAllowedForAgent(
+      data.agent ?? current.agent,
+      data.defaultModel ?? current.defaultModel,
+      db,
+    );
+  }
+  if (Object.keys(data).length === 0) {
+    const current = db.select().from(repos).where(eq(repos.id, id)).get();
+    if (!current) throw new Error(`repo ${id} not found`);
+    return current;
+  }
   const updated = db.update(repos).set(data).where(eq(repos.id, id)).returning().get();
   if (!updated) throw new Error(`repo ${id} not found`);
   return updated;

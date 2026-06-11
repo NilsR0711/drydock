@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { listRepos, listReposWithStats } from "@/lib/db/queries";
-import { jobs } from "@/lib/db/schema";
+import { jobs, openrouterModels } from "@/lib/db/schema";
 import { repoAutomation } from "@/lib/repos/automation";
 import { addRepo, removeRepo, updateRepo } from "@/lib/repos/service";
+import { saveSettings } from "@/lib/settings/service";
 
 let db: DB;
 beforeEach(() => {
@@ -243,6 +244,39 @@ describe("repos service", () => {
   });
 });
 
+describe("updateRepo partial semantics", () => {
+  it("leaves omitted defaulted fields untouched on a partial update", () => {
+    const repo = addRepo(
+      {
+        path: "/p",
+        name: "p",
+        agent: "codex",
+        defaultModel: "gpt-5",
+        adrGating: true,
+        readyLabels: ["go"],
+        dailyCostLimitUsd: 42,
+      },
+      db,
+    );
+    const updated = updateRepo(repo.id, { mergeGateMinutes: 7 }, db);
+    expect(updated.mergeGateMinutes).toBe(7);
+    // None of these were part of the patch — they must keep their stored
+    // values instead of snapping back to the schema defaults.
+    expect(updated.agent).toBe("codex");
+    expect(updated.defaultModel).toBe("gpt-5");
+    expect(updated.adrGating).toBe(true);
+    expect(updated.readyLabels).toBe('["go"]');
+    expect(updated.dailyCostLimitUsd).toBe(42);
+  });
+
+  it("returns the repo unchanged for an empty patch", () => {
+    const repo = addRepo({ path: "/p", name: "p", agent: "codex", defaultModel: "gpt-5" }, db);
+    const updated = updateRepo(repo.id, {}, db);
+    expect(updated.agent).toBe("codex");
+    expect(updated.defaultModel).toBe("gpt-5");
+  });
+});
+
 describe("listReposWithStats", () => {
   it("counts active jobs and returns last 5 runs", () => {
     const repo = addRepo({ path: "/tmp/foo", name: "foo" }, db);
@@ -316,5 +350,85 @@ describe("PR audit settings (issue #168)", () => {
     );
     expect(() => addRepo({ path: "/b", name: "b", prAuditLanguage: "" }, db)).toThrow();
     expect(() => addRepo({ path: "/c", name: "c", prAuditLanguage: "not a code" }, db)).toThrow();
+  });
+});
+
+describe("openrouter repos (issue #169)", () => {
+  function seedModel(id: string, over: Record<string, unknown> = {}) {
+    db.insert(openrouterModels)
+      .values({
+        id,
+        name: id,
+        supportedParameters: '["tools"]',
+        supportsTools: true,
+        isFree: false,
+        syncedAt: 1,
+        ...over,
+      })
+      .run();
+  }
+
+  it("accepts an openrouter agent with an available catalog model", () => {
+    seedModel("meta-llama/llama-3.3-70b-instruct:free", { isFree: true });
+    const repo = addRepo(
+      {
+        path: "/or",
+        name: "or",
+        agent: "openrouter",
+        defaultModel: "meta-llama/llama-3.3-70b-instruct:free",
+      },
+      db,
+    );
+    expect(repo.agent).toBe("openrouter");
+    expect(repo.defaultModel).toBe("meta-llama/llama-3.3-70b-instruct:free");
+  });
+
+  it("rejects an openrouter model missing from the synced catalog", () => {
+    expect(() =>
+      addRepo({ path: "/or", name: "or", agent: "openrouter", defaultModel: "missing/model" }, db),
+    ).toThrow(/catalog/i);
+  });
+
+  it("rejects removed and expired catalog models", () => {
+    seedModel("legacy/gone", { removedAt: 1 });
+    seedModel("legacy/expired", { expirationDate: 1 });
+    expect(() =>
+      addRepo({ path: "/a", name: "a", agent: "openrouter", defaultModel: "legacy/gone" }, db),
+    ).toThrow(/catalog/i);
+    expect(() =>
+      addRepo({ path: "/b", name: "b", agent: "openrouter", defaultModel: "legacy/expired" }, db),
+    ).toThrow(/catalog/i);
+  });
+
+  it("enforces the global free-models-only policy at write time", () => {
+    saveSettings({ openrouterFreeModelsOnly: true }, db);
+    seedModel("openai/gpt-4o-mini");
+    expect(() =>
+      addRepo(
+        { path: "/or", name: "or", agent: "openrouter", defaultModel: "openai/gpt-4o-mini" },
+        db,
+      ),
+    ).toThrow(/free/i);
+  });
+
+  it("still rejects unknown CLI model ids (issue #93 regression)", () => {
+    expect(() =>
+      addRepo({ path: "/x", name: "x", defaultModel: "claude-nonexistent-99" }, db),
+    ).toThrow(/unknown model id/i);
+  });
+
+  it("revalidates the model when an update switches the agent", () => {
+    seedModel("anthropic/claude-fable-5");
+    const repo = addRepo({ path: "/or", name: "or" }, db);
+    // The repo's claude default model is not an OpenRouter catalog id.
+    expect(() => updateRepo(repo.id, { agent: "openrouter" }, db)).toThrow(/catalog/i);
+    const ok = updateRepo(
+      repo.id,
+      { agent: "openrouter", defaultModel: "anthropic/claude-fable-5" },
+      db,
+    );
+    expect(ok.agent).toBe("openrouter");
+    // And back: switching to codex with an OpenRouter id must fail too.
+    expect(() => updateRepo(repo.id, { agent: "codex" }, db)).toThrow(/unknown model id/i);
   });
 });
