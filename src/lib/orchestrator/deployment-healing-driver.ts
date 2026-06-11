@@ -103,15 +103,21 @@ async function monitorRepo(
     if (job.status !== "merged" || job.prNumber == null) continue;
     const finishedMs = (job.finishedAt ?? job.createdAt) * 1000;
     if (now() - finishedMs > budgets.monitorWindowMs) continue; // too old to monitor
-    let headSha: string;
+    // Monitor the commit that actually landed on the default branch. PRs are
+    // squash-merged, so the PR head SHA never reaches the default branch and
+    // no deployment would ever match it; the merge (squash) commit is the one
+    // the platform deploys. Fall back to the head SHA only when the forge
+    // cannot resolve a merge commit.
+    let mergedSha: string;
     try {
-      headSha = await forge.prHeadSha(job.prNumber);
+      mergedSha =
+        (await forge.prMergeCommitSha?.(job.prNumber)) ?? (await forge.prHeadSha(job.prNumber));
     } catch (err) {
-      logError(`[deploy-heal] head sha lookup failed for job ${job.id}`, err);
+      logError(`[deploy-heal] merged sha lookup failed for job ${job.id}`, err);
       continue;
     }
-    if (deploymentSessionExists(job.id, headSha, db)) continue;
-    openDeploymentHealingSession(job.id, job.prNumber, adapter.id, headSha, db);
+    if (deploymentSessionExists(job.id, mergedSha, db)) continue;
+    openDeploymentHealingSession(job.id, job.prNumber, adapter.id, mergedSha, db);
   }
 
   // Phase B: advance every monitoring session for this repo.
@@ -217,10 +223,14 @@ async function defaultOpenFixPr(
 
   const wt: Worktree = await worktrees.prepareForNewBranch(repo, branch, `${job.id}-${short}`);
   try {
+    // sideSession: the monitored job is terminal (`merged`); a normal spawn
+    // would force an invalid `working` transition and throw before the agent
+    // ever starts, escalating every healing session instead of opening a PR.
     const result = await spawnAgentSession(job, deploymentFixPrompt(session, logs), wt.path, {
       db,
       provider,
       command,
+      sideSession: true,
     });
     if (result.exitCode !== 0) throw new Error(`${provider.label} exited non-zero`);
     await worktrees.commitAndPush(

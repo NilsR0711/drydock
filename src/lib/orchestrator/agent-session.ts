@@ -39,6 +39,15 @@ export interface AgentSessionDeps {
    * tests to avoid slow test runs when using hanging runners.
    */
   graceMs?: number;
+  /**
+   * Run this as an out-of-band side session (review feedback, deployment fix)
+   * rather than the job's main lifecycle run: the job state is left untouched
+   * (the forced `working` transition would throw for jobs past `working`, e.g.
+   * `ci_running` or `merged`), the recorded main session id is preserved so CI
+   * fixes can still resume it, and usage accumulates additively instead of
+   * replacing the main session's numbers.
+   */
+  sideSession?: boolean;
 }
 
 export interface AgentSessionResult {
@@ -183,8 +192,13 @@ export async function spawnAgentSession(
   const parser = provider.createParser();
   parser.onParseError = (error) => broker.publish(job.id, { type: "parse_error", payload: error });
 
-  if (job.status !== "working") transitionJob(job.id, "working", { model }, db);
-  else db.update(jobs).set({ model }).where(eq(jobs.id, job.id)).run();
+  // Out-of-band side sessions never touch the job lifecycle: forcing `working`
+  // would throw InvalidTransitionError for any job past `working` (the review
+  // feedback driver runs on ci_running jobs, deployment healing on merged ones).
+  if (!deps.sideSession) {
+    if (job.status !== "working") transitionJob(job.id, "working", { model }, db);
+    else db.update(jobs).set({ model }).where(eq(jobs.id, job.id)).run();
+  }
 
   // Per-job cost ceiling (issue #57): price the accumulated usage live and trip
   // a guard that aborts the subprocess the first time it crosses the cap. Cost
@@ -253,15 +267,29 @@ export async function spawnAgentSession(
           parser.totalCacheReadInputTokens,
         );
 
-  db.update(jobs)
-    .set({
-      sessionId: parser.sessionId,
-      totalInputTokens: parser.totalInputTokens,
-      totalOutputTokens: parser.totalOutputTokens,
-      costUsd,
-    })
-    .where(eq(jobs.id, job.id))
-    .run();
+  if (deps.sideSession) {
+    // A side session adds to the job's bill but must not clobber the main
+    // session id (CI fixes resume it) or reset the accumulated usage.
+    const current = db.select().from(jobs).where(eq(jobs.id, job.id)).get();
+    db.update(jobs)
+      .set({
+        totalInputTokens: (current?.totalInputTokens ?? 0) + parser.totalInputTokens,
+        totalOutputTokens: (current?.totalOutputTokens ?? 0) + parser.totalOutputTokens,
+        costUsd: (current?.costUsd ?? 0) + costUsd,
+      })
+      .where(eq(jobs.id, job.id))
+      .run();
+  } else {
+    db.update(jobs)
+      .set({
+        sessionId: parser.sessionId,
+        totalInputTokens: parser.totalInputTokens,
+        totalOutputTokens: parser.totalOutputTokens,
+        costUsd,
+      })
+      .where(eq(jobs.id, job.id))
+      .run();
+  }
 
   return {
     exitCode,

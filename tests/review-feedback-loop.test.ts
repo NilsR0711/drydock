@@ -7,8 +7,10 @@ import {
   type FeedbackApplyResult,
   feedbackMarker,
   listFeedbackItems,
+  openFeedbackItem,
   processPrFeedback,
   type ReviewForge,
+  transitionFeedbackItem,
 } from "@/lib/orchestrator/review-feedback";
 import { addRepo } from "@/lib/repos/service";
 
@@ -234,5 +236,71 @@ describe("processPrFeedback — idempotency", () => {
     expect(calls.updates).toHaveLength(1);
     expect(calls.updates[0]?.commentId).toBe("REPLY1");
     expect(calls.replies).toHaveLength(0);
+  });
+});
+
+describe("processPrFeedback — crash recovery", () => {
+  it("a throwing applyFeedback counts as a failed attempt instead of stranding the item", async () => {
+    const { forge } = fakeForge([thread({ id: "T1" })]);
+    const apply = vi.fn<() => Promise<FeedbackApplyResult>>(async () => {
+      throw new Error("apply blew up");
+    });
+    const summary = await processPrFeedback(job.id, 5, { forge, db, gate, applyFeedback: apply });
+    expect(summary.processed).toBe(1);
+    const [item] = listFeedbackItems(job.id, db);
+    // Re-queued for the next sweep, not silently stuck in in_progress.
+    expect(item?.status).toBe("queued");
+  });
+
+  it("re-queues an item stranded in in_progress by a crash and processes it again", async () => {
+    const { forge } = fakeForge([thread({ id: "T1" })]);
+    // Simulate a crash mid-apply on the very first attempt: the item sits in
+    // in_progress with nobody driving it. Before the recovery fix, every
+    // later sweep silently skipped it forever.
+    const stranded = openFeedbackItem(
+      {
+        jobId: job.id,
+        prNumber: 5,
+        threadId: "T1",
+        reviewer: "alice",
+        classification: "actionable",
+      },
+      db,
+    );
+    transitionFeedbackItem(stranded.id, "queued", {}, db);
+    transitionFeedbackItem(stranded.id, "in_progress", {}, db);
+
+    const summary = await processPrFeedback(job.id, 5, {
+      forge,
+      db,
+      gate,
+      applyFeedback: applyOk(),
+    });
+    expect(summary.resolved).toBe(1);
+    expect(listFeedbackItems(job.id, db)[0]?.status).toBe("resolved");
+  });
+
+  it("a recovered item whose attempts are exhausted is flagged, not retried forever", async () => {
+    const { forge } = fakeForge([thread({ id: "T1" })]);
+    // One failed sweep burns attempt 1 ...
+    await processPrFeedback(job.id, 5, {
+      forge,
+      db,
+      gate,
+      applyFeedback: async () => ({ ok: false, detail: "nope" }),
+    });
+    const stranded = listFeedbackItems(job.id, db)[0];
+    if (!stranded) throw new Error("expected an item");
+    // ... and a crash mid-apply burns attempt 2 (the default budget).
+    transitionFeedbackItem(stranded.id, "in_progress", {}, db);
+
+    const summary = await processPrFeedback(job.id, 5, {
+      forge,
+      db,
+      gate,
+      applyFeedback: applyOk(),
+    });
+    expect(summary.flagged).toBe(1);
+    expect(listFeedbackItems(job.id, db)[0]?.status).toBe("flagged");
   });
 });
