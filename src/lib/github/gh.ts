@@ -103,6 +103,14 @@ export const prCheckSchema = z.object({
 });
 export type PrCheck = z.infer<typeof prCheckSchema>;
 
+/**
+ * Merge readiness of an open PR/MR relative to its base branch (issue #181):
+ * `behind` means conflict-free but missing base commits (safe to update),
+ * `conflicted` needs a manual rebase, `unknown` means the forge has not
+ * computed mergeability yet (skip and re-probe on a later sweep).
+ */
+export type PrMergeState = "clean" | "behind" | "conflicted" | "unknown";
+
 /** A single comment within a PR review thread. */
 export interface ReviewThreadComment {
   /** GraphQL node id (used as a reaction subject). */
@@ -658,6 +666,59 @@ export class GhClient {
     const match = res.stdout.match(/\/pull\/(\d+)/);
     if (!match?.[1]) throw new GhError(`could not parse PR number from: ${res.stdout}`);
     return Number(match[1]);
+  }
+
+  /**
+   * Delete a remote branch via the git refs API (issue #181). Idempotent: a
+   * reference that no longer exists (e.g. deleted by hand or a prior sweep
+   * whose bookkeeping was lost) counts as success, so the janitor can safely
+   * retry. Branch segments are percent-encoded individually because the `/`
+   * separators are real path segments of the refs endpoint.
+   */
+  async deleteBranch(branch: string): Promise<void> {
+    const ref = branch.split("/").map(encodeURIComponent).join("/");
+    const res = await this.exec([
+      "api",
+      "-X",
+      "DELETE",
+      `repos/{owner}/{repo}/git/refs/heads/${ref}`,
+    ]);
+    if (res.exitCode !== 0 && !/reference does not exist|HTTP 404/i.test(res.stderr)) {
+      throw new GhError(res.stderr || "gh branch delete failed");
+    }
+  }
+
+  /**
+   * The PR's merge readiness relative to its base (issue #181). Conflicts win
+   * over everything; `BEHIND` is by definition conflict-free (a conflicting PR
+   * reports `DIRTY` instead), so it is safe to update. GitHub computes
+   * mergeability lazily — an `UNKNOWN` probe maps to `unknown` and the caller
+   * simply re-probes on a later sweep.
+   */
+  async prMergeState(prNumber: number): Promise<PrMergeState> {
+    const res = await this.exec([
+      "pr",
+      "view",
+      String(prNumber),
+      "--json",
+      "mergeable,mergeStateStatus",
+    ]);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr view failed");
+    const parsed = z
+      .object({ mergeable: z.string().default(""), mergeStateStatus: z.string().default("") })
+      .safeParse(JSON.parse(res.stdout || "{}"));
+    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
+    const { mergeable, mergeStateStatus } = parsed.data;
+    if (mergeable === "CONFLICTING" || mergeStateStatus === "DIRTY") return "conflicted";
+    if (mergeStateStatus === "BEHIND") return "behind";
+    if (mergeable === "MERGEABLE") return "clean";
+    return "unknown";
+  }
+
+  /** Merge the base branch into the PR branch (issue #181). */
+  async updatePrBranch(prNumber: number): Promise<void> {
+    const res = await this.exec(["pr", "update-branch", String(prNumber)]);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr update-branch failed");
   }
 
   /**

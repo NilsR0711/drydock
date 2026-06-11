@@ -4,6 +4,7 @@ import type {
   IssueCommentRef,
   IssueDetail,
   PrCheck,
+  PrMergeState,
   ReactionContent,
   ReviewThread,
   ReviewThreadComment,
@@ -20,6 +21,7 @@ export type {
   IssueCommentRef,
   IssueDetail,
   PrCheck,
+  PrMergeState,
   ReactionContent,
   ReviewThread,
   ReviewThreadComment,
@@ -116,6 +118,15 @@ export interface ForgeClient {
   listMergedPrs?(limit?: number): Promise<ForgeMergedPr[]>;
   /** Publish a release at a specific commit. */
   createRelease?(input: CreateReleaseInput): Promise<void>;
+
+  // --- Branch & PR janitor (issue #181) ------------------------------------
+  // Optional: forges without them skip the corresponding janitor step.
+  /** Delete a remote branch. Idempotent: an already-deleted branch succeeds. */
+  deleteBranch?(branch: string): Promise<void>;
+  /** The PR/MR's merge readiness relative to its base branch. */
+  prMergeState?(prNumber: number): Promise<PrMergeState>;
+  /** Update the PR/MR branch with its base (GitHub update-branch, GitLab rebase). */
+  updatePrBranch?(prNumber: number): Promise<void>;
 }
 
 /** A published release as listed from the forge (issue #59). */
