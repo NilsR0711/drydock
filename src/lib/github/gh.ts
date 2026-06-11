@@ -246,14 +246,16 @@ export class GhClient {
   /**
    * Conditional, paginated GET of an issues list via `gh api --include`.
    *
-   * The first page sends the cached ETag as `If-None-Match`; on a 304 the cached
-   * body — the full multi-page list captured on the prior fetch — is replayed
-   * without spending budget. A fresh 200 starts the accumulation and the
-   * `rel="next"` `Link` header is followed (bounded by {@link MAX_ISSUE_PAGES})
-   * until the list is exhausted. The combined list is cached under the first
-   * page's ETag so an unchanged first page replays every page. Rate-limit
-   * headers are observed on every page, a 429 backs off, and pull requests are
-   * filtered out.
+   * The first page sends the cached ETag as `If-None-Match`; on a 304 the
+   * cached body is replayed without spending budget. A fresh 200 starts the
+   * accumulation and the `rel="next"` `Link` header is followed (bounded by
+   * {@link MAX_ISSUE_PAGES}) until the list is exhausted. Only a single-page
+   * result is cached: GitHub computes the ETag from page 1's representation
+   * alone, so a 304 proves the whole list unchanged only when the whole list
+   * *is* page 1 — caching a combined multi-page body under page 1's ETag would
+   * replay stale later pages (e.g. an old issue closed beyond position 100)
+   * for as long as page 1's bytes stay put. Rate-limit headers are observed on
+   * every page, a 429 backs off, and pull requests are filtered out.
    */
   private async conditionalList(cacheKey: string, query: string): Promise<GhIssue[]> {
     this.gate("core");
@@ -270,6 +272,7 @@ export class GhClient {
 
     const raw: unknown[] = [...parseRawIssueArray(response.body)];
     let next = parseNextLink(response.headers.link);
+    const singlePage = !next;
     let pages = 1;
     while (next && pages < MAX_ISSUE_PAGES) {
       this.gate("core");
@@ -280,10 +283,12 @@ export class GhClient {
       pages++;
     }
 
-    // Cache the combined list under the first page's ETag so a later 304 (first
-    // page unchanged) replays every page, not just the first.
+    // Cache only when page 1 was the entire list (see the doc comment above);
+    // a multi-page list also drops any prior single-page entry so a later 304
+    // can never resurrect a stale, shorter list.
     const etag = response.headers.etag;
-    if (etag) this.etags.set(cacheKey, etag, JSON.stringify(raw));
+    if (etag && singlePage) this.etags.set(cacheKey, etag, JSON.stringify(raw));
+    else this.etags.delete(cacheKey);
     return this.toGhIssues(raw);
   }
 
@@ -380,9 +385,12 @@ export class GhClient {
         // unparseable output: fall through and try to create the label
       }
     }
-    const args = ["label", "create", name];
+    const args = ["label", "create"];
     if (opts.color) args.push(flagEq("--color", opts.color));
     if (opts.description) args.push(flagEq("--description", opts.description));
+    // `--` ends option parsing so a label name beginning with `-` is always
+    // read as the positional name, never as a flag (same hardening as flagEq).
+    args.push("--", name);
     const res = await this.exec(args);
     // A concurrent create can win the race; treat "already exists" as success.
     if (res.exitCode !== 0 && !/already exists/i.test(res.stderr)) {
