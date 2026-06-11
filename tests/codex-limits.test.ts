@@ -87,6 +87,17 @@ describe("classifyCodexFailure", () => {
       });
       expect(info?.kind).toBe("rate_limit");
     });
+
+    it("drops a malformed retry-after hint instead of persisting NaN", () => {
+      // `[\d.]+` also matches version-like strings; Number("1.2.3") is NaN and
+      // must never land in retryAfterMs (a NaN window corrupts the latch).
+      const info = classifyCodexFailure({
+        ...failed,
+        stderr: "exceeded retry limit, last status: 429 Too Many Requests, try again in 1.2.3s",
+      });
+      expect(info?.kind).toBe("rate_limit");
+      expect(info?.retryAfterMs).toBeUndefined();
+    });
   });
 
   describe("quota and billing", () => {

@@ -98,7 +98,10 @@ export function classifyCodexFailure(input: ClassifyFailureInput): ProviderLimit
   };
   if (rule.kind === "rate_limit" || rule.kind === "overloaded") {
     const seconds = text.match(RETRY_AFTER)?.[1];
-    if (seconds) info.retryAfterMs = Math.ceil(Number(seconds) * 1000);
+    // `[\d.]+` also matches malformed numbers ("1.2.3" → NaN); a non-finite
+    // delay must never reach the latch, so the hint is dropped instead.
+    const retryAfterMs = seconds ? Math.ceil(Number(seconds) * 1000) : Number.NaN;
+    if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) info.retryAfterMs = retryAfterMs;
   }
   return info;
 }
