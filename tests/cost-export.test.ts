@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { buildCostExport, type CostExportTable, toCsv, toJson } from "@/lib/db/cost-export";
 import { dailyCosts } from "@/lib/db/cost-queries";
-import { jobs } from "@/lib/db/schema";
+import { jobs, oneShotCosts } from "@/lib/db/schema";
 import { addRepo } from "@/lib/repos/service";
 
 let db: DB;
@@ -63,6 +63,28 @@ beforeEach(() => {
       },
     ])
     .run();
+  // One-shot agent spend (decompose/release/…) is counted by the dashboard and
+  // the daily budget, so the exports must fold it in too.
+  db.insert(oneShotCosts)
+    .values([
+      {
+        repoId: repoA,
+        type: "decompose",
+        costUsd: 0.01,
+        inputTokens: 100,
+        outputTokens: 10,
+        createdAt: DAY1,
+      },
+      {
+        repoId: repoB,
+        type: "release",
+        costUsd: 0.03,
+        inputTokens: 300,
+        outputTokens: 30,
+        createdAt: DAY2,
+      },
+    ])
+    .run();
 });
 
 describe("buildCostExport — line items", () => {
@@ -78,8 +100,8 @@ describe("buildCostExport — line items", () => {
       "output_tokens",
       "total_cost_usd",
     ]);
-    // 3 dated jobs; the startedAt=null job is excluded.
-    expect(table.rows).toHaveLength(3);
+    // 3 dated jobs + 2 one-shot calls; the startedAt=null job is excluded.
+    expect(table.rows).toHaveLength(5);
     const row = table.rows.find((r) => r.issue === 1);
     expect(row).toMatchObject({
       date: "2026-05-20",
@@ -89,6 +111,20 @@ describe("buildCostExport — line items", () => {
       input_tokens: 1000,
       output_tokens: 200,
       total_cost_usd: 0.05,
+    });
+  });
+
+  it("includes one-shot calls as rows with empty issue/job cells and a one-shot model label", () => {
+    const table = buildCostExport("line-items", {}, db);
+    const oneShot = table.rows.find((r) => r.model === "one-shot:decompose");
+    expect(oneShot).toMatchObject({
+      date: "2026-05-20",
+      repo: 'Acme, "Inc"',
+      issue: "",
+      job_id: "",
+      input_tokens: 100,
+      output_tokens: 10,
+      total_cost_usd: 0.01,
     });
   });
 
@@ -108,12 +144,13 @@ describe("buildCostExport — aggregates", () => {
       "output_tokens",
       "total_cost_usd",
     ]);
+    // Job spend + one-shot spend per repo; the `jobs` count stays jobs-only.
     const a = table.rows.find((r) => r.repo === 'Acme, "Inc"');
-    expect(a).toMatchObject({ jobs: 2, input_tokens: 3000, output_tokens: 600 });
-    expect(a?.total_cost_usd).toBeCloseTo(0.07);
+    expect(a).toMatchObject({ jobs: 2, input_tokens: 3100, output_tokens: 610 });
+    expect(a?.total_cost_usd).toBeCloseTo(0.08);
     const b = table.rows.find((r) => r.repo === "beta");
     expect(b).toMatchObject({ jobs: 1 });
-    expect(b?.total_cost_usd).toBeCloseTo(0.13);
+    expect(b?.total_cost_usd).toBeCloseTo(0.16);
   });
 
   it("aggregates by model with token and cost sums", () => {
@@ -132,29 +169,44 @@ describe("buildCostExport — aggregates", () => {
     const haiku = table.rows.find((r) => r.model === "claude-haiku-4-5");
     expect(haiku?.total_cost_usd).toBeCloseTo(0.02);
   });
+
+  it("surfaces one-shot spend as dedicated by-model buckets with a zero job count", () => {
+    const table = buildCostExport("by-model", {}, db);
+    const decompose = table.rows.find((r) => r.model === "one-shot:decompose");
+    expect(decompose).toMatchObject({ jobs: 0, input_tokens: 100, output_tokens: 10 });
+    expect(decompose?.total_cost_usd).toBeCloseTo(0.01);
+    const release = table.rows.find((r) => r.model === "one-shot:release");
+    expect(release?.total_cost_usd).toBeCloseTo(0.03);
+  });
 });
 
 describe("buildCostExport — filters", () => {
   it("restricts to an inclusive date range", () => {
     const table = buildCostExport("line-items", { from: "2026-05-21", to: "2026-05-21" }, db);
-    expect(table.rows.map((r) => r.issue).sort()).toEqual([2, 3]);
+    // Jobs 2 + 3 and the DAY2 release one-shot (empty issue cell).
+    expect(table.rows.map((r) => r.issue).sort()).toEqual(["", 2, 3]);
   });
 
   it("honours a lower bound only", () => {
     const table = buildCostExport("line-items", { from: "2026-05-21" }, db);
-    expect(table.rows.map((r) => r.issue).sort()).toEqual([2, 3]);
+    expect(table.rows.map((r) => r.issue).sort()).toEqual(["", 2, 3]);
   });
 
   it("honours an upper bound only", () => {
     const table = buildCostExport("line-items", { to: "2026-05-20" }, db);
-    expect(table.rows.map((r) => r.issue)).toEqual([1]);
+    // Job 1 and the DAY1 decompose one-shot.
+    expect(table.rows.map((r) => r.issue).sort()).toEqual(["", 1]);
   });
 
   it("restricts to a single repo", () => {
     const table = buildCostExport("by-model", { repoId: repoB }, db);
-    expect(table.rows).toHaveLength(1);
-    expect(table.rows[0]).toMatchObject({ model: "claude-sonnet-4-5", jobs: 1 });
-    expect(table.rows[0]?.total_cost_usd).toBeCloseTo(0.13);
+    expect(table.rows).toHaveLength(2);
+    const job = table.rows.find((r) => r.model === "claude-sonnet-4-5");
+    expect(job).toMatchObject({ jobs: 1 });
+    expect(job?.total_cost_usd).toBeCloseTo(0.13);
+    const oneShot = table.rows.find((r) => r.model === "one-shot:release");
+    expect(oneShot).toMatchObject({ jobs: 0 });
+    expect(oneShot?.total_cost_usd).toBeCloseTo(0.03);
   });
 });
 
@@ -176,7 +228,8 @@ describe("buildCostExport — reconciliation with the dashboard", () => {
     expect(lineTotal).toBeCloseTo(dashboardTotal);
     expect(repoTotal).toBeCloseTo(dashboardTotal);
     expect(modelTotal).toBeCloseTo(dashboardTotal);
-    expect(dashboardTotal).toBeCloseTo(0.2);
+    // 0.20 job spend + 0.04 one-shot spend.
+    expect(dashboardTotal).toBeCloseTo(0.24);
   });
 });
 
