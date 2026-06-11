@@ -161,6 +161,13 @@ describe("repos service", () => {
     expect(cfg.priorityAuthors).toEqual([]);
   });
 
+  it("defaults model escalation on retry to off and lets a repo opt in (issue #179)", () => {
+    const repo = addRepo({ path: "/esc", name: "esc" }, db);
+    expect(repo.escalateModelOnRetry).toBe(false);
+    const updated = updateRepo(repo.id, { escalateModelOnRetry: true }, db);
+    expect(updated.escalateModelOnRetry).toBe(true);
+  });
+
   it("defaults release management to off and parses it (issue #59)", () => {
     const repo = addRepo({ path: "/rel", name: "rel" }, db);
     expect(repo.releaseEnabled).toBe(false);

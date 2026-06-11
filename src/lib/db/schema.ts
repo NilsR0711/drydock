@@ -117,6 +117,13 @@ export const repos = sqliteTable("repos", {
   prAuditModel: text("pr_audit_model"),
   prAuditLanguage: text("pr_audit_language").notNull().default("en"),
   prAuditPostOnPr: integer("pr_audit_post_on_pr", { mode: "boolean" }).notNull().default(false),
+  // Opt-in model escalation ladder (issue #179, default off). When a failed
+  // (needs_human) job is requeued, the next attempt runs the next-stronger
+  // model in the agent's catalog ladder, capped at the strongest model. The
+  // escalated model is persisted on the job so pricing reflects the actual run.
+  escalateModelOnRetry: integer("escalate_model_on_retry", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 
