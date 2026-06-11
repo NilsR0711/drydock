@@ -25,6 +25,7 @@ import { resolveOpenRouterApiKey } from "@/lib/openrouter/config";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
+import { runBranchJanitorSweep } from "./branch-janitor";
 import { getCredentialFailures } from "./credential-status";
 import { runCredentialProbeSweep, shouldRunCredentialProbe } from "./credential-watchdog";
 import { driveDeploymentHealing } from "./deployment-healing-driver";
@@ -75,6 +76,8 @@ export interface DriveTickDeps {
   deploymentHealing?: (db: DB) => Promise<void>;
   /** Post-merge release-management sweep entry point (injectable for tests). */
   releaseManagement?: (db: DB) => Promise<void>;
+  /** Branch & PR janitor sweep entry point (issue #181, injectable for tests). */
+  branchJanitor?: (db: DB) => Promise<void>;
   /** OpenRouter catalog sync entry point (issue #169, injectable for tests). */
   openrouterCatalogSync?: (db: DB) => Promise<unknown>;
   /** Credential watchdog probe round (issue #177, injectable for tests). */
@@ -480,6 +483,16 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
     await withPriority("low", () => releaseManagement(db));
   } catch (err) {
     logError("[driver] release-management sweep failed", err);
+  }
+
+  // Branch & PR janitor (issue #181): delete merged drydock/* branches, update
+  // stale-but-clean PRs, and escalate conflicted ones. Low priority like the
+  // other background sweeps so its forge calls yield to active jobs.
+  const branchJanitor = deps.branchJanitor ?? ((d: DB) => runBranchJanitorSweep({ db: d }));
+  try {
+    await withPriority("low", () => branchJanitor(db));
+  } catch (err) {
+    logError("[driver] branch-janitor sweep failed", err);
   }
 
   // Mirror the OpenRouter model catalog (issue #169) when a refresh is due.

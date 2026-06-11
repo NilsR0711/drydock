@@ -228,6 +228,19 @@ describe("driveTick", () => {
     });
     await expect(driveTick(deps([], { releaseManagement }) as never)).resolves.toBeUndefined();
   });
+
+  it("drives the branch-janitor sweep each tick (issue #181)", async () => {
+    const branchJanitor = vi.fn(async () => {});
+    await driveTick(deps([], { branchJanitor }) as never);
+    expect(branchJanitor).toHaveBeenCalledWith(db);
+  });
+
+  it("survives a branch-janitor sweep failure", async () => {
+    const branchJanitor = vi.fn(async () => {
+      throw new Error("janitor boom");
+    });
+    await expect(driveTick(deps([], { branchJanitor }) as never)).resolves.toBeUndefined();
+  });
 });
 
 describe("driveTick auto-processing", () => {
