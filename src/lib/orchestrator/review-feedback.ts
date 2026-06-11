@@ -54,11 +54,14 @@ export function isTrustedReviewer(
   opts: { isBot?: boolean } = {},
 ): boolean {
   const lower = login.toLowerCase();
-  const bare = normalizeBotLogin(login);
-  if (gate.ignoredBots.some((b) => normalizeBotLogin(b) === bare)) return false;
   if (opts.isBot || lower.endsWith("[bot]")) {
+    // Suffix-insensitive comparisons only apply to bot actors: ignoring
+    // `cursor[bot]` must not reject a human who happens to log in as `cursor`.
+    const bare = normalizeBotLogin(login);
+    if (gate.ignoredBots.some((b) => normalizeBotLogin(b) === bare)) return false;
     return gate.trustedBots.some((b) => normalizeBotLogin(b) === bare);
   }
+  if (gate.ignoredBots.some((b) => b.toLowerCase() === lower)) return false;
   return gate.trustedReviewers.some((r) => r.toLowerCase() === lower);
 }
 

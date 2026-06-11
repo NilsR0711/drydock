@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getAgentProvider } from "@/lib/agents/registry";
 import type { AgentProvider } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
@@ -269,13 +269,15 @@ export async function spawnAgentSession(
 
   if (deps.sideSession) {
     // A side session adds to the job's bill but must not clobber the main
-    // session id (CI fixes resume it) or reset the accumulated usage.
-    const current = db.select().from(jobs).where(eq(jobs.id, job.id)).get();
+    // session id (CI fixes resume it) or reset the accumulated usage. The
+    // increments happen inside the UPDATE so overlapping side sessions (or a
+    // side session racing the main session's final write) never lose spend
+    // to a read-then-write race.
     db.update(jobs)
       .set({
-        totalInputTokens: (current?.totalInputTokens ?? 0) + parser.totalInputTokens,
-        totalOutputTokens: (current?.totalOutputTokens ?? 0) + parser.totalOutputTokens,
-        costUsd: (current?.costUsd ?? 0) + costUsd,
+        totalInputTokens: sql`coalesce(${jobs.totalInputTokens}, 0) + ${parser.totalInputTokens}`,
+        totalOutputTokens: sql`coalesce(${jobs.totalOutputTokens}, 0) + ${parser.totalOutputTokens}`,
+        costUsd: sql`coalesce(${jobs.costUsd}, 0) + ${costUsd}`,
       })
       .where(eq(jobs.id, job.id))
       .run();

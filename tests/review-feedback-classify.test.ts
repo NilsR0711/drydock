@@ -73,6 +73,16 @@ describe("isTrustedReviewer", () => {
     expect(isTrustedReviewer("cursor", gate, { isBot: true })).toBe(false);
   });
 
+  it("ignoring a bot does not reject a human with the same bare login", () => {
+    const gate = {
+      trustedReviewers: ["cursor"],
+      trustedBots: [],
+      ignoredBots: ["cursor[bot]"],
+    };
+    // Human reviewer logged in as `cursor` — not a bot actor.
+    expect(isTrustedReviewer("cursor", gate)).toBe(true);
+  });
+
   it("ignore-list entries match suffix-insensitively for bot actors", () => {
     const gate = {
       trustedReviewers: [],

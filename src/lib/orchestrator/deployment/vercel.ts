@@ -21,9 +21,15 @@ export function parseVercelStatus(stdout: string, exitCode: number): DeploymentS
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  const line = lines.find((l) => /●|ready|error|building|queued|initializing/i.test(l));
+  // Status words can also appear inside the deployment URL (e.g.
+  // https://ready-app.vercel.app), so classification must never read the URL:
+  // strip URLs from the line before matching.
+  const withoutUrls = (l: string) => l.replace(/https?:\/\/\S+/g, " ");
+  const line = lines.find((l) =>
+    /●|ready|error|building|queued|initializing/i.test(withoutUrls(l)),
+  );
   if (!line) return "not_found";
-  const hay = line.toLowerCase();
+  const hay = withoutUrls(line).toLowerCase();
   if (/\berror\b|\bfailed\b|canceled/.test(hay)) return "error";
   if (/\bready\b/.test(hay)) return "ready";
   if (/\bbuilding\b/.test(hay)) return "building";
