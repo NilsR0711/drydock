@@ -46,3 +46,22 @@ export function modelLabel(id: string | null | undefined): string {
 export function isKnownModelId(id: string): boolean {
   return MODELS.some((m) => m.id === id);
 }
+
+/**
+ * The next rung up an agent's escalation ladder (issue #179). The ladder is
+ * the agent's MODELS slice, which is ordered strongest→cheapest, so escalating
+ * means stepping one entry toward the front. Returns null when there is no
+ * defined next rung: the model is already the strongest, the id is not in the
+ * agent's catalog (e.g. an openrouter id — that catalog is synced, not static,
+ * and carries no strength ordering), or no current model is known.
+ */
+export function nextStrongerModel(
+  agent: AgentId,
+  current: string | null | undefined,
+): string | null {
+  if (!current) return null;
+  const ladder = modelsForAgent(agent);
+  const idx = ladder.findIndex((m) => m.id === current);
+  if (idx <= 0) return null; // unknown id (-1) or already strongest (0)
+  return ladder[idx - 1]?.id ?? null;
+}

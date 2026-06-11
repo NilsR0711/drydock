@@ -2,10 +2,14 @@ process.env.DRYDOCK_DB = ":memory:";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/lib/db/client";
-import { abortJobAction, emergencyStopAction } from "@/lib/orchestrator/job-actions";
+import {
+  abortJobAction,
+  emergencyStopAction,
+  requeueJobAction,
+} from "@/lib/orchestrator/job-actions";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { abortAllJobs, registerAbort } from "@/lib/orchestrator/singleton";
-import { addRepo } from "@/lib/repos/service";
+import { addRepo, updateRepo } from "@/lib/repos/service";
 import { getSettings, saveSettings } from "@/lib/settings/service";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -15,6 +19,34 @@ beforeEach(() => {
   abortAllJobs();
   repoId = addRepo({ path: "/r", name: "acme" }, getDb()).id;
   saveSettings({ paused: false });
+});
+
+describe("requeueJobAction", () => {
+  it("requeues a needs_human job without touching the model by default", async () => {
+    const db = getDb();
+    const job = createJob({ repoId, issueNumber: 20, model: "claude-haiku-4-5" }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "needs_human", {}, db);
+
+    const result = await requeueJobAction(job.id);
+
+    expect(result.status).toBe("queued");
+    expect(result.model).toBe("claude-haiku-4-5");
+  });
+
+  it("escalates the model when the repo opted in (issue #179)", async () => {
+    const db = getDb();
+    updateRepo(repoId, { escalateModelOnRetry: true }, db);
+    const job = createJob({ repoId, issueNumber: 21, model: "claude-haiku-4-5" }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "needs_human", {}, db);
+
+    const result = await requeueJobAction(job.id);
+
+    expect(result.status).toBe("queued");
+    expect(result.model).toBe("claude-sonnet-4-5");
+    expect(getJob(job.id, db)?.model).toBe("claude-sonnet-4-5");
+  });
 });
 
 describe("abortJobAction", () => {

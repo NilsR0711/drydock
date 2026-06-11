@@ -100,6 +100,8 @@ export const repoInputSchema = z.object({
     })
     .default("en"),
   prAuditPostOnPr: z.boolean().default(false),
+  // Opt-in model escalation ladder on requeue (issue #179).
+  escalateModelOnRetry: z.boolean().default(false),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 

@@ -3,13 +3,18 @@
 import { revalidatePath } from "next/cache";
 import { notifyPauseTransition } from "@/lib/notify/lifecycle";
 import { getSettings, saveSettings } from "@/lib/settings/service";
+import { requeueJobWithEscalation } from "./escalation";
 import { getJob, transitionJob } from "./jobs";
 import { abortAllJobs, abortJob } from "./singleton";
 import { canTransition, InvalidTransitionError, type JobStatus } from "./state-machine";
 
-/** Put a needs_human (or interrupted) job back in the queue for another attempt. */
+/**
+ * Put a needs_human (or interrupted) job back in the queue for another
+ * attempt. On a repo with escalateModelOnRetry, a failed (needs_human) job's
+ * next attempt runs the next-stronger model in the ladder (issue #179).
+ */
 export async function requeueJobAction(jobId: number) {
-  const job = transitionJob(jobId, "queued");
+  const job = requeueJobWithEscalation(jobId);
   revalidatePath("/needs-human");
   revalidatePath("/");
   revalidatePath(`/repos/${job.repoId}`);
