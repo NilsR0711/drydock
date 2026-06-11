@@ -108,6 +108,19 @@ describe("resolveAuditConfig", () => {
       language: "en",
     });
   });
+
+  it("ignores the stored defaultModel when the stored agent is invalid", () => {
+    // An internally inconsistent row: unusable agent, codex-flavoured default
+    // model. The fallback agent must come with its own catalog default, never
+    // a model the resolved CLI cannot run.
+    const repo = addRepo({ path: "/r", name: "r" }, db);
+    const corrupted = { ...repo, agent: "garbage", defaultModel: "gpt-5" } as never;
+    expect(resolveAuditConfig(corrupted)).toEqual({
+      agent: "claude",
+      model: "claude-opus-4-8",
+      language: "en",
+    });
+  });
 });
 
 describe("buildPrAuditGenerator", () => {

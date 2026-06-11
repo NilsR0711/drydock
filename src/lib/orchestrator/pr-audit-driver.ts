@@ -75,11 +75,16 @@ export interface AuditConfig {
  */
 export function resolveAuditConfig(repo: Repo): AuditConfig {
   // Defense-in-depth: repo.agent is schema-constrained on writes, but a stored
-  // row is still untrusted input here — gate it instead of casting.
+  // row is still untrusted input here — gate it instead of casting. When the
+  // stored agent is unusable, the row's defaultModel is untrusted too: the
+  // fallback agent gets its own catalog default, never a model the resolved
+  // CLI cannot run.
   const repoAgent: AgentId = isAgentId(repo.agent) ? repo.agent : DEFAULT_AGENT;
+  const storedAgentValid = repoAgent === repo.agent;
   const agent: AgentId = isAgentId(repo.prAuditAgent) ? repo.prAuditAgent : repoAgent;
   const model =
-    repo.prAuditModel ?? (agent === repoAgent ? repo.defaultModel : defaultModelForAgent(agent));
+    repo.prAuditModel ??
+    (storedAgentValid && agent === repoAgent ? repo.defaultModel : defaultModelForAgent(agent));
   return { agent, model, language: repo.prAuditLanguage || "en" };
 }
 
