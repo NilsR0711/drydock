@@ -96,8 +96,13 @@ export function Dialog({
     return () => clearTimeout(timer);
   }, [open]);
 
+  // Focus management must wait for `mounted`: a dialog instance that was
+  // mounted closed (every persistent ConfirmDialog) still renders null on the
+  // commit where `open` flips to true, so panelRef.current is null until the
+  // setMounted(true) re-render attaches the panel. Depending on `mounted` too
+  // re-runs this effect once the panel actually exists.
   useEffect(() => {
-    if (!open) return;
+    if (!open || !mounted) return;
 
     // Remember the element that opened the dialog so focus can be restored.
     triggerRef.current = document.activeElement;
@@ -115,9 +120,11 @@ export function Dialog({
         closeRef.current();
         return;
       }
-      if (e.key === "Tab" && panel) {
+      // Read the panel from the ref so the trap never closes over a stale node.
+      const panelEl = panelRef.current;
+      if (e.key === "Tab" && panelEl) {
         e.preventDefault();
-        const focusable = getFocusableElements(panel);
+        const focusable = getFocusableElements(panelEl);
         if (focusable.length === 0) return;
         const next = wrapFocus(focusable, document.activeElement as HTMLElement, e.shiftKey);
         next.focus();
@@ -133,7 +140,7 @@ export function Dialog({
       }
       triggerRef.current = null;
     };
-  }, [open]);
+  }, [open, mounted]);
 
   if (!mounted) return null;
 

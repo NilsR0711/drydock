@@ -42,6 +42,252 @@ function parseLabels(raw: string): string[] {
   }
 }
 
+// Row and Zone live at module level on purpose: defining them inside
+// IssueBoard would create a new component type on every render, forcing React
+// to unmount/remount every row on each state update (every filter keystroke,
+// selection toggle, and drag-over). That destroyed the drag source node
+// mid-drag — browsers never fire `dragend` on a removed node, so cancelled
+// drags left the board stuck in "dropping" mode — and threw keyboard focus
+// back to the document whenever a row checkbox was toggled.
+
+interface RowProps {
+  issue: Issue;
+  reorderable: boolean;
+  queueLabel: string;
+  /** Position of this issue in the full (unfiltered) queue; -1 if not queued. */
+  queueIndex: number;
+  queueSize: number;
+  isDragging: boolean;
+  isOver: boolean;
+  isFlash: boolean;
+  selected: boolean;
+  pending: boolean;
+  onToggleSelect: () => void;
+  onOpen: () => void;
+  onAddToQueue: () => void;
+  onRemoveFromQueue: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onDragStartRow: () => void;
+  onDragEnterRow: () => void;
+  onDragEndRow: () => void;
+  onDropRow: () => void;
+}
+
+function Row({
+  issue,
+  reorderable,
+  queueLabel,
+  queueIndex,
+  queueSize,
+  isDragging,
+  isOver,
+  isFlash,
+  selected,
+  pending,
+  onToggleSelect,
+  onOpen,
+  onAddToQueue,
+  onRemoveFromQueue,
+  onMoveUp,
+  onMoveDown,
+  onDragStartRow,
+  onDragEnterRow,
+  onDragEndRow,
+  onDropRow,
+}: RowProps) {
+  const isFirst = queueIndex === 0;
+  const isLast = queueIndex === queueSize - 1;
+  const labels = parseLabels(issue.labels).filter((l) => l !== queueLabel);
+  const selectId = `issue-select-${issue.number}`;
+
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: draggable issue row; the keyboard path is the per-row action buttons (open, +, up/down, remove) and the checkbox
+    <div
+      draggable
+      onDragStart={(e) => {
+        onDragStartRow();
+        e.dataTransfer.effectAllowed = "move";
+        try {
+          e.dataTransfer.setData("text/plain", String(issue.number));
+        } catch {}
+      }}
+      onDragEnter={onDragEnterRow}
+      onDragOver={(e) => e.preventDefault()}
+      onDragEnd={onDragEndRow}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDropRow();
+      }}
+      className={cn(
+        "issue-row group flex items-center gap-3 rounded-lg border border-transparent bg-card px-3 py-2.5 hover-elevate",
+        isDragging && "opacity-40",
+        isOver && "ring-1 ring-primary/70",
+        isFlash && "bg-success/[0.06] ring-1 ring-success/70",
+      )}
+    >
+      <GripVertical
+        aria-hidden
+        className="h-[15px] w-[15px] shrink-0 cursor-grab text-muted-foreground/40 group-hover:text-muted-foreground active:cursor-grabbing"
+      />
+      <Checkbox
+        id={selectId}
+        checked={selected}
+        onChange={onToggleSelect}
+        aria-label={`Select #${issue.number} for bulk actions`}
+        className="shrink-0"
+      />
+      {reorderable && (
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-semibold tabular-nums text-primary-foreground">
+          {queueIndex + 1}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left focus-ring"
+      >
+        <span className="shrink-0 font-mono text-xs text-muted-foreground">#{issue.number}</span>
+        <span className="truncate text-sm group-hover:text-foreground">{issue.title}</span>
+      </button>
+      <div className="hidden shrink-0 items-center gap-1.5 md:flex">
+        {issue.triagedAt && (
+          <Tooltip content="Labels applied by auto-triage — see the issue comment for reasons">
+            <Badge tone="primary">auto-triaged</Badge>
+          </Tooltip>
+        )}
+        {labels.slice(0, 2).map((l) => (
+          <span
+            key={l}
+            className="rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground"
+          >
+            {l}
+          </span>
+        ))}
+      </div>
+      <div className="flex shrink-0 items-center gap-0.5">
+        {reorderable ? (
+          <>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Move #${issue.number} up in queue`}
+              disabled={isFirst || pending}
+              onClick={onMoveUp}
+              className="h-7 w-7"
+            >
+              <ArrowUp />
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Move #${issue.number} down in queue`}
+              disabled={isLast || pending}
+              onClick={onMoveDown}
+              className="h-7 w-7"
+            >
+              <ArrowDown />
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Remove #${issue.number} from queue`}
+              disabled={pending}
+              onClick={onRemoveFromQueue}
+              className="h-7 w-7 text-destructive hover:text-destructive"
+            >
+              <X />
+            </Button>
+          </>
+        ) : (
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            aria-label={`Add #${issue.number} to queue`}
+            disabled={pending}
+            onClick={onAddToQueue}
+            className="h-7 w-7"
+          >
+            <Plus />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Zone({
+  zone,
+  icon: ZoneIcon,
+  title,
+  count,
+  hint,
+  empty,
+  emptyDrop,
+  dropping,
+  isEmpty,
+  onDropZone,
+  onClearOver,
+  children,
+}: {
+  zone: "queue" | "backlog";
+  icon: typeof Inbox;
+  title: string;
+  count: number;
+  hint: string;
+  empty: string;
+  emptyDrop: string;
+  dropping: boolean;
+  isEmpty: boolean;
+  onDropZone: () => void;
+  /** Clear the row hover marker when dragging over the zone's own padding. */
+  onClearOver: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: drop zone for drag-and-drop; the keyboard path is the per-row action buttons (+, up/down, remove)
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (e.currentTarget === e.target) onClearOver();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDropZone();
+      }}
+      data-zone={zone}
+      className={cn(
+        "rounded-xl border p-2 transition-colors",
+        dropping ? "border-dashed border-primary/45 bg-primary/[0.03]" : "border-card-border",
+      )}
+    >
+      <div className="flex items-center gap-2 px-2 py-1.5">
+        <ZoneIcon className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-sm font-semibold">{title}</span>
+        <Badge tone="neutral">{count}</Badge>
+        <span className="ml-auto hidden text-xs text-muted-foreground sm:block">{hint}</span>
+      </div>
+      {isEmpty ? (
+        <div
+          className={cn(
+            "m-1 rounded-lg border border-dashed px-3 py-6 text-center text-xs transition-colors",
+            dropping ? "border-primary/50 text-primary" : "border-border text-muted-foreground",
+          )}
+        >
+          {dropping ? emptyDrop : empty}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-0.5 p-1">{children}</div>
+      )}
+    </div>
+  );
+}
+
 export function IssueBoard({
   repoId,
   queueLabel,
@@ -104,13 +350,18 @@ export function IssueBoard({
   const backlog = issues.filter((i) => !inQueue(i) && matches(i));
   const queue = issues.filter((i) => inQueue(i) && matches(i));
 
+  /** Reset the drag visuals — every drop path must end here. */
+  function clearDragState() {
+    setDragNumber(null);
+    setOverNumber(null);
+  }
+
   function dropToQueue() {
     if (dragNumber === null) return;
     const moved = issues.find((i) => i.number === dragNumber);
     const num = dragNumber;
     const title = moved?.title;
-    setDragNumber(null);
-    setOverNumber(null);
+    clearDragState();
     if (!moved || inQueue(moved)) return;
     start(() => {
       addToQueueAction(repoId, num)
@@ -127,8 +378,7 @@ export function IssueBoard({
   function dropToBacklog() {
     if (dragNumber === null) return;
     const moved = issues.find((i) => i.number === dragNumber);
-    setDragNumber(null);
-    setOverNumber(null);
+    clearDragState();
     if (!moved || !inQueue(moved)) return;
     start(() => {
       removeFromQueueAction(repoId, moved.number)
@@ -138,22 +388,46 @@ export function IssueBoard({
   }
 
   function reorderWithinQueue(targetNumber: number) {
-    if (dragNumber === null || dragNumber === targetNumber) return;
-    const moved = issues.find((i) => i.number === dragNumber);
+    const num = dragNumber;
+    // Clear the drag visuals up front so early returns never leave the board
+    // stuck in "dropping" mode with a stale dragNumber.
+    clearDragState();
+    if (num === null || num === targetNumber) return;
+    const moved = issues.find((i) => i.number === num);
     if (!moved || !inQueue(moved)) return; // only reorder queued items
     // Build the new order from the FULL queue, not the search-filtered view:
     // sending only the visible numbers would partially update priorities and
     // collide with the hidden issues.
     const order = moveIssueBefore(
       issues.filter(inQueue).map((i) => i.number),
-      dragNumber,
+      num,
       targetNumber,
     );
-    setDragNumber(null);
-    setOverNumber(null);
     start(() => {
       reorderIssuesAction(repoId, order).catch((e) => setError(e.message));
     });
+  }
+
+  /**
+   * Drop onto an existing row. Rows cover nearly the whole zone, so this is
+   * the common landing spot: same-zone queue drops reorder, while cross-zone
+   * drops fall through to the zone action (queue/dequeue) instead of being
+   * silently swallowed by the row's stopPropagation.
+   */
+  function dropOnRow(target: Issue, rowInQueue: boolean) {
+    const moved = dragNumber === null ? undefined : issues.find((i) => i.number === dragNumber);
+    if (!moved) {
+      clearDragState();
+      return;
+    }
+    if (inQueue(moved) === rowInQueue) {
+      if (rowInQueue) reorderWithinQueue(target.number);
+      else clearDragState(); // backlog → backlog: nothing to do
+    } else if (rowInQueue) {
+      dropToQueue();
+    } else {
+      dropToBacklog();
+    }
   }
 
   function toggleSelect(number: number) {
@@ -195,237 +469,64 @@ export function IssueBoard({
     });
   }
 
-  function Row({ issue, reorderable }: { issue: Issue; reorderable: boolean }) {
-    const allQueue = issues.filter(inQueue);
-    const fullIdx = allQueue.findIndex((i) => i.number === issue.number);
-    const isFirst = fullIdx === 0;
-    const isLast = fullIdx === allQueue.length - 1;
-    const labels = parseLabels(issue.labels).filter((l) => l !== queueLabel);
-    const isDragging = dragNumber === issue.number;
-    const isOver =
-      overNumber === issue.number && dragNumber !== null && dragNumber !== issue.number;
-    const isFlash = flash === issue.number;
-    const selectId = `issue-select-${issue.number}`;
-
-    function handleAddToQueue() {
-      start(() => {
-        addToQueueAction(repoId, issue.number)
-          .then(setIssues)
-          .catch((err: Error) => setError(err.message));
-      });
-    }
-
-    function handleRemoveFromQueue() {
-      start(() => {
-        removeFromQueueAction(repoId, issue.number)
-          .then(setIssues)
-          .catch((err: Error) => setError(err.message));
-      });
-    }
-
-    function handleMoveUp() {
-      const newOrder = moveIssueUp(
-        allQueue.map((i) => i.number),
-        issue.number,
-      );
-      start(() => {
-        reorderIssuesAction(repoId, newOrder).catch((err: Error) => setError(err.message));
-      });
-    }
-
-    function handleMoveDown() {
-      const newOrder = moveIssueDown(
-        allQueue.map((i) => i.number),
-        issue.number,
-      );
-      start(() => {
-        reorderIssuesAction(repoId, newOrder).catch((err: Error) => setError(err.message));
-      });
-    }
-
-    return (
-      // biome-ignore lint/a11y/noStaticElementInteractions: draggable issue row; the keyboard path is the per-row action buttons (open, +, up/down, remove) and the checkbox
-      <div
-        draggable
-        onDragStart={(e) => {
-          setDragNumber(issue.number);
-          e.dataTransfer.effectAllowed = "move";
-          try {
-            e.dataTransfer.setData("text/plain", String(issue.number));
-          } catch {}
-        }}
-        onDragEnter={() => setOverNumber(issue.number)}
-        onDragOver={(e) => e.preventDefault()}
-        onDragEnd={() => {
-          setDragNumber(null);
-          setOverNumber(null);
-        }}
-        onDrop={(e) => {
-          e.stopPropagation();
-          if (reorderable) reorderWithinQueue(issue.number);
-        }}
-        className={cn(
-          "issue-row group flex items-center gap-3 rounded-lg border border-transparent bg-card px-3 py-2.5 hover-elevate",
-          isDragging && "opacity-40",
-          isOver && "ring-1 ring-primary/70",
-          isFlash && "bg-success/[0.06] ring-1 ring-success/70",
-        )}
-      >
-        <GripVertical
-          aria-hidden
-          className="h-[15px] w-[15px] shrink-0 cursor-grab text-muted-foreground/40 group-hover:text-muted-foreground active:cursor-grabbing"
-        />
-        <Checkbox
-          id={selectId}
-          checked={selected.has(issue.number)}
-          onChange={() => toggleSelect(issue.number)}
-          aria-label={`Select #${issue.number} for bulk actions`}
-          className="shrink-0"
-        />
-        {reorderable && (
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-semibold tabular-nums text-primary-foreground">
-            {fullIdx + 1}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={() => setModalIssue(issue.number)}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left focus-ring"
-        >
-          <span className="shrink-0 font-mono text-xs text-muted-foreground">#{issue.number}</span>
-          <span className="truncate text-sm group-hover:text-foreground">{issue.title}</span>
-        </button>
-        <div className="hidden shrink-0 items-center gap-1.5 md:flex">
-          {issue.triagedAt && (
-            <Tooltip content="Labels applied by auto-triage — see the issue comment for reasons">
-              <Badge tone="primary">auto-triaged</Badge>
-            </Tooltip>
-          )}
-          {labels.slice(0, 2).map((l) => (
-            <span
-              key={l}
-              className="rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground"
-            >
-              {l}
-            </span>
-          ))}
-        </div>
-        <div className="flex shrink-0 items-center gap-0.5">
-          {reorderable ? (
-            <>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label={`Move #${issue.number} up in queue`}
-                disabled={isFirst || pending}
-                onClick={handleMoveUp}
-                className="h-7 w-7"
-              >
-                <ArrowUp />
-              </Button>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label={`Move #${issue.number} down in queue`}
-                disabled={isLast || pending}
-                onClick={handleMoveDown}
-                className="h-7 w-7"
-              >
-                <ArrowDown />
-              </Button>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label={`Remove #${issue.number} from queue`}
-                disabled={pending}
-                onClick={handleRemoveFromQueue}
-                className="h-7 w-7 text-destructive hover:text-destructive"
-              >
-                <X />
-              </Button>
-            </>
-          ) : (
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              aria-label={`Add #${issue.number} to queue`}
-              disabled={pending}
-              onClick={handleAddToQueue}
-              className="h-7 w-7"
-            >
-              <Plus />
-            </Button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
+  const queueNumbers = issues.filter(inQueue).map((i) => i.number);
   const dropping = dragNumber !== null;
 
-  function Zone({
-    zone,
-    icon: ZoneIcon,
-    title,
-    count,
-    hint,
-    empty,
-    emptyDrop,
-    onDrop,
-    children,
-    isEmpty,
-  }: {
-    zone: "queue" | "backlog";
-    icon: typeof Inbox;
-    title: string;
-    count: number;
-    hint: string;
-    empty: string;
-    emptyDrop: string;
-    onDrop: () => void;
-    children: React.ReactNode;
-    isEmpty: boolean;
-  }) {
+  function addIssue(number: number) {
+    start(() => {
+      addToQueueAction(repoId, number)
+        .then(setIssues)
+        .catch((err: Error) => setError(err.message));
+    });
+  }
+
+  function removeIssue(number: number) {
+    start(() => {
+      removeFromQueueAction(repoId, number)
+        .then(setIssues)
+        .catch((err: Error) => setError(err.message));
+    });
+  }
+
+  function moveUp(number: number) {
+    const newOrder = moveIssueUp(queueNumbers, number);
+    start(() => {
+      reorderIssuesAction(repoId, newOrder).catch((err: Error) => setError(err.message));
+    });
+  }
+
+  function moveDown(number: number) {
+    const newOrder = moveIssueDown(queueNumbers, number);
+    start(() => {
+      reorderIssuesAction(repoId, newOrder).catch((err: Error) => setError(err.message));
+    });
+  }
+
+  function renderRow(issue: Issue, reorderable: boolean) {
     return (
-      // biome-ignore lint/a11y/noStaticElementInteractions: drop zone for drag-and-drop; the keyboard path is the per-row action buttons (+, up/down, remove)
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          if (e.currentTarget === e.target) setOverNumber(null);
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          onDrop();
-        }}
-        data-zone={zone}
-        className={cn(
-          "rounded-xl border p-2 transition-colors",
-          dropping ? "border-dashed border-primary/45 bg-primary/[0.03]" : "border-card-border",
-        )}
-      >
-        <div className="flex items-center gap-2 px-2 py-1.5">
-          <ZoneIcon className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-sm font-semibold">{title}</span>
-          <Badge tone="neutral">{count}</Badge>
-          <span className="ml-auto hidden text-xs text-muted-foreground sm:block">{hint}</span>
-        </div>
-        {isEmpty ? (
-          <div
-            className={cn(
-              "m-1 rounded-lg border border-dashed px-3 py-6 text-center text-xs transition-colors",
-              dropping ? "border-primary/50 text-primary" : "border-border text-muted-foreground",
-            )}
-          >
-            {dropping ? emptyDrop : empty}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-0.5 p-1">{children}</div>
-        )}
-      </div>
+      <Row
+        key={issue.number}
+        issue={issue}
+        reorderable={reorderable}
+        queueLabel={queueLabel}
+        queueIndex={queueNumbers.indexOf(issue.number)}
+        queueSize={queueNumbers.length}
+        isDragging={dragNumber === issue.number}
+        isOver={overNumber === issue.number && dragNumber !== null && dragNumber !== issue.number}
+        isFlash={flash === issue.number}
+        selected={selected.has(issue.number)}
+        pending={pending}
+        onToggleSelect={() => toggleSelect(issue.number)}
+        onOpen={() => setModalIssue(issue.number)}
+        onAddToQueue={() => addIssue(issue.number)}
+        onRemoveFromQueue={() => removeIssue(issue.number)}
+        onMoveUp={() => moveUp(issue.number)}
+        onMoveDown={() => moveDown(issue.number)}
+        onDragStartRow={() => setDragNumber(issue.number)}
+        onDragEnterRow={() => setOverNumber(issue.number)}
+        onDragEndRow={clearDragState}
+        onDropRow={() => dropOnRow(issue, reorderable)}
+      />
     );
   }
 
@@ -528,12 +629,12 @@ export function IssueBoard({
         hint="top = next to run"
         empty="Nothing queued. Drag an issue up from the backlog, or use the + button."
         emptyDrop="Drop here"
-        onDrop={dropToQueue}
+        dropping={dropping}
+        onDropZone={dropToQueue}
+        onClearOver={() => setOverNumber(null)}
         isEmpty={queue.length === 0}
       >
-        {queue.map((issue) => (
-          <Row key={issue.number} issue={issue} reorderable />
-        ))}
+        {queue.map((issue) => renderRow(issue, true))}
       </Zone>
 
       <Zone
@@ -544,12 +645,12 @@ export function IssueBoard({
         hint="drag up to schedule"
         empty="Backlog is empty."
         emptyDrop="Drop here"
-        onDrop={dropToBacklog}
+        dropping={dropping}
+        onDropZone={dropToBacklog}
+        onClearOver={() => setOverNumber(null)}
         isEmpty={backlog.length === 0}
       >
-        {backlog.map((issue) => (
-          <Row key={issue.number} issue={issue} reorderable={false} />
-        ))}
+        {backlog.map((issue) => renderRow(issue, false))}
       </Zone>
 
       <IssueDetailModal

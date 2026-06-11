@@ -28,7 +28,7 @@ function LabelWithHelp({ text, help }: { text: string; help: string }) {
 export function RepoSettingsBar({ repo }: { repo: Repo }) {
   const [agent, setAgent] = useState(repo.agent as AgentId);
   const [model, setModel] = useState(repo.defaultModel);
-  const [limit, setLimit] = useState(repo.dailyCostLimitUsd);
+  const [limit, setLimit] = useState(repo.dailyCostLimitUsd.toString());
   const [maxJobMinutes, setMaxJobMinutes] = useState(repo.maxJobMinutes?.toString() ?? "");
   const [maxCiWaitMinutes, setMaxCiWaitMinutes] = useState(repo.maxCiWaitMinutes?.toString() ?? "");
   const [mergeGateMinutes, setMergeGateMinutes] = useState(repo.mergeGateMinutes.toString());
@@ -69,9 +69,14 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
     persist({ agent: value, defaultModel: nextModel });
   }
 
-  function changeLimit(value: number) {
+  // Guard the money field like the sibling handlers below: clearing the input
+  // while retyping must not persist — Number("") is 0, and a $0 daily cap
+  // silently blocks every new job for the repo.
+  function changeLimit(value: string) {
     setLimit(value);
-    persist({ dailyCostLimitUsd: value });
+    const limitUsd = Number(value);
+    if (value.trim() === "" || !Number.isFinite(limitUsd) || limitUsd < 0) return;
+    persist({ dailyCostLimitUsd: limitUsd });
   }
 
   // Empty input clears the per-repo override (null = use the global default).
@@ -165,7 +170,7 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
               min={0}
               step={1}
               value={limit}
-              onChange={(e) => changeLimit(Number(e.target.value))}
+              onChange={(e) => changeLimit(e.target.value)}
             />
           </Field>
           <Field
