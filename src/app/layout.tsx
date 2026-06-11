@@ -4,6 +4,10 @@ import { AppShell } from "@/components/app-shell";
 import { Providers } from "@/components/providers";
 import { pendingCount } from "@/lib/adr/service";
 import { needsHumanJobs } from "@/lib/db/queries";
+import {
+  type CredentialFailure,
+  getCredentialFailures,
+} from "@/lib/orchestrator/credential-status";
 import { getSettings } from "@/lib/settings/service";
 import { getInstallKind } from "@/lib/version/current";
 import { peekUpdateStatus } from "@/lib/version/update-check";
@@ -27,10 +31,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   let pending = 0;
   let needsHuman = 0;
   let paused = false;
+  let credentialFailures: CredentialFailure[] = [];
   try {
     pending = pendingCount();
     needsHuman = needsHumanJobs().length;
     paused = getSettings().paused;
+    credentialFailures = getCredentialFailures();
   } catch {
     // DB may not exist yet on first boot
   }
@@ -53,6 +59,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             paused={paused}
             updateStatus={updateStatus}
             installKind={installKind}
+            credentialFailures={credentialFailures}
           >
             {children}
           </AppShell>

@@ -15,10 +15,12 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { CredentialBanner } from "@/components/credential-banner";
 import { EmergencyStopButton } from "@/components/emergency-stop-button";
 import { PauseToggle } from "@/components/pause-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/update-banner";
+import type { CredentialFailure } from "@/lib/orchestrator/credential-status";
 import { cn } from "@/lib/utils";
 import type { InstallKind } from "@/lib/version/current";
 import type { UpdateStatus } from "@/lib/version/update-check";
@@ -45,6 +47,7 @@ export function AppShell({
   paused = false,
   updateStatus,
   installKind = "local",
+  credentialFailures = [],
 }: {
   children: React.ReactNode;
   adrPending?: number;
@@ -52,6 +55,7 @@ export function AppShell({
   paused?: boolean;
   updateStatus?: UpdateStatus;
   installKind?: InstallKind;
+  credentialFailures?: CredentialFailure[];
 }) {
   const pathname = usePathname();
   return (
@@ -116,6 +120,7 @@ export function AppShell({
             </div>
           </div>
         )}
+        <CredentialBanner failures={credentialFailures} />
       </header>
       <main id="main" className="mx-auto max-w-7xl px-4 py-6 sm:py-8">
         {children}
