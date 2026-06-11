@@ -78,6 +78,15 @@ export interface IssueComment {
   body: string;
   createdAt: string;
 }
+/**
+ * An issue comment addressed by its stable id, for in-place edits (the
+ * idempotent PR-audit comment upsert, issue #168). GitHub ids are GraphQL
+ * node ids; GitLab ids are stringified note ids.
+ */
+export interface IssueCommentRef {
+  id: string;
+  body: string;
+}
 export interface IssueDetail {
   number: number;
   title: string;
@@ -481,6 +490,48 @@ export class GhClient {
   async commentIssue(issueNumber: number, body: string): Promise<void> {
     const res = await this.exec(["issue", "comment", String(issueNumber), flagEq("--body", body)]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue comment failed");
+  }
+
+  /**
+   * List an issue's comments with their GraphQL node ids (issue #168). The
+   * `viewIssue` comment shape drops ids, but the audit upsert needs a stable
+   * handle to edit a prior comment in place, so this is a dedicated call.
+   */
+  async listIssueComments(issueNumber: number): Promise<IssueCommentRef[]> {
+    const res = await this.exec(["issue", "view", String(issueNumber), "--json", "comments"]);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue view failed");
+    let raw: unknown;
+    try {
+      raw = JSON.parse(res.stdout || "{}");
+    } catch {
+      throw new GhError(`unexpected gh output: ${res.stdout.slice(0, 200)}`);
+    }
+    const schema = z.object({
+      comments: z.array(z.object({ id: z.string(), body: z.string().default("") })).default([]),
+    });
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
+    return parsed.data.comments.map((c) => ({ id: c.id, body: c.body }));
+  }
+
+  /**
+   * Edit one of our prior issue comments in place (GraphQL `updateIssueComment`,
+   * issue #168). The issue number is unused on GitHub — node ids are global —
+   * but kept in the signature so the forge contract works for GitLab too.
+   */
+  async updateIssueComment(_issueNumber: number, commentId: string, body: string): Promise<void> {
+    const query = `mutation($id:ID!,$body:String!){updateIssueComment(input:{id:$id,body:$body}){issueComment{id}}}`;
+    const res = await this.exec(
+      ["api", "graphql", "-F", `id=${commentId}`, "-f", `body=${body}`, "-f", `query=${query}`],
+      "graphql",
+    );
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh update issue comment failed");
+  }
+
+  /** Post a comment on the PR itself (the optional audit mirror, issue #168). */
+  async commentPr(prNumber: number, body: string): Promise<void> {
+    const res = await this.exec(["pr", "comment", String(prNumber), flagEq("--body", body)]);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr comment failed");
   }
 
   async createIssue(title: string, body: string): Promise<number> {
