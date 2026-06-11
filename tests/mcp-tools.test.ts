@@ -188,6 +188,31 @@ describe("MCP tool registry", () => {
     expect(result.status).toBe("queued");
   });
 
+  it("requeue_job escalates the model when the repo opted in (issue #179)", async () => {
+    const repoId = db
+      .insert(repos)
+      .values({ path: "/r", name: "r", escalateModelOnRetry: true })
+      .returning()
+      .get().id;
+    const job = db
+      .insert(jobs)
+      .values({
+        repoId,
+        issueNumber: 6,
+        status: "needs_human",
+        agent: "claude",
+        model: "claude-haiku-4-5",
+      })
+      .returning()
+      .get();
+    const result = (await run("requeue_job", { jobId: job.id }, db)) as {
+      status: string;
+      model: string;
+    };
+    expect(result.status).toBe("queued");
+    expect(result.model).toBe("claude-sonnet-4-5");
+  });
+
   it("abort_job transitions a queued job to aborted", async () => {
     const repoId = seedRepo(db);
     const job = db

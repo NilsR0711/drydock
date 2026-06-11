@@ -9,6 +9,7 @@ import {
   syncRepoIssues,
 } from "@/lib/issues/service";
 import { isKnownModelId } from "@/lib/models";
+import { requeueJobWithEscalation } from "@/lib/orchestrator/escalation";
 import { getJob, listJobs, transitionJob } from "@/lib/orchestrator/jobs";
 import { startPrAudit } from "@/lib/orchestrator/pr-audit-driver";
 import { isGitRepoPath } from "@/lib/repos/path";
@@ -218,7 +219,8 @@ export const tools: ToolDef[] = [
       const job = getJob(jobId, db);
       if (!job) throw new Error(`job ${jobId} not found`);
       assertWorkAllowed(job.repoId, db);
-      return transitionJob(jobId, "queued", {}, db);
+      // Escalates the model one rung when the repo opted in (issue #179).
+      return requeueJobWithEscalation(jobId, db);
     },
   },
   {
