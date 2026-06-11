@@ -35,6 +35,34 @@ export function classifyChecks(checks: PrCheck[]): CiOutcome {
 
 export const MAX_CI_RETRIES = 3;
 
+/**
+ * Outcome of one CI-fix resume attempt as observed by the babysitter. A resume
+ * that timed out, hit the cost cap, failed to spawn, exited non-zero, or
+ * produced no commit cannot have moved the PR head — re-polling would only
+ * re-observe the same failed checks, burning the retry budget on no-ops.
+ */
+export interface ResumeOutcome {
+  exitCode: number;
+  timedOut?: boolean;
+  costExceeded?: boolean;
+  spawnError?: Error;
+  /** True when the fix session finished but produced no commit to push. */
+  noChanges?: boolean;
+  /** True when an outside actor settled the job while the fix session ran. */
+  settledExternally?: boolean;
+}
+
+/** Why a resume cannot have advanced the PR, or null when it may have. */
+export function resumeFailureReason(outcome: ResumeOutcome): string | null {
+  if (outcome.timedOut) return "CI-fix session timed out";
+  if (outcome.costExceeded) return "per-job cost limit reached during the CI fix";
+  if (outcome.spawnError) return `CI-fix session failed to start: ${outcome.spawnError.message}`;
+  if (outcome.exitCode !== 0) return "CI-fix session exited non-zero";
+  if (outcome.settledExternally) return "job was settled externally during the CI fix";
+  if (outcome.noChanges) return "CI-fix session produced no changes";
+  return null;
+}
+
 /** Opt-in CI auto-healing config, supplied when a repo enables `autoHealCi`. */
 export interface AutoHealConfig {
   /** Resolve the PR's current head commit SHA (binds sessions, detects pushes). */
@@ -50,8 +78,13 @@ export interface BabysitterDeps {
   /** Forge client (GitHub or GitLab) for PR/MR checks, merge, and comments. */
   gh: ForgeClient;
   db?: DB;
-  /** Resume the Claude session with a CI-fix prompt (Haiku). Returns when done. */
-  resumeSession: (job: Job, sessionId: string, failedLog: string) => Promise<void>;
+  /**
+   * Resume the agent session with a CI-fix prompt (Haiku). Runs in the job's
+   * worktree and commits + pushes the fix; the outcome reports whether the PR
+   * head can actually have changed so the loop escalates instead of re-polling
+   * an unchanged PR.
+   */
+  resumeSession: (job: Job, sessionId: string, failedLog: string) => Promise<ResumeOutcome>;
   pollMs?: number;
   sleep?: (ms: number) => Promise<void>;
   /** Safety bound for the poll loop in tests. */
@@ -221,7 +254,14 @@ export async function ciBabysitter(
     // Feed a focused, line-capped evidence slice instead of the raw 8000-char
     // tail (issue #62), so the resume prompt targets the actual failure.
     const { evidence } = extractEvidence(failedLog, DEFAULT_EVIDENCE_LINES);
-    await deps.resumeSession(job, sessionId, evidence);
+    const fixOutcome = await deps.resumeSession(job, sessionId, evidence);
+    // A failed resume cannot have moved the PR head; escalate with the real
+    // reason instead of burning the remaining retries on no-op sessions.
+    const failure = resumeFailureReason(fixOutcome);
+    if (failure) {
+      recordEvent(job.id, "status", { reason: failure, prNumber }, db);
+      return transitionJob(job.id, "needs_human", { errorMessage: failure }, db);
+    }
     job = transitionJob(job.id, "ci_running", {}, db);
     // loop again to re-poll the now-updated PR
   }
@@ -399,7 +439,16 @@ async function autoHealLoop(
           log: failedLog,
           maxLines: budgets.maxEvidenceLines,
         });
-        await deps.resumeSession(job, sessionId, prompt);
+        const fixOutcome = await deps.resumeSession(job, sessionId, prompt);
+        // The attempt never reached CI (timeout, cost cap, spawn failure,
+        // non-zero exit, or no commit): finalize it as rejected and escalate
+        // rather than awaiting a verdict on an unchanged head.
+        const failure = resumeFailureReason(fixOutcome);
+        if (failure) {
+          finalizeHealingAttempt(attempt.id, { status: "rejected", afterSha: null }, db);
+          closeHealingSession(session.id, "escalated", db);
+          return escalateToHuman(job, prNumber, `CI auto-heal: ${failure}.`, deps, db);
+        }
 
         transitionHealingSession(session.id, "awaiting_ci", db);
         job = transitionJob(job.id, "ci_running", {}, db);

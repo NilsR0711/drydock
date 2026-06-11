@@ -1,5 +1,6 @@
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
 import { jobs } from "@/lib/db/schema";
@@ -32,6 +33,12 @@ function liveJobIds(db: DB): Set<number> {
     if (!(TERMINAL_STATES as readonly string[]).includes(row.status)) live.add(row.id);
   }
   return live;
+}
+
+/** Fresh per-id liveness check, immediately before a destructive removal. */
+function isLiveJob(id: number, db: DB): boolean {
+  const row = db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, id)).get();
+  return row !== undefined && !(TERMINAL_STATES as readonly string[]).includes(row.status);
 }
 
 /**
@@ -73,7 +80,14 @@ export async function reapOrphanedWorktrees(deps: ReapDeps = {}): Promise<number
     for (const entry of entries) {
       const match = JOB_DIR.exec(entry) ?? FB_DIR.exec(entry) ?? DH_DIR.exec(entry);
       if (!match) continue; // only managed worktrees are reaped here
-      if (live.has(Number(match[1]))) continue; // guard: live job, never touch
+      const jobId = Number(match[1]);
+      if (live.has(jobId)) continue; // guard: live job, never touch
+      // The entry-time snapshot is not enough: the awaited git calls above
+      // yield the event loop, so a concurrently running driver tick may have
+      // created and claimed a brand-new job whose id is outside the snapshot.
+      // Re-check liveness right before deleting so its freshly added worktree
+      // is never reaped out from under a running agent session.
+      if (isLiveJob(jobId, db)) continue;
 
       const path = join(dir, entry);
       // Unregister the worktree before deleting it so git's metadata stays

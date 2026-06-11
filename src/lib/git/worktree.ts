@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Repo } from "@/lib/db/schema";
@@ -36,18 +37,26 @@ export class EmptyCommitError extends WorktreeError {
 }
 
 /**
+ * Process-wide per-repo mutation queues. Module-level by design: every job run
+ * and driver sweep constructs its own WorktreeManager, so an instance-scoped
+ * map would serialize nothing — two concurrent jobs (or a job racing a
+ * review-feedback sweep) on the same repo would contend on git's internal lock
+ * files and fail transiently.
+ */
+const repoLocks = new Map<string, Promise<unknown>>();
+
+/**
  * Manages isolated git worktrees, one per job, under the app home directory.
- * Mutations on the same repo path are serialized to avoid git index races.
+ * Mutations on the same repo path are serialized to avoid git index races —
+ * across all WorktreeManager instances in this process, not just within one.
  */
 export class WorktreeManager {
-  private locks = new Map<string, Promise<unknown>>();
-
   constructor(private readonly run: CommandRunner = spawnRunner) {}
 
   private withRepoLock<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
-    const prev = this.locks.get(repoPath) ?? Promise.resolve();
+    const prev = repoLocks.get(repoPath) ?? Promise.resolve();
     const next = prev.then(fn, fn);
-    this.locks.set(
+    repoLocks.set(
       repoPath,
       next.then(
         () => undefined,
@@ -68,9 +77,23 @@ export class WorktreeManager {
   async prepare(repo: Repo, jobId: number, issueNumber = 0): Promise<Worktree> {
     const branch = `drydock/issue-${issueNumber}-job-${jobId}`;
     const path = join(repoWorktreesDir(repo.name), `job-${jobId}`);
-    await this.withRepoLock(repo.path, () =>
-      this.git(["-C", repo.path, "worktree", "add", "-b", branch, path, repo.defaultBranch]),
-    );
+    await this.withRepoLock(repo.path, async () => {
+      // Branch and path derive solely from the job id, so a retry of the same
+      // job (operator requeue, crash recovery) collides with whatever attempt
+      // one left behind: remove() never ran, and the reaper skips non-terminal
+      // jobs. Clear the stale worktree and branch best-effort first, or every
+      // re-run dies on "a branch named ... already exists".
+      await this.git(["-C", repo.path, "worktree", "remove", "--force", path]).catch(
+        () => undefined,
+      );
+      // Prune AFTER the directory is gone: if `worktree remove` failed while
+      // the path still existed, pruning first would still see it as live and
+      // keep the stale registration, failing the re-add below.
+      rmSync(path, { recursive: true, force: true });
+      await this.git(["-C", repo.path, "worktree", "prune"]).catch(() => undefined);
+      await this.git(["-C", repo.path, "branch", "-D", branch]).catch(() => undefined);
+      await this.git(["-C", repo.path, "worktree", "add", "-b", branch, path, repo.defaultBranch]);
+    });
     return { path, branch };
   }
 

@@ -134,25 +134,35 @@ export function startOrchestrator(): void {
   // them under Vitest keeps lazy getDb() bootstraps from mutating per-test DBs or
   // leaving a polling timer running.
   if (!process.env.VITEST) {
-    try {
-      const { requeued, interrupted } = recoverOnStartup();
-      if (requeued > 0) console.log(`[orchestrator] requeued ${requeued} orphaned job(s)`);
-      if (interrupted > 0)
-        console.log(`[orchestrator] recovered ${interrupted} interrupted job(s)`);
-    } catch (err) {
-      logError("[orchestrator] recovery failed", err);
-    }
-
     if (acquireInstanceLock()) {
+      // Crash recovery runs only in the lock-holding instance, mirroring the
+      // worktree-reaper guard (issue #53): a second process sharing the DB
+      // would otherwise requeue the live instance's actively-running working
+      // jobs and flip its babysat CI states to interrupted before discovering
+      // it lost the lock.
+      try {
+        const { requeued, interrupted } = recoverOnStartup();
+        if (requeued > 0) console.log(`[orchestrator] requeued ${requeued} orphaned job(s)`);
+        if (interrupted > 0)
+          console.log(`[orchestrator] recovered ${interrupted} interrupted job(s)`);
+      } catch (err) {
+        logError("[orchestrator] recovery failed", err);
+      }
+
       // Only the lock-holding instance reaps worktrees, so a second process
       // never deletes the active instance's in-flight directories (issue #53).
+      // The driver loop starts only after the sweep settles: its first tick can
+      // create and claim a brand-new job, whose freshly added worktree the
+      // sweep's entry-time liveness snapshot would not protect.
       reapOrphanedWorktrees()
         .then((reaped) => {
           if (reaped > 0) console.log(`[orchestrator] reaped ${reaped} orphaned worktree(s)`);
         })
-        .catch((err) => logError("[orchestrator] worktree reap failed", err));
-      startDriverLoop();
-      startPruneSweep();
+        .catch((err) => logError("[orchestrator] worktree reap failed", err))
+        .finally(() => {
+          startDriverLoop();
+          startPruneSweep();
+        });
     } else {
       console.warn("[orchestrator] another instance holds the lock; driver loop not started");
     }

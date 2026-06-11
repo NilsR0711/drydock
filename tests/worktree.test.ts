@@ -1,9 +1,26 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Repo } from "@/lib/db/schema";
 import type { CommandResult, CommandRunner } from "@/lib/exec/runner";
 import { EmptyCommitError, WorktreeManager, worktreeHome } from "@/lib/git/worktree";
 
 const repo = { id: 7, path: "/repos/acme", name: "acme", defaultBranch: "main" } as Repo;
+
+// prepare() runs a real rmSync against the derived worktree path, so the
+// suite must never run against the developer's actual ~/.drydock.
+const originalHome = process.env.DRYDOCK_HOME;
+let testHome = "";
+beforeEach(() => {
+  testHome = mkdtempSync(join(tmpdir(), "drydock-worktree-"));
+  process.env.DRYDOCK_HOME = testHome;
+});
+afterEach(() => {
+  rmSync(testHome, { recursive: true, force: true });
+  if (originalHome === undefined) delete process.env.DRYDOCK_HOME;
+  else process.env.DRYDOCK_HOME = originalHome;
+});
 
 function recordingRunner() {
   const calls: { cmd: string; args: string[]; cwd?: string }[] = [];
@@ -38,6 +55,31 @@ describe("WorktreeManager", () => {
     const { run } = recordingRunner();
     const wt = await new WorktreeManager(run).prepare(repo, 42, 13);
     expect(wt.branch).toBe("drydock/issue-13-job-42");
+  });
+
+  it("prepare clears the stale worktree and branch of a prior attempt before re-adding", async () => {
+    // Branch and path derive solely from the job id, so a requeued job's second
+    // attempt collides with attempt one's leftovers unless prepare cleans them.
+    const { calls, run } = recordingRunner();
+    const wt = await new WorktreeManager(run).prepare(repo, 42, 13);
+    expect(calls.map((c) => c.args.slice(2))).toEqual([
+      ["worktree", "remove", "--force", wt.path],
+      ["worktree", "prune"],
+      ["branch", "-D", "drydock/issue-13-job-42"],
+      ["worktree", "add", "-b", "drydock/issue-13-job-42", wt.path, "main"],
+    ]);
+  });
+
+  it("prepare succeeds on a fresh job even though the stale-cleanup calls fail", async () => {
+    // First attempt of a job: there is nothing to remove, so the best-effort
+    // cleanup git calls exit non-zero. Only a failing `worktree add` is fatal.
+    const run: CommandRunner = async (_cmd, args) => {
+      const isAdd = args.includes("add");
+      return { stdout: "", stderr: isAdd ? "" : "not found", exitCode: isAdd ? 0 : 1 };
+    };
+    await expect(new WorktreeManager(run).prepare(repo, 1, 1)).resolves.toMatchObject({
+      branch: "drydock/issue-1-job-1",
+    });
   });
 
   it("prepareForBranch fetches and checks out an existing branch", async () => {

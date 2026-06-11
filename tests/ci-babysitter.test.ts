@@ -99,7 +99,7 @@ describe("ciBabysitter", () => {
       [{ name: "build", state: "FAILURE" }],
       [{ name: "build", state: "SUCCESS" }],
     ]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     const final = await ciBabysitter(job, 5, {
       db,
       gh,
@@ -118,7 +118,7 @@ describe("ciBabysitter", () => {
     transitionJob(job.id, "working", {}, db);
     transitionJob(job.id, "ci_running", { prNumber: 5 }, db);
     const { gh } = scriptedGh([[{ name: "build", state: "FAILURE" }]]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     const final = await ciBabysitter(job, 5, {
       db,
       gh,
@@ -134,7 +134,7 @@ describe("ciBabysitter", () => {
   it("escalates to needs_human when checks stay pending past the wait budget", async () => {
     const job = ciRunningJob(6);
     const { gh } = scriptedGh([[{ name: "build", state: "PENDING" }]]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     // Clock advances 60s per call; budget is 2 min, so the deadline is breached
     // after a couple of pending polls rather than looping forever.
     let t = 0;
@@ -206,6 +206,7 @@ describe("ciBabysitter", () => {
     let captured = "";
     const resume = vi.fn(async (_j: unknown, _s: string, log: string) => {
       captured = log;
+      return { exitCode: 0 };
     });
     const final = await ciBabysitter(job, 5, {
       db,
@@ -225,7 +226,7 @@ describe("ciBabysitter", () => {
   it("gives up after MAX retries -> needs_human + follow-up issue", async () => {
     const job = ciRunningJob(3);
     const { gh } = scriptedGh([[{ name: "build", state: "FAILURE" }]]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     const final = await ciBabysitter(job, 5, {
       db,
       gh,
@@ -301,7 +302,7 @@ describe("ciBabysitter — merge gate (issue #159)", () => {
       [{ name: "build", state: "FAILURE" }],
       [{ name: "build", state: "SUCCESS" }],
     ]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     let t = 0;
     const sleep = vi.fn(async () => {
       t += 3 * 60_000;

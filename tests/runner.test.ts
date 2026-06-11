@@ -17,4 +17,14 @@ describe("spawnRunner", () => {
   it("exposes a default wall-clock bound for one-shot commands", () => {
     expect(ONE_SHOT_TIMEOUT_MS).toBeGreaterThan(0);
   });
+
+  it("maps a signal death to a non-zero exit code instead of success", async () => {
+    // close(null, signal) must never read as exit 0: an externally killed
+    // git/gh call would otherwise be treated as having succeeded.
+    const res = await spawnRunner("node", [
+      "-e",
+      'process.kill(process.pid, "SIGTERM"); setTimeout(() => {}, 60000);',
+    ]);
+    expect(res.exitCode).not.toBe(0);
+  });
 });
