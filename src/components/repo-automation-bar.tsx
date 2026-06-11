@@ -154,6 +154,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [minAssoc, setMinAssoc] = useState(repo.minAuthorAssociation);
   const [deployPlatform, setDeployPlatform] = useState(repo.deploymentPlatform ?? "");
   const [maxAttempts, setMaxAttempts] = useState(repo.maxAttempts);
+  const [escalateModel, setEscalateModel] = useState(repo.escalateModelOnRetry);
   const [agentInstructions, setAgentInstructions] = useState(repo.agentInstructions ?? "");
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -273,6 +274,15 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               />
             </Field>
           </AutoToggle>
+          <AutoToggle
+            label="Escalate model on retry"
+            checked={escalateModel}
+            onChange={(v) => {
+              setEscalateModel(v);
+              persist({ escalateModelOnRetry: v });
+            }}
+            help="When a failed job is requeued, the next attempt runs the next-stronger model in this agent's ladder (capped at the strongest). Each attempt is priced at the model it actually ran."
+          />
           <AutoToggle
             label="Decompose large issues"
             checked={autoDecompose}
