@@ -22,6 +22,10 @@ export class EtagCache {
   set(key: string, etag: string, body: string): void {
     this.entries.set(key, { etag, body });
   }
+
+  delete(key: string): void {
+    this.entries.delete(key);
+  }
 }
 
 /** Process-wide ETag cache shared by every GitHub client. */

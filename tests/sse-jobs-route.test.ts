@@ -6,9 +6,19 @@ import { getDb } from "@/lib/db/client";
 import { jobEvents } from "@/lib/db/schema";
 import { createJob } from "@/lib/orchestrator/jobs";
 import { addRepo } from "@/lib/repos/service";
+import { getBroker } from "@/lib/stream/broker";
 
-function get(id: string, signal?: AbortSignal): Promise<Response> {
-  const req = new Request(`http://127.0.0.1/api/sse/jobs/${id}`, { signal });
+function get(
+  id: string,
+  signal?: AbortSignal,
+  opts: { lastEventId?: string; query?: string } = {},
+): Promise<Response> {
+  const headers: Record<string, string> =
+    opts.lastEventId !== undefined ? { "Last-Event-ID": opts.lastEventId } : {};
+  const req = new Request(`http://127.0.0.1/api/sse/jobs/${id}${opts.query ?? ""}`, {
+    signal,
+    headers,
+  });
   return GET(req as never, { params: Promise.resolve({ id }) });
 }
 
@@ -82,5 +92,58 @@ describe("GET /api/sse/jobs/[id]", () => {
     expect(text).toContain('"error":"unparseable event payload"');
     // ...and the stream still delivers the events after it.
     expect(text).toContain('"text":"still alive"');
+  });
+
+  /** Insert sequential text events and return their row ids. */
+  function seedEvents(texts: string[]): number[] {
+    const db = getDb();
+    return texts.map(
+      (text) =>
+        db
+          .insert(jobEvents)
+          .values({ jobId, type: "text", payload: JSON.stringify({ text }) })
+          .returning()
+          .get().id,
+    );
+  }
+
+  it("resumes after the Last-Event-ID header instead of re-replaying everything", async () => {
+    const ids = seedEvents(["one", "two", "three"]);
+
+    const ac = new AbortController();
+    const res = await get(String(jobId), ac.signal, { lastEventId: String(ids[1]) });
+    const text = await readBlocks(res, 1);
+    ac.abort();
+    expect(text).toContain('"text":"three"');
+    expect(text).not.toContain('"text":"one"');
+    expect(text).not.toContain('"text":"two"');
+  });
+
+  it("supports ?after= as a manual resume fallback", async () => {
+    const ids = seedEvents(["a", "b"]);
+
+    const ac = new AbortController();
+    const res = await get(String(jobId), ac.signal, { query: `?after=${ids[0]}` });
+    const text = await readBlocks(res, 1);
+    ac.abort();
+    expect(text).toContain('"text":"b"');
+    expect(text).not.toContain('"text":"a"');
+  });
+
+  it("falls back to the full replay window on an unusable Last-Event-ID", async () => {
+    seedEvents(["solo"]);
+
+    const ac = new AbortController();
+    const res = await get(String(jobId), ac.signal, { lastEventId: "not-a-number" });
+    const text = await readBlocks(res, 1);
+    ac.abort();
+    expect(text).toContain('"text":"solo"');
+  });
+
+  it("unsubscribes from the broker when the stream is cancelled without an abort", async () => {
+    const res = await get(String(jobId));
+    expect(getBroker().subscriberCount(jobId)).toBe(1);
+    await res.body?.cancel();
+    expect(getBroker().subscriberCount(jobId)).toBe(0);
   });
 });

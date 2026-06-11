@@ -87,7 +87,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 🏷️ **Opt-in release management** — per repo, extend autonomy past merge to shipping: evaluate the PRs merged since the last tag, decide whether a release is warranted and the semver bump, generate notes, and publish a release. The auto path is **idempotent** (one run per merge commit, never a duplicate release for a tag) and a failed run is retryable; a **dry-run preview** shows the proposed version and included PRs with no side effects; a **manual publish** forces a release through the same evaluation pipeline. Gated by both a global kill-switch and a per-repo opt-in, off by default; releases at the default-branch tip and never auto-merges. See [ADR 028](docs/adr/028-release-management.md).
 
-⚖️ **Rate-limit budgeting** — a priority-aware governor meters every GitHub call: the background sweep runs at *low* priority and yields once the budget drops below a reserve fraction, while interactive actions stay *high*; a hard floor stops anything from draining the budget to zero, a 429 backs off until reset, and unchanged issue lists are fetched with conditional ETag requests so they cost nothing. See [ADR 018](docs/adr/018-rate-limit-governor.md).
+⚖️ **Rate-limit budgeting** — a priority-aware governor meters every GitHub call: the background sweep runs at *low* priority and yields once the budget drops below a reserve fraction, while interactive actions stay *high*; a hard floor stops anything from draining the budget to zero, a 429 backs off until reset, and unchanged single-page issue lists are fetched with conditional ETag requests so they cost nothing (multi-page lists are always refetched — GitHub's ETag only validates the first page). See [ADR 018](docs/adr/018-rate-limit-governor.md).
 
 💬 **Ask about this PR** — on a job's detail view, ask a free-text question ("why did this change X?", "is the failing test related?", "what's left to do?") and a **read-only** agent answers from a length-capped context bundle Drydock already has: PR metadata, check pass/fail state, a review-feedback summary, the recent activity log, and the PR diff. Each question is persisted with a visible lifecycle (`answering → answered | error`), scoped to the PR it was asked about, and empty or failed responses are recorded as an error rather than crashing.
 
@@ -330,8 +330,9 @@ pnpm mcp            # start the local stdio MCP server (see "MCP server")
   sweep runs automatically; for a manual run use `pnpm db:prune [--days <n>] [--no-vacuum]`,
   which deletes expired events and runs `VACUUM` to reclaim disk. See
   [ADR 023](docs/adr/023-log-retention-and-pruning.md).
-- **Secret redaction** — GitHub/GitLab tokens and `Bearer` values echoed in agent output are
-  scrubbed before any log event is persisted or streamed.
+- **Secret redaction** — GitHub/GitLab tokens, `Bearer`/`Basic` values, Anthropic/OpenAI API
+  keys and Telegram bot tokens echoed in agent output are scrubbed before any log event is
+  persisted or streamed.
 - **Pause / cost limit** — flip the global pause or hit the daily cost limit and the driver
   loop stops claiming new work; in-flight jobs finish cleanly.
 

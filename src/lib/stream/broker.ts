@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { type JobEvent, jobEvents } from "@/lib/db/schema";
 import { redactSecrets } from "@/lib/log/redact";
@@ -50,7 +50,15 @@ export class LogBroker {
    */
   publish(jobId: number, event: BrokerEvent): JobEvent {
     const payload = redactSecrets(JSON.stringify(event.payload ?? {}));
-    const safePayload = JSON.parse(payload);
+    // Redaction rewrites the serialized payload, so the re-parse must never be
+    // allowed to throw into the producer (publish runs synchronously inside the
+    // child stdout handler). Mirror the replay-side defense with a fallback.
+    let safePayload: unknown;
+    try {
+      safePayload = JSON.parse(payload);
+    } catch {
+      safePayload = { error: "unparseable event payload" };
+    }
     const row = this.db
       .insert(jobEvents)
       .values({ jobId, type: event.type, payload })
@@ -58,22 +66,43 @@ export class LogBroker {
       .get();
     const set = this.subs.get(jobId);
     if (set) {
-      for (const sub of set) {
-        sub.send({ id: row.id, type: row.type, payload: safePayload });
+      // A broken subscriber (e.g. an SSE controller closed mid-publish) must
+      // not break the fan-out or its producer: drop it and keep going.
+      for (const sub of [...set]) {
+        try {
+          sub.send({ id: row.id, type: row.type, payload: safePayload });
+        } catch {
+          this.unsubscribe(jobId, sub);
+        }
       }
     }
     return row;
   }
 
-  /** Last N persisted events for replay on (re)connect. */
-  replay(jobId: number, limit = REPLAY_LIMIT): JobEvent[] {
-    const rows = this.db
+  /**
+   * Persisted events for replay on (re)connect: the last N, or — when the
+   * client resumes with `afterId` (SSE `Last-Event-ID`) — the next N after
+   * that id. Both shapes bound the query in SQL (the `(jobId, ts)` index
+   * covers them) so a long job's full history is never materialized.
+   */
+  replay(jobId: number, limit = REPLAY_LIMIT, afterId?: number): JobEvent[] {
+    if (afterId !== undefined) {
+      return this.db
+        .select()
+        .from(jobEvents)
+        .where(and(eq(jobEvents.jobId, jobId), gt(jobEvents.id, afterId)))
+        .orderBy(jobEvents.ts, jobEvents.id)
+        .limit(limit)
+        .all();
+    }
+    return this.db
       .select()
       .from(jobEvents)
       .where(eq(jobEvents.jobId, jobId))
-      .orderBy(jobEvents.ts, jobEvents.id)
-      .all();
-    return rows.slice(-limit);
+      .orderBy(desc(jobEvents.ts), desc(jobEvents.id))
+      .limit(limit)
+      .all()
+      .reverse();
   }
 }
 

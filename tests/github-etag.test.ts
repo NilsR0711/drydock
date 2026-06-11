@@ -20,6 +20,14 @@ describe("EtagCache", () => {
     cache.set("k", '"v2"', "new");
     expect(cache.get("k")).toEqual({ etag: '"v2"', body: "new" });
   });
+
+  it("deletes an entry (and tolerates deleting an unknown key)", () => {
+    const cache = new EtagCache();
+    cache.set("k", '"v1"', "body");
+    cache.delete("k");
+    expect(cache.get("k")).toBeUndefined();
+    expect(() => cache.delete("missing")).not.toThrow();
+  });
 });
 
 describe("parseIncludeResponse", () => {

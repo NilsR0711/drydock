@@ -211,6 +211,112 @@ describe("GitlabForge list pagination", () => {
   });
 });
 
+describe("GitlabForge pipeline job pagination", () => {
+  /** An http client serving an MR with pipeline 99 and two pages of jobs. */
+  function twoPageJobsHttp(): HttpClient {
+    return async (url) => {
+      if (/\/merge_requests\/12(\?|$)/.test(url)) {
+        return {
+          status: 200,
+          ok: true,
+          body: JSON.stringify({ iid: 12, sha: "abc", head_pipeline: { id: 99 } }),
+        };
+      }
+      if (url.includes("/pipelines/99/jobs")) {
+        if (url.includes("page=2")) {
+          return {
+            status: 200,
+            ok: true,
+            body: JSON.stringify([{ id: 6, name: "late-test", status: "failed" }]),
+          };
+        }
+        return {
+          status: 200,
+          ok: true,
+          body: JSON.stringify([{ id: 5, name: "build", status: "success" }]),
+          headers: { "x-next-page": "2" },
+        };
+      }
+      if (url.includes("/jobs/6/trace")) {
+        return { status: 200, ok: true, body: "late failure log" };
+      }
+      return { status: 404, ok: false, body: JSON.stringify({ message: "no route" }) };
+    };
+  }
+
+  it("prChecks follows X-Next-Page so a failing job beyond 100 is not dropped", async () => {
+    const forge = new GitlabForge(
+      { cwd: "/repo", baseUrl: null, token: "t" },
+      { http: twoPageJobsHttp(), run: fakeRun(REMOTE) },
+    );
+    const checks = await forge.prChecks(12);
+    expect(checks).toEqual([
+      { name: "build", state: "SUCCESS" },
+      { name: "late-test", state: "FAILURE" },
+    ]);
+  });
+
+  it("failedRunLog finds a failed job on a later page", async () => {
+    const forge = new GitlabForge(
+      { cwd: "/repo", baseUrl: null, token: "t" },
+      { http: twoPageJobsHttp(), run: fakeRun(REMOTE) },
+    );
+    expect(await forge.failedRunLog(12)).toBe("late failure log");
+  });
+
+  it("prDiff follows X-Next-Page across diff pages", async () => {
+    const http: HttpClient = async (url) => {
+      if (url.includes("page=2")) {
+        return {
+          status: 200,
+          ok: true,
+          body: JSON.stringify([{ old_path: "b", new_path: "b", diff: "+2" }]),
+        };
+      }
+      return {
+        status: 200,
+        ok: true,
+        body: JSON.stringify([{ old_path: "a", new_path: "a", diff: "+1" }]),
+        headers: { "x-next-page": "2" },
+      };
+    };
+    const forge = new GitlabForge(
+      { cwd: "/repo", baseUrl: null, token: "t" },
+      { http, run: fakeRun(REMOTE) },
+    );
+    const diff = await forge.prDiff(12);
+    expect(diff).toContain("+++ b/a\n+1");
+    expect(diff).toContain("+++ b/b\n+2");
+  });
+});
+
+describe("GitlabForge project resolution retry", () => {
+  it("retries the git remote lookup after a transient failure instead of caching the rejection", async () => {
+    let calls = 0;
+    const run = vi.fn(async (): Promise<CommandResult> => {
+      calls++;
+      if (calls === 1) return { stdout: "", stderr: "git busy", exitCode: 1 };
+      return { stdout: REMOTE, stderr: "", exitCode: 0 };
+    });
+    const { http } = fakeHttp([{ method: "GET", match: "/issues", response: { body: "[]" } }]);
+    const forge = new GitlabForge({ cwd: "/repo", baseUrl: null, token: "t" }, { http, run });
+
+    await expect(forge.listAllIssues()).rejects.toBeInstanceOf(ForgeError);
+    // The transient condition cleared: the next call must retry and succeed.
+    await expect(forge.listAllIssues()).resolves.toEqual([]);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("resolves the project only once after a successful lookup", async () => {
+    const { http } = fakeHttp([{ method: "GET", match: "/issues", response: { body: "[]" } }]);
+    const run = fakeRun(REMOTE);
+    const forge = new GitlabForge({ cwd: "/repo", baseUrl: null, token: "t" }, { http, run });
+    await forge.listAllIssues();
+    await forge.listAllIssues();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("GitlabForge.viewIssue", () => {
   it("maps description→body, opened→open, and notes→comments (system notes filtered)", async () => {
     const { forge } = makeForge([

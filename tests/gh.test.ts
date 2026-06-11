@@ -133,7 +133,9 @@ describe("GhClient list pagination", () => {
     expect(runner).toHaveBeenCalledTimes(MAX_ISSUE_PAGES);
   });
 
-  it("replays the full multi-page list from cache on a 304", async () => {
+  it("never caches a multi-page list under page 1's ETag (refetches every page)", async () => {
+    // GitHub's ETag validates page 1 alone, so a 304 cannot prove pages 2..N
+    // unchanged — a multi-page result must be refetched in full on every poll.
     const cache = new EtagCache();
     const gov = new RateLimitGovernor();
     const page1 = includeResponse({
@@ -151,10 +153,49 @@ describe("GhClient list pagination", () => {
     const first = sequenceRunner([{ stdout: page1 }, { stdout: page2 }]);
     await new GhClient("/repo", first, gov, cache).listAllIssues();
 
-    const second = fakeRunner({ stdout: includeResponse({ status: 304, body: "" }) });
+    // Page 2 changed (issue #2 was closed); page 1's bytes are identical.
+    const second = sequenceRunner([
+      { stdout: page1 },
+      { stdout: includeResponse({ status: 200, body: "[]" }) },
+    ]);
     const issues = await new GhClient("/repo", second, gov, cache).listAllIssues();
-    expect(issues.map((i) => i.number)).toEqual([1, 2]); // both pages served from cache
-    expect(second).toHaveBeenCalledOnce();
+    expect(issues.map((i) => i.number)).toEqual([1]); // close on page 2 observed
+    expect(second).toHaveBeenCalledTimes(2); // both pages refetched
+    const [, secondArgs] = second.mock.calls[0] as [string, string[]];
+    expect(secondArgs).not.toContain("-H"); // no If-None-Match was sent
+  });
+
+  it("drops a stale single-page cache entry once the list grows multi-page", async () => {
+    const cache = new EtagCache();
+    const gov = new RateLimitGovernor();
+    const singlePage = includeResponse({
+      status: 200,
+      headers: { etag: '"v1"' },
+      body: JSON.stringify([restIssue({ number: 1 })]),
+    });
+    await new GhClient("/repo", fakeRunner({ stdout: singlePage }), gov, cache).listAllIssues();
+
+    const page1 = includeResponse({
+      status: 200,
+      headers: {
+        etag: '"v2"',
+        link: '<https://api.github.com/repositories/9/issues?page=2>; rel="next"',
+      },
+      body: JSON.stringify([restIssue({ number: 1 }), restIssue({ number: 2 })]),
+    });
+    const page2 = includeResponse({
+      status: 200,
+      body: JSON.stringify([restIssue({ number: 3 })]),
+    });
+    const grow = sequenceRunner([{ stdout: page1 }, { stdout: page2 }]);
+    await new GhClient("/repo", grow, gov, cache).listAllIssues();
+
+    // The old single-page entry must be gone: a later 304 could otherwise
+    // resurrect the shorter list.
+    const third = fakeRunner({ stdout: singlePage });
+    await new GhClient("/repo", third, gov, cache).listAllIssues();
+    const [, thirdArgs] = third.mock.calls[0] as [string, string[]];
+    expect(thirdArgs).not.toContain("-H");
   });
 });
 
@@ -646,9 +687,19 @@ describe("GhClient.ensureLabel", () => {
     await gh.ensureLabel("drydock:queue", { color: "1f6feb", description: "Queued" });
     expect(runner).toHaveBeenLastCalledWith(
       "gh",
-      ["label", "create", "drydock:queue", "--color=1f6feb", "--description=Queued"],
+      ["label", "create", "--color=1f6feb", "--description=Queued", "--", "drydock:queue"],
       "/repo",
     );
+  });
+
+  it("passes the name after `--` so a leading-dash label is never read as a flag", async () => {
+    const runner = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "[]", stderr: "", exitCode: 0 })
+      .mockResolvedValueOnce({ stdout: "", stderr: "", exitCode: 0 });
+    const gh = new GhClient("/repo", runner);
+    await gh.ensureLabel("-rf danger");
+    expect(runner).toHaveBeenLastCalledWith("gh", ["label", "create", "--", "-rf danger"], "/repo");
   });
 
   it("tolerates a concurrent create (label already exists)", async () => {

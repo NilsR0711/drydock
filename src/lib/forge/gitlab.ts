@@ -160,7 +160,7 @@ export class GitlabForge implements ForgeClient {
 
   private resolveProject(): Promise<ProjectRef> {
     if (!this.projectRef) {
-      this.projectRef = (async () => {
+      const lookup = (async () => {
         const res = await this.run("git", ["remote", "get-url", "origin"], this.config.cwd);
         if (res.exitCode !== 0 || !res.stdout.trim()) {
           throw new ForgeError(res.stderr || "could not resolve git remote 'origin'");
@@ -169,6 +169,13 @@ export class GitlabForge implements ForgeClient {
         const baseUrl = (this.config.baseUrl?.trim() || `https://${host}`).replace(/\/$/, "");
         return { baseUrl, encodedPath: encodeURIComponent(path) };
       })();
+      // Memoize only success: a transient git failure must not poison the
+      // client for its whole lifetime (one instance spans a job's entire CI
+      // poll loop), so a rejected lookup is cleared and retried next call.
+      lookup.catch(() => {
+        if (this.projectRef === lookup) this.projectRef = undefined;
+      });
+      this.projectRef = lookup;
     }
     return this.projectRef;
   }
@@ -228,13 +235,29 @@ export class GitlabForge implements ForgeClient {
    * {@link MAX_ISSUE_PAGES} so a misbehaving header cannot loop forever.
    */
   private async listIssuesPaginated(query: Record<string, string>): Promise<ForgeIssue[]> {
-    const all: ForgeIssue[] = [];
+    return this.listPaginated("/issues", query, parseIssues);
+  }
+
+  /**
+   * Fetch every page of a project list endpoint, following GitLab's
+   * `X-Next-Page` response header (empty when no further page exists), bounded
+   * by {@link MAX_ISSUE_PAGES} so a misbehaving header cannot loop forever.
+   * Used for issues, pipeline jobs, MR diffs and issue notes alike — a failing
+   * CI job beyond the first 100 must not be silently dropped (it would
+   * misclassify a red pipeline as passed). Throws ForgeError on a non-ok page.
+   */
+  private async listPaginated<T>(
+    path: string,
+    query: Record<string, string>,
+    parsePage: (body: string) => T[],
+  ): Promise<T[]> {
+    const all: T[] = [];
     let page = 1;
     for (let i = 0; i < MAX_ISSUE_PAGES; i++) {
-      const res = await this.mutate("GET", "/issues", {
+      const res = await this.mutate("GET", path, {
         query: { ...query, per_page: "100", page: String(page) },
       });
-      all.push(...parseIssues(res.body));
+      all.push(...parsePage(res.body));
       const next = res.headers?.["x-next-page"];
       if (!next) break;
       const nextPage = Number(next);
@@ -246,11 +269,8 @@ export class GitlabForge implements ForgeClient {
 
   async viewIssue(issueNumber: number): Promise<IssueDetail> {
     const issueRes = await this.mutate("GET", `/issues/${issueNumber}`);
-    const notesRes = await this.mutate("GET", `/issues/${issueNumber}/notes`, {
-      query: { per_page: "100" },
-    });
+    const notes = await this.listPaginated(`/issues/${issueNumber}/notes`, {}, parseNotes);
     const issue = gitlabIssueDetailSchema.parse(safeJson(issueRes.body, {}));
-    const notes = z.array(gitlabNoteSchema).parse(safeJson(notesRes.body, []));
     return {
       number: issue.iid,
       title: issue.title,
@@ -320,10 +340,7 @@ export class GitlabForge implements ForgeClient {
   async prChecks(prNumber: number): Promise<PrCheck[]> {
     const pipelineId = await this.latestPipelineId(prNumber);
     if (pipelineId === null) return [];
-    const res = await this.mutate("GET", `/pipelines/${pipelineId}/jobs`, {
-      query: { per_page: "100" },
-    });
-    const jobs = z.array(gitlabJobSchema).parse(safeJson(res.body, []));
+    const jobs = await this.listPaginated(`/pipelines/${pipelineId}/jobs`, {}, parseJobs);
     return jobs.map((j) => ({ name: j.name, state: mapJobStatus(j.status) }));
   }
 
@@ -336,18 +353,8 @@ export class GitlabForge implements ForgeClient {
     try {
       const pipelineId = await this.latestPipelineId(prNumber);
       if (pipelineId === null) return "";
-      const jobsRes = await this.request("GET", `/pipelines/${pipelineId}/jobs`, {
-        query: { per_page: "100" },
-      });
-      if (!jobsRes.ok) {
-        logError(
-          `GitLab failedRunLog: pipeline ${pipelineId} jobs request failed (${jobsRes.status})`,
-        );
-        return "";
-      }
-      const jobs = z.array(gitlabJobSchema).safeParse(safeJson(jobsRes.body, []));
-      if (!jobs.success) return "";
-      const failed = jobs.data.find((j) => j.status === "failed" && j.id !== undefined);
+      const jobs = await this.listPaginated(`/pipelines/${pipelineId}/jobs`, {}, parseJobs);
+      const failed = jobs.find((j) => j.status === "failed" && j.id !== undefined);
       if (!failed) return "";
       const traceRes = await this.request("GET", `/jobs/${failed.id}/trace`);
       if (!traceRes.ok) {
@@ -363,18 +370,8 @@ export class GitlabForge implements ForgeClient {
 
   async prDiff(prNumber: number): Promise<string> {
     try {
-      const res = await this.request("GET", `/merge_requests/${prNumber}/diffs`, {
-        query: { per_page: "100" },
-      });
-      if (!res.ok) {
-        logError(`GitLab prDiff: MR ${prNumber} diffs request failed (${res.status})`);
-        return "";
-      }
-      const parsed = z.array(gitlabDiffSchema).safeParse(safeJson(res.body, []));
-      if (!parsed.success) return "";
-      return parsed.data
-        .map((d) => `--- a/${d.old_path}\n+++ b/${d.new_path}\n${d.diff}`)
-        .join("\n");
+      const diffs = await this.listPaginated(`/merge_requests/${prNumber}/diffs`, {}, parseDiffs);
+      return diffs.map((d) => `--- a/${d.old_path}\n+++ b/${d.new_path}\n${d.diff}`).join("\n");
     } catch (err) {
       logError("GitLab prDiff error:", err);
       return "";
@@ -427,6 +424,24 @@ function parseIssues(body: string): ForgeIssue[] {
     // act on public participants). See ADR 016.
     authorAssociation: null,
   }));
+}
+
+function parseJobs(body: string): z.infer<typeof gitlabJobSchema>[] {
+  const parsed = z.array(gitlabJobSchema).safeParse(safeJson(body, []));
+  if (!parsed.success) throw new ForgeError(`unexpected GitLab output: ${parsed.error.message}`);
+  return parsed.data;
+}
+
+function parseDiffs(body: string): z.infer<typeof gitlabDiffSchema>[] {
+  const parsed = z.array(gitlabDiffSchema).safeParse(safeJson(body, []));
+  if (!parsed.success) throw new ForgeError(`unexpected GitLab output: ${parsed.error.message}`);
+  return parsed.data;
+}
+
+function parseNotes(body: string): z.infer<typeof gitlabNoteSchema>[] {
+  const parsed = z.array(gitlabNoteSchema).safeParse(safeJson(body, []));
+  if (!parsed.success) throw new ForgeError(`unexpected GitLab output: ${parsed.error.message}`);
+  return parsed.data;
 }
 
 function normalizeColor(color: string): string {
