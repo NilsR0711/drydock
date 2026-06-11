@@ -272,7 +272,12 @@ export class GhClient {
 
     const raw: unknown[] = [...parseRawIssueArray(response.body)];
     let next = parseNextLink(response.headers.link);
-    const singlePage = !next;
+    // A page is provably complete only when it is BOTH the last page and not
+    // boundary-sized: a no-next page holding exactly per_page items can grow a
+    // page 2 later while page 1's bytes (and ETag) stay put, so caching it
+    // would replay a stale, shorter list on every 304.
+    const perPage = Number(new URLSearchParams(query).get("per_page") ?? "30");
+    const singlePage = !next && Number.isFinite(perPage) && raw.length < perPage;
     let pages = 1;
     while (next && pages < MAX_ISSUE_PAGES) {
       this.gate("core");

@@ -46,6 +46,29 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         }
       };
 
+      // Subscribe BEFORE replaying: replay-then-subscribe leaves a window in
+      // which a concurrently published event lands in neither the replay
+      // result nor the live fan-out, permanently dropping it for this client.
+      // Live events arriving during the replay are buffered and flushed after
+      // it, deduplicated against the replay by event id, so ordering holds.
+      let cursor = afterId ?? 0;
+      let replaying = true;
+      const buffered: { id?: number; type: string; payload: unknown }[] = [];
+      const deliver = (event: { id?: number; type: string; payload: unknown }) => {
+        if (typeof event.id === "number") {
+          if (event.id <= cursor) return; // already sent via replay
+          cursor = event.id;
+        }
+        write(event);
+      };
+      sub = {
+        send: (event) => {
+          if (replaying) buffered.push(event);
+          else deliver(event);
+        },
+      };
+      broker.subscribe(jobId, sub);
+
       // Replay persisted events — everything after the client's Last-Event-ID
       // on a resume, the last 200 on a fresh connect — then go live. A corrupt
       // persisted payload must not kill the whole stream, so parse each row
@@ -57,11 +80,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         } catch {
           payload = { error: "unparseable event payload" };
         }
+        cursor = Math.max(cursor, row.id);
         write({ id: row.id, type: row.type, payload });
       }
-
-      sub = { send: write };
-      broker.subscribe(jobId, sub);
+      replaying = false;
+      for (const event of buffered) deliver(event);
+      buffered.length = 0;
       req.signal.addEventListener("abort", () => {
         unsubscribe();
         try {
