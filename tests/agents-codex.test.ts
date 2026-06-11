@@ -15,6 +15,16 @@ describe("codexProvider", () => {
     expect(codexProvider.supportsResume).toBe(true);
   });
 
+  it("classifies limit failures via classifyFailure (issue #167)", () => {
+    const info = codexProvider.classifyFailure?.({
+      exitCode: 1,
+      stderr: "",
+      resultText: "You've hit your usage limit. Try again at 9:01 PM.",
+      resultIsError: true,
+    });
+    expect(info).toMatchObject({ agent: "codex", kind: "usage_limit" });
+  });
+
   it("builds a non-interactive exec invocation with JSON output and a writable sandbox", () => {
     const args = codexProvider.buildStartArgs({
       prompt: "fix the bug",
@@ -142,6 +152,48 @@ describe("CodexStreamParser", () => {
     ];
     expect(events.at(-1)?.type).toBe("result");
     expect(events.at(-1)?.isError).toBe(true);
+  });
+
+  it("captures the turn.failed error message as the result text (issue #167)", () => {
+    const p = new CodexStreamParser();
+    const line = JSON.stringify({
+      type: "turn.failed",
+      error: { message: "You've hit your usage limit. Try again at 9:01 PM." },
+    });
+    [...p.push(`${line}\n`), ...p.flush()];
+    expect(p.resultIsError).toBe(true);
+    expect(p.resultText).toBe("You've hit your usage limit. Try again at 9:01 PM.");
+  });
+
+  it("captures a fatal stream error event's message as the result text", () => {
+    const p = new CodexStreamParser();
+    const line = JSON.stringify({
+      type: "error",
+      message: "stream disconnected before completion: Rate limit reached for gpt-5-codex",
+    });
+    [...p.push(`${line}\n`), ...p.flush()];
+    expect(p.resultIsError).toBe(true);
+    expect(p.resultText).toContain("Rate limit reached");
+  });
+
+  it("clears the error result when a later turn completes (transient reconnect notices)", () => {
+    // The CLI emits non-fatal `error` events (e.g. "Reconnecting... 1/5") that
+    // do not fail the turn; a subsequent turn.completed must win.
+    const p = new CodexStreamParser();
+    const lines = [
+      JSON.stringify({ type: "error", message: "Reconnecting... 1/5 (stream error)" }),
+      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 10, output_tokens: 5 } }),
+    ].join("\n");
+    [...p.push(`${lines}\n`), ...p.flush()];
+    expect(p.resultIsError).toBe(false);
+    expect(p.resultText).toBeUndefined();
+  });
+
+  it("keeps resultIsError set on a turn.failed without an error message", () => {
+    const p = new CodexStreamParser();
+    [...p.push(`${JSON.stringify({ type: "turn.failed" })}\n`), ...p.flush()];
+    expect(p.resultIsError).toBe(true);
+    expect(p.resultText).toBeUndefined();
   });
 
   it("skips a malformed JSON line without throwing or crashing (issue #46)", () => {

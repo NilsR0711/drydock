@@ -6,6 +6,7 @@ import {
   type ParsedEvent,
   type ParseError,
 } from "@/lib/stream/parser";
+import { classifyCodexFailure } from "./codex-limits";
 import type { AgentProvider } from "./types";
 
 export const CODEX_DEFAULT_MODEL = "gpt-5-codex";
@@ -84,6 +85,10 @@ const codexEvent = z
     thread_id: z.string().optional(),
     usage: usageSchema.optional(),
     item: itemSchema.optional(),
+    // turn.failed carries `{error:{message}}`; fatal stream `error` events
+    // carry a top-level `message` (issue #167). Neither has structured codes.
+    error: z.object({ message: z.string().optional() }).passthrough().optional(),
+    message: z.string().optional(),
   })
   .passthrough();
 
@@ -157,12 +162,18 @@ function toParsed(event: CodexEvent): ParsedEvent | null {
   return null;
 }
 
-/** Parse one codex JSONL line. Returns null for blank lines; throws on bad JSON. */
-export function parseCodexLine(line: string): ParsedEvent | null {
+/** Parse one codex JSONL line into the raw event shape; null for blank lines. */
+function parseCodexEventLine(line: string): CodexEvent | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
   const json = JSON.parse(trimmed);
-  return toParsed(codexEvent.parse(json));
+  return codexEvent.parse(json);
+}
+
+/** Parse one codex JSONL line. Returns null for blank lines; throws on bad JSON. */
+export function parseCodexLine(line: string): ParsedEvent | null {
+  const event = parseCodexEventLine(line);
+  return event ? toParsed(event) : null;
 }
 
 /** Stateful, incremental JSONL parser for `codex exec --json` stdout. */
@@ -181,6 +192,15 @@ export class CodexStreamParser {
   totalCacheReadInputTokens = 0;
   /** Codex omits USD cost from its stream; always 0 (cost is estimated). */
   costUsd = 0;
+  /**
+   * The final failure message from `turn.failed` / a fatal stream `error`
+   * event (issue #167). The CLI also emits non-fatal `error` events (e.g.
+   * "Reconnecting... 1/5"); a later `turn.completed` clears both fields so a
+   * recovered session never looks failed.
+   */
+  resultText?: string;
+  /** Whether the stream ended in a failed turn / fatal error (issue #167). */
+  resultIsError?: boolean;
   /** Invoked for every line that fails to parse; the line is then skipped. */
   onParseError?: (error: ParseError) => void;
 
@@ -206,15 +226,28 @@ export class CodexStreamParser {
   }
 
   private consume(line: string): ParsedEvent | null {
-    let parsed: ParsedEvent | null;
+    let event: CodexEvent | null;
     try {
-      parsed = parseCodexLine(line);
+      event = parseCodexEventLine(line);
     } catch (error) {
       // Codex stdout is not guaranteed pure JSONL (banners, MCP diagnostics,
       // crash dumps). Skip a bad line rather than letting it crash the process.
       this.onParseError?.({ line: line.trim(), message: errorMessage(error) });
       return null;
     }
+    if (!event) return null;
+    // Failure-text tracking for the limit classifier (issue #167): keep the
+    // last error message seen; a completed turn wins over earlier transient
+    // errors (the CLI's reconnect notices arrive as `error` events too).
+    if (event.type === "turn.failed" || event.type === "error") {
+      this.resultIsError = true;
+      const message = event.error?.message ?? event.message;
+      if (message) this.resultText = message;
+    } else if (event.type === "turn.completed") {
+      this.resultIsError = false;
+      this.resultText = undefined;
+    }
+    const parsed = toParsed(event);
     if (!parsed) return null;
     if (parsed.sessionId) this.sessionId = parsed.sessionId;
     this.totalInputTokens += parsed.inputTokens;
@@ -285,6 +318,8 @@ export const codexProvider: AgentProvider = {
   buildStreamOneShotArgs: () => null,
 
   createParser: () => new CodexStreamParser(),
+
+  classifyFailure: classifyCodexFailure,
 
   estimateCost: estimateCodexCost,
 };
