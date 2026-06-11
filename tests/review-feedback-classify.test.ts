@@ -61,6 +61,37 @@ describe("isTrustedReviewer", () => {
     ).toBe(false);
   });
 
+  it("matches a GraphQL bot login without the [bot] suffix against a suffixed allowlist entry", () => {
+    // GraphQL reports bot actors as `cursor` (type Bot), not `cursor[bot]`.
+    const gate = { trustedReviewers: [], trustedBots: ["cursor[bot]"], ignoredBots: [] };
+    expect(isTrustedReviewer("cursor", gate, { isBot: true })).toBe(true);
+    expect(isTrustedReviewer("Cursor", gate, { isBot: true })).toBe(true);
+  });
+
+  it("a bot flagged via actor type never falls through to the human allowlist", () => {
+    const gate = { trustedReviewers: ["cursor"], trustedBots: [], ignoredBots: [] };
+    expect(isTrustedReviewer("cursor", gate, { isBot: true })).toBe(false);
+  });
+
+  it("ignoring a bot does not reject a human with the same bare login", () => {
+    const gate = {
+      trustedReviewers: ["cursor"],
+      trustedBots: [],
+      ignoredBots: ["cursor[bot]"],
+    };
+    // Human reviewer logged in as `cursor` — not a bot actor.
+    expect(isTrustedReviewer("cursor", gate)).toBe(true);
+  });
+
+  it("ignore-list entries match suffix-insensitively for bot actors", () => {
+    const gate = {
+      trustedReviewers: [],
+      trustedBots: ["dependabot[bot]"],
+      ignoredBots: ["dependabot[bot]"],
+    };
+    expect(isTrustedReviewer("dependabot", gate, { isBot: true })).toBe(false);
+  });
+
   it("trusts nobody when the allowlists are empty (opt-in safety)", () => {
     expect(
       isTrustedReviewer("alice", { trustedReviewers: [], trustedBots: [], ignoredBots: [] }),

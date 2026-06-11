@@ -26,19 +26,42 @@ export interface ReviewerGate {
 }
 
 /**
- * Whether a reviewer's feedback may be acted on. An explicit ignore-list match
- * always loses. Bot accounts (the conventional `[bot]` login suffix) must
- * appear on the trusted-bots allowlist (issue #158) — e.g. `cursor[bot]` for
- * automated review findings; a human must appear on the trusted-reviewers
- * allowlist. Empty allowlists trust nobody, keeping the feature inert until a
- * repo opts specific reviewers or bots in.
+ * Strip the REST-style `[bot]` suffix and lowercase, so a configured
+ * `cursor[bot]` matches the bare `cursor` login the GraphQL API reports for
+ * bot actors (REST and GraphQL disagree on the suffix; issue #158).
  */
-export function isTrustedReviewer(login: string, gate: ReviewerGate): boolean {
+function normalizeBotLogin(login: string): string {
+  return login.toLowerCase().replace(/\[bot\]$/, "");
+}
+
+/**
+ * Whether a reviewer's feedback may be acted on. An explicit ignore-list match
+ * always loses. Bot accounts must appear on the trusted-bots allowlist
+ * (issue #158) — e.g. `cursor[bot]` for automated review findings; a human
+ * must appear on the trusted-reviewers allowlist. Empty allowlists trust
+ * nobody, keeping the feature inert until a repo opts specific reviewers or
+ * bots in.
+ *
+ * Bot detection prefers the forge's actor type (`opts.isBot`, from GraphQL
+ * `__typename`); the `[bot]` login suffix remains as a fallback because
+ * GraphQL reports bot logins *without* it (`cursor`, not `cursor[bot]`), so
+ * the suffix alone never matches in production. Both bot lists are compared
+ * suffix-insensitively for the same reason.
+ */
+export function isTrustedReviewer(
+  login: string,
+  gate: ReviewerGate,
+  opts: { isBot?: boolean } = {},
+): boolean {
   const lower = login.toLowerCase();
-  if (gate.ignoredBots.some((b) => b.toLowerCase() === lower)) return false;
-  if (lower.endsWith("[bot]")) {
-    return gate.trustedBots.some((b) => b.toLowerCase() === lower);
+  if (opts.isBot || lower.endsWith("[bot]")) {
+    // Suffix-insensitive comparisons only apply to bot actors: ignoring
+    // `cursor[bot]` must not reject a human who happens to log in as `cursor`.
+    const bare = normalizeBotLogin(login);
+    if (gate.ignoredBots.some((b) => normalizeBotLogin(b) === bare)) return false;
+    return gate.trustedBots.some((b) => normalizeBotLogin(b) === bare);
   }
+  if (gate.ignoredBots.some((b) => b.toLowerCase() === lower)) return false;
   return gate.trustedReviewers.some((r) => r.toLowerCase() === lower);
 }
 
@@ -302,7 +325,7 @@ export async function processPrFeedback(
       summary.skipped++;
       continue;
     }
-    if (!isTrustedReviewer(first.author, deps.gate)) {
+    if (!isTrustedReviewer(first.author, deps.gate, { isBot: first.authorIsBot })) {
       summary.skipped++;
       continue;
     }
@@ -316,6 +339,14 @@ export async function processPrFeedback(
     if (isTerminal(item.status)) {
       summary.skipped++;
       continue;
+    }
+
+    // Recover an item stranded in `in_progress` by a crash or throw mid-apply:
+    // sweeps run strictly sequentially, so an `in_progress` row at this point
+    // can only be a leftover whose apply never reported back. Re-queue it so
+    // the normal attempt budget decides between a retry and flagging.
+    if (item.status === "in_progress") {
+      item = transitionFeedbackItem(item.id, "queued", {}, db);
     }
 
     // Acknowledge the comment once, when first seen.
@@ -376,7 +407,15 @@ export async function processPrFeedback(
         await postReply(deps.forge, thread, "Drydock: working on this now…");
       }
 
-      const result = await deps.applyFeedback(item, thread);
+      // A throw must never strand the item in `in_progress` (it would be
+      // silently skipped forever): treat it like a failed attempt so the
+      // budget below either re-queues or flags it.
+      let result: FeedbackApplyResult;
+      try {
+        result = await deps.applyFeedback(item, thread);
+      } catch (err) {
+        result = { ok: false, detail: err instanceof Error ? err.message : String(err) };
+      }
       summary.processed++;
       if (result.ok) {
         transitionFeedbackItem(item.id, "resolved", { detail: result.detail }, db);

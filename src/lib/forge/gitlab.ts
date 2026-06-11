@@ -349,6 +349,22 @@ export class GitlabForge implements ForgeClient {
     return z.object({ sha: z.string() }).parse(safeJson(res.body, {})).sha;
   }
 
+  /**
+   * The commit a merged MR landed as on the target branch, or null when the MR
+   * is not merged yet. MRs are squash-merged (`mergePr` sets `squash: true`),
+   * so the squash commit is preferred over the plain merge commit.
+   */
+  async prMergeCommitSha(prNumber: number): Promise<string | null> {
+    const res = await this.mutate("GET", `/merge_requests/${prNumber}`);
+    const parsed = z
+      .object({
+        squash_commit_sha: z.string().nullish(),
+        merge_commit_sha: z.string().nullish(),
+      })
+      .parse(safeJson(res.body, {}));
+    return parsed.squash_commit_sha ?? parsed.merge_commit_sha ?? null;
+  }
+
   async failedRunLog(prNumber: number): Promise<string> {
     try {
       const pipelineId = await this.latestPipelineId(prNumber);

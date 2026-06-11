@@ -7,7 +7,11 @@ import {
   getDeploymentAdapter,
   listDeploymentPlatforms,
 } from "@/lib/orchestrator/deployment/registry";
-import { parseVercelStatus, VercelAdapter } from "@/lib/orchestrator/deployment/vercel";
+import {
+  parseVercelDeploymentUrl,
+  parseVercelStatus,
+  VercelAdapter,
+} from "@/lib/orchestrator/deployment/vercel";
 
 function runnerReturning(result: Partial<CommandResult>): CommandRunner {
   return vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, ...result }));
@@ -23,31 +27,40 @@ function ctx(overrides: Partial<DeploymentContext> = {}): DeploymentContext {
 }
 
 describe("parseVercelStatus", () => {
-  it("maps the status tokens for the matching ref line", () => {
+  it("maps the status token of the first deployment line", () => {
     const out = [
-      "Age  Deployment                       Status   Duration  Commit",
-      "5m   https://app-abc.vercel.app       ● Ready  30s       deadbee feat: x",
-      "9m   https://app-old.vercel.app       ● Error  12s       0000000 old",
+      "Age  Deployment                       Status   Duration",
+      "5m   https://app-abc.vercel.app       ● Ready  30s",
     ].join("\n");
-    expect(parseVercelStatus(out, 0, "deadbeef1234")).toBe("ready");
-    expect(parseVercelStatus(out, 0, "0000000aaaa")).toBe("error");
+    expect(parseVercelStatus(out, 0)).toBe("ready");
   });
 
-  it("returns not_found when the ref has no deployment line yet", () => {
-    expect(parseVercelStatus("● Ready  somethingelse", 0, "deadbeef")).toBe("not_found");
+  it("returns not_found when the commit-scoped list has no deployment yet", () => {
+    // A `vercel list --meta githubCommitSha=…` table with no matching rows.
+    expect(parseVercelStatus("Age  Deployment  Status  Duration", 0)).toBe("not_found");
+    expect(parseVercelStatus("", 0)).toBe("not_found");
   });
 
-  it("maps building and queued states", () => {
-    expect(parseVercelStatus("● Building  abc1234", 0, "abc1234")).toBe("building");
-    expect(parseVercelStatus("● Queued  abc1234", 0, "abc1234")).toBe("deploying");
+  it("maps error, building, and queued states", () => {
+    expect(parseVercelStatus("9m  https://app.vercel.app  ● Error  12s", 0)).toBe("error");
+    expect(parseVercelStatus("● Building  https://app.vercel.app", 0)).toBe("building");
+    expect(parseVercelStatus("● Queued  https://app.vercel.app", 0)).toBe("deploying");
   });
 
   it("treats a non-zero exit as not_found", () => {
-    expect(parseVercelStatus("Error: not authorized", 1, "abc")).toBe("not_found");
+    expect(parseVercelStatus("Error: not authorized", 1)).toBe("not_found");
+  });
+});
+
+describe("parseVercelDeploymentUrl", () => {
+  it("extracts the deployment URL from a list line", () => {
+    expect(parseVercelDeploymentUrl("5m  https://app-abc.vercel.app  ● Ready  30s")).toBe(
+      "https://app-abc.vercel.app",
+    );
   });
 
-  it("reads the latest deployment when no ref is given", () => {
-    expect(parseVercelStatus("5m  url  ● Ready  30s", 0)).toBe("ready");
+  it("returns null when no URL is present", () => {
+    expect(parseVercelDeploymentUrl("Age  Deployment  Status")).toBeNull();
   });
 });
 
@@ -73,18 +86,55 @@ describe("VercelAdapter", () => {
     expect(await adapter.detect(ctx({ exists: () => false }))).toBe(false);
   });
 
-  it("runs `vercel list` in the repo checkout for status", async () => {
-    const run = runnerReturning({ stdout: "url ● Ready abc1234", exitCode: 0 });
+  it("scopes `vercel list` to the watched commit via --meta", async () => {
+    const run = runnerReturning({ stdout: "https://app.vercel.app ● Ready", exitCode: 0 });
     const status = await new VercelAdapter().getStatus(ctx({ run, ref: "abc1234", cwd: "/r" }));
+    expect(status).toBe("ready");
+    expect(run).toHaveBeenCalledWith("vercel", ["list", "--meta", "githubCommitSha=abc1234"], "/r");
+  });
+
+  it("runs a plain `vercel list` when no ref is given", async () => {
+    const run = runnerReturning({ stdout: "url ● Ready", exitCode: 0 });
+    const status = await new VercelAdapter().getStatus(ctx({ run, cwd: "/r" }));
     expect(status).toBe("ready");
     expect(run).toHaveBeenCalledWith("vercel", ["list"], "/r");
   });
 
-  it("inspects logs for a ref", async () => {
-    const run = runnerReturning({ stdout: "build failed: TS2304", exitCode: 0 });
+  it("inspects logs via the deployment URL resolved from the commit-scoped list", async () => {
+    // `vercel inspect` takes a deployment URL/id, never a git SHA: the adapter
+    // must resolve the URL from the meta-filtered list first.
+    const run = vi.fn(async (_cmd: string, args: string[]) => {
+      if (args[0] === "list") {
+        return {
+          stdout: "5m  https://app-abc.vercel.app  ● Error  30s",
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      return { stdout: "build failed: TS2304", stderr: "", exitCode: 0 };
+    });
     const logs = await new VercelAdapter().getLogs(ctx({ run, ref: "abc1234" }));
     expect(logs).toContain("build failed");
-    expect(run).toHaveBeenCalledWith("vercel", ["inspect", "--logs", "abc1234"], "/repo");
+    expect(run).toHaveBeenCalledWith(
+      "vercel",
+      ["list", "--meta", "githubCommitSha=abc1234"],
+      "/repo",
+    );
+    expect(run).toHaveBeenCalledWith(
+      "vercel",
+      ["inspect", "--logs", "https://app-abc.vercel.app"],
+      "/repo",
+    );
+  });
+
+  it("falls back to `vercel logs` when no deployment URL resolves", async () => {
+    const run = vi.fn(async (_cmd: string, args: string[]) => {
+      if (args[0] === "list") return { stdout: "Age  Deployment", stderr: "", exitCode: 0 };
+      return { stdout: "tail", stderr: "", exitCode: 0 };
+    });
+    const logs = await new VercelAdapter().getLogs(ctx({ run, ref: "abc1234" }));
+    expect(logs).toBe("tail");
+    expect(run).toHaveBeenCalledWith("vercel", ["logs"], "/repo");
   });
 });
 

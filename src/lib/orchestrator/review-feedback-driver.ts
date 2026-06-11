@@ -145,8 +145,11 @@ async function defaultProcessJob(repo: Repo, job: Job, forge: ForgeClient): Prom
     repo,
     job,
     worktrees,
+    // sideSession: the job already sits in a PR-open state (ci_running, …);
+    // a normal spawn would force an invalid `working` transition and throw
+    // before the agent ever starts.
     runSession: (j, prompt, cwd) =>
-      spawnAgentSession(j, prompt, cwd, { db, provider, command }).then((r) => ({
+      spawnAgentSession(j, prompt, cwd, { db, provider, command, sideSession: true }).then((r) => ({
         exitCode: r.exitCode,
       })),
   });

@@ -136,6 +136,23 @@ function createMergeGate(gateMs: number, now: () => number) {
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** Job states the babysitter itself drives; anything else was set by an
+ * outside actor (abort, emergency stop, manual intervention). */
+const BABYSAT_STATES = new Set<string>(["ci_running", "ci_failed", "retrying"]);
+
+/**
+ * Re-read the job row and return it when the babysitter must stop: an abort of
+ * a `ci_running` job only flips the DB row (the abort registry covers live
+ * agent subprocesses, not a polling loop), so the loop has to observe the DB —
+ * otherwise it would keep polling and could merge the PR of an aborted job.
+ * Returns undefined while the job is still in a CI state the loop owns.
+ */
+function externallySettled(jobId: number, db: DB): Job | undefined {
+  const fresh = getJob(jobId, db);
+  if (!fresh || BABYSAT_STATES.has(fresh.status)) return undefined;
+  return fresh;
+}
+
 /** Comment on the issue, file a follow-up, and park the job for a human. */
 async function escalateToHuman(
   job: Job,
@@ -166,9 +183,10 @@ async function escalateCiTimeout(
   ciWaitMs: number,
   deps: BabysitterDeps,
   db: DB,
+  detail = "checks stayed pending",
 ): Promise<Job> {
   const minutes = Math.round(ciWaitMs / 60_000);
-  const message = `CI did not complete in time (checks stayed pending for over ${minutes} min on PR #${prNumber}).`;
+  const message = `CI did not complete in time (${detail} for over ${minutes} min on PR #${prNumber}).`;
   await deps.gh.commentIssue(job.issueNumber, `${message} Handing over to a human.`);
   recordEvent(job.id, "status", { reason: "ci wait budget exceeded", prNumber }, db);
   return transitionJob(job.id, "needs_human", { errorMessage: message.slice(0, 500) }, db);
@@ -202,6 +220,8 @@ export async function ciBabysitter(
   let polls = 0;
   while (polls < maxPolls) {
     polls++;
+    const settled = externallySettled(job.id, db);
+    if (settled) return settled;
     const checks = await deps.gh.prChecks(prNumber);
     const outcome = classifyChecks(checks);
 
@@ -225,6 +245,10 @@ export async function ciBabysitter(
         await sleep(pollMs);
         continue;
       }
+      // Last-moment re-check: the merge is irreversible, so an abort that
+      // landed since the poll started must win over the green verdict.
+      const aborted = externallySettled(job.id, db);
+      if (aborted) return aborted;
       await deps.gh.mergePr(prNumber);
       return transitionJob(job.id, "merged", { prNumber }, db);
     }
@@ -309,12 +333,23 @@ async function autoHealLoop(
   let polls = 0;
   while (polls < maxPolls) {
     polls++;
+    const settled = externallySettled(job.id, db);
+    if (settled) {
+      // Free the in-flight heal slot: nothing will drive this session again.
+      if (pending) closeHealingSession(pending.sessionId, "superseded", db);
+      return settled;
+    }
     const checks = await deps.gh.prChecks(prNumber);
     const outcome = classifyChecks(checks);
 
     if (outcome === "pending") {
       gate.reset();
-      if (now() >= deadline) return escalateCiTimeout(job, prNumber, ciWaitMs, deps, db);
+      if (now() >= deadline) {
+        // Close the awaiting-CI session before parking the job: leaked
+        // in-flight sessions count against the global concurrency cap forever.
+        if (pending) closeHealingSession(pending.sessionId, "escalated", db);
+        return escalateCiTimeout(job, prNumber, ciWaitMs, deps, db);
+      }
       await sleep(pollMs);
       continue;
     }
@@ -333,6 +368,13 @@ async function autoHealLoop(
       if (gate.open()) {
         await sleep(pollMs);
         continue;
+      }
+      // Last-moment re-check: the merge is irreversible, so an abort that
+      // landed since the poll started must win over the green verdict.
+      const aborted = externallySettled(job.id, db);
+      if (aborted) {
+        if (pending) closeHealingSession(pending.sessionId, "superseded", db);
+        return aborted;
       }
       if (pending) {
         const after = await heal.headSha(prNumber);
@@ -412,11 +454,37 @@ async function autoHealLoop(
         closeHealingSession(session.id, "escalated", db);
         return escalateToHuman(job, prNumber, `CI auto-heal: ${plan.reason}.`, deps, db);
       }
+      // Both waiting branches honour the CI wait budget: without the deadline
+      // check a leaked slot elsewhere (or a long cooldown) would spin this
+      // loop forever, pinning the job in ci_running and stalling sequential
+      // repos — the budget is only ever checked on the pending path otherwise.
       case "wait_slot": {
+        if (now() >= deadline) {
+          closeHealingSession(session.id, "escalated", db);
+          return escalateCiTimeout(
+            job,
+            prNumber,
+            ciWaitMs,
+            deps,
+            db,
+            "auto-heal waited for a free healing slot",
+          );
+        }
         await sleep(pollMs);
         continue;
       }
       case "cooldown": {
+        if (now() >= deadline) {
+          closeHealingSession(session.id, "escalated", db);
+          return escalateCiTimeout(
+            job,
+            prNumber,
+            ciWaitMs,
+            deps,
+            db,
+            "auto-heal waited out its cooldown",
+          );
+        }
         await sleep(Math.min(plan.waitMs, pollMs));
         continue;
       }
@@ -429,29 +497,41 @@ async function autoHealLoop(
         const attempt = recordHealingAttempt(session.id, plan.target, headSha, db);
         transitionHealingSession(session.id, "awaiting_slot", db);
         transitionHealingSession(session.id, "repairing", db);
-        job = transitionJob(job.id, "ci_failed", { prNumber }, db);
-        job = transitionJob(job.id, "retrying", { ciRetryCount: job.ciRetryCount + 1 }, db);
+        let failure: string | null = null;
+        try {
+          job = transitionJob(job.id, "ci_failed", { prNumber }, db);
+          job = transitionJob(job.id, "retrying", { ciRetryCount: job.ciRetryCount + 1 }, db);
 
-        // Targeted, category-specific fix prompt with focused, line-capped
-        // evidence (issue #62) — not a generic raw-log dump.
-        const prompt = buildFixPrompt({
-          checkName: plan.target.checkName,
-          log: failedLog,
-          maxLines: budgets.maxEvidenceLines,
-        });
-        const fixOutcome = await deps.resumeSession(job, sessionId, prompt);
+          // Targeted, category-specific fix prompt with focused, line-capped
+          // evidence (issue #62) — not a generic raw-log dump.
+          const prompt = buildFixPrompt({
+            checkName: plan.target.checkName,
+            log: failedLog,
+            maxLines: budgets.maxEvidenceLines,
+          });
+          const fixOutcome = await deps.resumeSession(job, sessionId, prompt);
+          failure = resumeFailureReason(fixOutcome);
+          if (!failure) {
+            transitionHealingSession(session.id, "awaiting_ci", db);
+            job = transitionJob(job.id, "ci_running", {}, db);
+          }
+        } catch (err) {
+          // A throw here (a concurrent abort failing the job transition, the
+          // resume rejecting) would otherwise leak the session in `repairing`,
+          // permanently occupying the global in-flight healing slot.
+          closeHealingSession(session.id, "escalated", db);
+          throw err;
+        }
         // The attempt never reached CI (timeout, cost cap, spawn failure,
         // non-zero exit, or no commit): finalize it as rejected and escalate
-        // rather than awaiting a verdict on an unchanged head.
-        const failure = resumeFailureReason(fixOutcome);
+        // rather than awaiting a verdict on an unchanged head. Handled outside
+        // the try so an escalation that itself throws cannot double-close the
+        // already-closed session in the catch above.
         if (failure) {
           finalizeHealingAttempt(attempt.id, { status: "rejected", afterSha: null }, db);
           closeHealingSession(session.id, "escalated", db);
           return escalateToHuman(job, prNumber, `CI auto-heal: ${failure}.`, deps, db);
         }
-
-        transitionHealingSession(session.id, "awaiting_ci", db);
-        job = transitionJob(job.id, "ci_running", {}, db);
         pending = {
           attemptId: attempt.id,
           sessionId: session.id,

@@ -100,6 +100,13 @@ export interface ReviewThreadComment {
   id: string;
   databaseId: number | null;
   author: string;
+  /**
+   * Whether the author is a bot account. GraphQL reports bot logins *without*
+   * the REST-style `[bot]` suffix (`cursor`, not `cursor[bot]`), so the actor
+   * type — not the login shape — is the reliable bot signal (issue #158).
+   * Optional: absent means unknown, and consumers fall back to the suffix.
+   */
+  authorIsBot?: boolean;
   body: string;
 }
 
@@ -136,7 +143,9 @@ const reviewThreadsSchema = z.object({
                       id: z.string(),
                       databaseId: z.number().nullish(),
                       body: z.string().default(""),
-                      author: z.object({ login: z.string() }).nullish(),
+                      author: z
+                        .object({ login: z.string(), __typename: z.string().nullish() })
+                        .nullish(),
                     }),
                   ),
                 }),
@@ -454,6 +463,21 @@ export class GhClient {
     return parsed.data.headRefOid;
   }
 
+  /**
+   * The squash/merge commit a merged PR landed as on the base branch, or null
+   * for an unmerged PR. Squash merges rewrite the commit, so the PR head SHA
+   * never appears on the default branch — post-merge monitoring needs this.
+   */
+  async prMergeCommitSha(prNumber: number): Promise<string | null> {
+    const res = await this.exec(["pr", "view", String(prNumber), "--json", "mergeCommit"]);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr view failed");
+    const parsed = z
+      .object({ mergeCommit: z.object({ oid: z.string() }).nullish() })
+      .safeParse(JSON.parse(res.stdout || "{}"));
+    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
+    return parsed.data.mergeCommit?.oid ?? null;
+  }
+
   async commentIssue(issueNumber: number, body: string): Promise<void> {
     const res = await this.exec(["issue", "comment", String(issueNumber), flagEq("--body", body)]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue comment failed");
@@ -694,7 +718,7 @@ export class GhClient {
    */
   async listReviewThreads(prNumber: number): Promise<ReviewThread[]> {
     const { owner, name } = await this.repoSlug();
-    const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated path line comments(first:100){nodes{id databaseId body author{login}}}}}}}}`;
+    const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated path line comments(first:100){nodes{id databaseId body author{login __typename}}}}}}}}`;
     const res = await this.exec(
       [
         "api",
@@ -724,6 +748,7 @@ export class GhClient {
         id: c.id,
         databaseId: c.databaseId ?? null,
         author: c.author?.login ?? "",
+        authorIsBot: c.author?.__typename === "Bot",
         body: c.body,
       })),
     }));

@@ -55,6 +55,13 @@ export interface ForgeClient {
   prChecks(prNumber: number): Promise<PrCheck[]>;
   /** Current head commit SHA of the PR/MR (binds CI auto-heal sessions). */
   prHeadSha(prNumber: number): Promise<string>;
+  /**
+   * The commit a merged PR/MR landed as on the target branch, or null when the
+   * PR is not merged (or the forge reports none). PRs are squash-merged, so
+   * this differs from the head SHA — anything monitoring the default branch
+   * (deployment healing) must use this, not `prHeadSha`.
+   */
+  prMergeCommitSha?(prNumber: number): Promise<string | null>;
   commentIssue(issueNumber: number, body: string): Promise<void>;
   createIssue(title: string, body: string): Promise<number>;
   failedRunLog(prNumber: number): Promise<string>;

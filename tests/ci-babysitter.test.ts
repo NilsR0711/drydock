@@ -93,6 +93,27 @@ describe("ciBabysitter", () => {
     );
   });
 
+  it("never merges a job that was aborted while babysitting", async () => {
+    const job = ciRunningJob(6);
+    // An abort (abort action, emergency stop) only flips the DB row — the
+    // polling loop must observe it instead of merging the aborted job's PR.
+    transitionJob(job.id, "aborted", {}, db);
+    const { gh, runner } = scriptedGh([[{ name: "build", state: "SUCCESS" }]]);
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: vi.fn(),
+      sleep: vi.fn(),
+      maxPolls: 3,
+    });
+    expect(final.status).toBe("aborted");
+    expect(runner).not.toHaveBeenCalledWith(
+      "gh",
+      expect.arrayContaining(["pr", "merge", "5"]),
+      "/tmp/r",
+    );
+  });
+
   it("retries on failure then merges on the next green poll", async () => {
     const job = ciRunningJob(2);
     const { gh } = scriptedGh([
