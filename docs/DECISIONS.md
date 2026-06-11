@@ -31,3 +31,4 @@
 - [028](adr/028-release-management.md) — Opt-in release management (evaluate → version → publish, gated & idempotent)
 - [029](adr/029-webhook-issue-sync.md) — Opt-in webhook-driven issue sync (per-repo secret, signature-verified, debounced, polling fallback)
 - [030](adr/030-provider-limit-auto-wait.md) — Provider usage-limit auto-wait (`waiting_limit` job state, persistent latch, session-continuity resume)
+- [031](adr/031-pr-audit.md) — Opt-in AI PR audit (read-only whole-PR review posted on the issue, locale-aware)
