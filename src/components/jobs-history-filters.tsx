@@ -2,7 +2,7 @@
 
 import { Search } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useTransition } from "react";
+import { useEffect, useRef, useTransition } from "react";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Select } from "@/components/ui/select";
@@ -23,6 +23,23 @@ const STATUS_FILTERS = [
   ...JOB_STATES.map((s) => ({ value: s, label: s.replace(/_/g, " ") })),
 ];
 
+/**
+ * Build the next query string for a filter change. Pure so the debounce can
+ * apply it against the LIVE location at fire time — using the render-time
+ * searchParams snapshot would clobber a filter changed inside the debounce
+ * window.
+ */
+export function buildJobsFilterQuery(currentSearch: string, key: string, value: string): string {
+  const params = new URLSearchParams(currentSearch);
+  if (value) {
+    params.set(key, value);
+  } else {
+    params.delete(key);
+  }
+  params.delete("page");
+  return params.toString();
+}
+
 export function JobsHistoryFilters({
   repos,
   models,
@@ -34,17 +51,16 @@ export function JobsHistoryFilters({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
+  // Debounce timer for the search input. Kept in a ref (not a window global)
+  // and cleared on unmount so a pending push can never navigate the user away
+  // from a job they just opened.
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(debounceRef.current), []);
 
   function update(key: string, value: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    if (value) {
-      params.set(key, value);
-    } else {
-      params.delete(key);
-    }
-    params.delete("page");
+    const query = buildJobsFilterQuery(window.location.search, key, value);
     startTransition(() => {
-      router.push(`${pathname}?${params.toString()}`);
+      router.push(`${pathname}?${query}`);
     });
   }
 
@@ -66,11 +82,8 @@ export function JobsHistoryFilters({
             onChange={(e) => {
               const v = e.target.value;
               // Debounce: only push after user stops typing for 300ms
-              clearTimeout((window as { _jhDebounce?: ReturnType<typeof setTimeout> })._jhDebounce);
-              (window as { _jhDebounce?: ReturnType<typeof setTimeout> })._jhDebounce = setTimeout(
-                () => update("q", v),
-                300,
-              );
+              clearTimeout(debounceRef.current);
+              debounceRef.current = setTimeout(() => update("q", v), 300);
             }}
           />
         </div>

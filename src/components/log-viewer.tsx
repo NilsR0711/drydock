@@ -109,6 +109,23 @@ function field(payload: unknown, key: string): string | undefined {
   return undefined;
 }
 
+/** Job states whose log stream produces no further events once entered. */
+const STREAM_END_STATES = new Set(["merged", "needs_human", "aborted", "interrupted"]);
+
+/**
+ * Whether a log event marks the end of the stream: an agent result/exit, or a
+ * `status` transition into a parked/terminal state. Jobs that end via a status
+ * transition (needs_human, aborted) never emit a result/claude_exit event, so
+ * the viewer must also treat those transitions as completion — otherwise it
+ * shows a permanent "live" badge and keeps the EventSource open forever.
+ */
+export function isTerminalLogEvent(type: string, payload: unknown): boolean {
+  if (type === "result" || type === "claude_exit") return true;
+  if (type !== "status") return false;
+  const to = field(payload, "to");
+  return to !== undefined && STREAM_END_STATES.has(to);
+}
+
 /** Pretty-print a single event payload, shaped per event type. */
 function PayloadView({ type, payload }: { type: string; payload: unknown }) {
   if (type === "text") {
@@ -277,8 +294,10 @@ export function LogViewer({
   jobId: number;
   initial?: LogLine[];
   /** Whether the job is still running (from the server's job status). Jobs that
-   *  end via a status transition (needs_human, aborted, ci_failed) never emit a
-   *  `result`/`claude_exit` event, so event types alone can't decide completion. */
+   *  end via a status transition (needs_human, aborted) never emit a
+   *  `result`/`claude_exit` event, so completion is decided from this prop plus
+   *  terminal events (result/claude_exit or a status transition into a
+   *  parked/terminal state — see isTerminalLogEvent). */
   active?: boolean;
 }) {
   const [lines, setLines] = useState<LogLine[]>(initial);
@@ -286,7 +305,7 @@ export function LogViewer({
   // initial replay already carries a terminal event. Seeding this prevents a
   // done job from being stuck on the "live" badge + streaming spinner.
   const [complete, setComplete] = useState(
-    () => !active || initial.some((l) => l.type === "result" || l.type === "claude_exit"),
+    () => !active || initial.some((l) => isTerminalLogEvent(l.type, l.payload)),
   );
   const [autoscroll, setAutoscroll] = useState(true);
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
@@ -297,7 +316,10 @@ export function LogViewer({
 
   useEffect(() => {
     // A finished job has all its events in `initial` — don't open a stream.
-    if (!active) return;
+    // Once a terminal event arrives, `complete` flips and this effect re-runs:
+    // the cleanup closes the EventSource instead of leaving it open (and
+    // auto-reconnecting) until unmount.
+    if (!active || complete) return;
     const es = new EventSource(`/api/sse/jobs/${jobId}`);
     const handler = (type: string) => (ev: MessageEvent) => {
       const id = ev.lastEventId ? Number(ev.lastEventId) : Date.now();
@@ -312,11 +334,11 @@ export function LogViewer({
       // Live events stream in real time, so stamp them now (the SSE frame
       // carries only id + payload, not the row's ts).
       setLines((prev) => [...prev, { id, type, payload, ts: Math.floor(Date.now() / 1000) }]);
-      if (type === "result" || type === "claude_exit") setComplete(true);
+      if (isTerminalLogEvent(type, payload)) setComplete(true);
     };
     for (const t of EVENT_TYPES) es.addEventListener(t, handler(t));
     return () => es.close();
-  }, [jobId, active]);
+  }, [jobId, active, complete]);
 
   const visible = useMemo(() => lines.filter((l) => !hidden.has(l.type)), [lines, hidden]);
   const running = !complete;

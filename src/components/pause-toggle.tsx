@@ -1,7 +1,7 @@
 "use client";
 
 import { Pause, Play } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useToast } from "@/components/ui/toast";
 import { togglePauseAction } from "@/lib/settings/actions";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,13 @@ export function PauseToggle({ paused }: { paused: boolean }) {
   const [isPaused, setIsPaused] = useState(paused);
   const [pending, start] = useTransition();
   const { success, error } = useToast();
+
+  // The pause flag is also flipped elsewhere (settings kill switch, emergency
+  // stop), and this client state survives the RSC refresh those actions
+  // trigger. Reconcile with the server prop so the toggle never shows the
+  // opposite of the paused banner and the first click performs the right
+  // action.
+  useEffect(() => setIsPaused(paused), [paused]);
 
   function toggle() {
     const next = !isPaused;
