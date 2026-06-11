@@ -7,6 +7,7 @@ import {
   type ForgeConfig,
   ForgeError,
   type ForgeIssue,
+  type IssueCommentRef,
   type IssueDetail,
   type PrCheck,
 } from "./types";
@@ -64,6 +65,11 @@ const gitlabNoteSchema = z.object({
   body: z.string().default(""),
   created_at: z.string().default(""),
   system: z.boolean().default(false),
+});
+
+const gitlabNoteRefSchema = z.object({
+  id: z.number(),
+  body: z.string().default(""),
 });
 
 const gitlabJobSchema = z.object({
@@ -332,6 +338,24 @@ export class GitlabForge implements ForgeClient {
     await this.mutate("POST", `/issues/${issueNumber}/notes`, { body: { body } });
   }
 
+  /** List an issue's notes with stable ids (the audit comment upsert, #168). */
+  async listIssueComments(issueNumber: number): Promise<IssueCommentRef[]> {
+    const notes = await this.listPaginated(`/issues/${issueNumber}/notes`, {}, parseNoteRefs);
+    return notes.map((n) => ({ id: String(n.id), body: n.body }));
+  }
+
+  /** Edit one of our prior issue notes in place (issue #168). */
+  async updateIssueComment(issueNumber: number, commentId: string, body: string): Promise<void> {
+    await this.mutate("PUT", `/issues/${issueNumber}/notes/${encodeURIComponent(commentId)}`, {
+      body: { body },
+    });
+  }
+
+  /** Post a note on the MR itself (the optional audit mirror, issue #168). */
+  async commentPr(prNumber: number, body: string): Promise<void> {
+    await this.mutate("POST", `/merge_requests/${prNumber}/notes`, { body: { body } });
+  }
+
   async createIssue(title: string, body: string): Promise<number> {
     const res = await this.mutate("POST", "/issues", { body: { title, description: body } });
     return z.object({ iid: z.number() }).parse(safeJson(res.body, {})).iid;
@@ -440,6 +464,12 @@ function parseIssues(body: string): ForgeIssue[] {
     // act on public participants). See ADR 016.
     authorAssociation: null,
   }));
+}
+
+function parseNoteRefs(body: string): z.infer<typeof gitlabNoteRefSchema>[] {
+  const parsed = z.array(gitlabNoteRefSchema).safeParse(safeJson(body, []));
+  if (!parsed.success) throw new ForgeError(`unexpected GitLab output: ${parsed.error.message}`);
+  return parsed.data;
 }
 
 function parseJobs(body: string): z.infer<typeof gitlabJobSchema>[] {

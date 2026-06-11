@@ -10,6 +10,7 @@ import {
 } from "@/lib/issues/service";
 import { isKnownModelId } from "@/lib/models";
 import { getJob, listJobs, transitionJob } from "@/lib/orchestrator/jobs";
+import { startPrAudit } from "@/lib/orchestrator/pr-audit-driver";
 import { isGitRepoPath } from "@/lib/repos/path";
 import { addRepo } from "@/lib/repos/service";
 import { getSettings, jobsAllowed, repoJobsAllowed, saveSettings } from "@/lib/settings/service";
@@ -277,6 +278,23 @@ export const tools: ToolDef[] = [
     handler: (args) => {
       const { jobId, limit } = parseArgs(getLogsShape, args);
       return getBroker().replay(jobId, limit);
+    },
+  },
+  {
+    name: "run_pr_audit",
+    description:
+      "Run the read-only AI PR audit for a job's open PR (issue #168): a structured review is " +
+      "posted on the linked issue. Advisory only; job state is never touched.",
+    inputSchema: jobIdShape,
+    handler: (args, { db }) => {
+      const { jobId } = parseArgs(jobIdShape, args);
+      const job = getJob(jobId, db);
+      if (!job) throw new Error(`job ${jobId} not found`);
+      assertWorkAllowed(job.repoId, db);
+      // Fire-and-forget: the audit can take minutes and persists its own
+      // events; the pass never rejects, so nothing is left unhandled.
+      const { prNumber } = startPrAudit(jobId, db);
+      return { jobId, prNumber, status: "audit_started" };
     },
   },
 ];

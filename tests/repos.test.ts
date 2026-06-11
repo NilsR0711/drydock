@@ -254,3 +254,67 @@ describe("listReposWithStats", () => {
     expect(stats[0]?.recentJobs).toHaveLength(2);
   });
 });
+
+describe("PR audit settings (issue #168)", () => {
+  it("defaults to off with inherited agent/model and English output", () => {
+    const repo = addRepo({ path: "/tmp/foo", name: "foo" }, db);
+    expect(repo.autoPrAudit).toBe(false);
+    expect(repo.prAuditAgent).toBeNull();
+    expect(repo.prAuditModel).toBeNull();
+    expect(repo.prAuditLanguage).toBe("en");
+    expect(repo.prAuditPostOnPr).toBe(false);
+  });
+
+  it("persists explicit audit settings", () => {
+    const repo = addRepo(
+      {
+        path: "/tmp/foo",
+        name: "foo",
+        autoPrAudit: true,
+        prAuditAgent: "codex",
+        prAuditModel: "gpt-5-codex",
+        prAuditLanguage: "de",
+        prAuditPostOnPr: true,
+      },
+      db,
+    );
+    expect(repo.autoPrAudit).toBe(true);
+    expect(repo.prAuditAgent).toBe("codex");
+    expect(repo.prAuditModel).toBe("gpt-5-codex");
+    expect(repo.prAuditLanguage).toBe("de");
+    expect(repo.prAuditPostOnPr).toBe(true);
+  });
+
+  it("updates audit settings and clears overrides back to inherit", () => {
+    const repo = addRepo(
+      { path: "/tmp/foo", name: "foo", prAuditAgent: "claude", prAuditModel: "claude-opus-4-8" },
+      db,
+    );
+    const updated = updateRepo(
+      repo.id,
+      { autoPrAudit: true, prAuditAgent: null, prAuditModel: null },
+      db,
+    );
+    expect(updated.autoPrAudit).toBe(true);
+    expect(updated.prAuditAgent).toBeNull();
+    expect(updated.prAuditModel).toBeNull();
+  });
+
+  it("rejects an unknown audit model id", () => {
+    expect(() => addRepo({ path: "/x", name: "x", prAuditModel: "gpt-99-nonsense" }, db)).toThrow();
+  });
+
+  it("rejects an unknown audit agent", () => {
+    expect(() =>
+      addRepo({ path: "/x", name: "x", prAuditAgent: "copilot" } as never, db),
+    ).toThrow();
+  });
+
+  it("accepts simple and BCP 47 language codes and rejects junk", () => {
+    expect(addRepo({ path: "/a", name: "a", prAuditLanguage: "pt-BR" }, db).prAuditLanguage).toBe(
+      "pt-BR",
+    );
+    expect(() => addRepo({ path: "/b", name: "b", prAuditLanguage: "" }, db)).toThrow();
+    expect(() => addRepo({ path: "/c", name: "c", prAuditLanguage: "not a code" }, db)).toThrow();
+  });
+});

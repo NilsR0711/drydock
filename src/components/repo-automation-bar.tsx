@@ -9,6 +9,8 @@ import {
   Wand2,
 } from "lucide-react";
 import { type ReactNode, useState, useTransition } from "react";
+import { AgentSelect } from "@/components/agent-select";
+import { ModelSelect } from "@/components/model-select";
 import { Alert } from "@/components/ui/alert";
 import { Field } from "@/components/ui/field";
 import { Fieldset } from "@/components/ui/fieldset";
@@ -18,7 +20,9 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { HelpTip } from "@/components/ui/tooltip";
+import type { AgentId } from "@/lib/agents/types";
 import type { Repo } from "@/lib/db/schema";
+import { defaultModelForAgent } from "@/lib/models";
 import { updateRepoAction } from "@/lib/repos/actions";
 import { AGENT_INSTRUCTIONS_MAX_CHARS } from "@/lib/repos/agent-instructions";
 
@@ -118,6 +122,21 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoDecompose, setAutoDecompose] = useState(repo.autoDecompose);
   const [planFirst, setPlanFirst] = useState(repo.planFirst);
   const [verifyPr, setVerifyPr] = useState(repo.verifyPr);
+  const [autoPrAudit, setAutoPrAudit] = useState(repo.autoPrAudit);
+  const [auditAgent, setAuditAgent] = useState<AgentId>(
+    (repo.prAuditAgent ?? repo.agent) as AgentId,
+  );
+  // Effective audit model: an explicit override wins; with only the agent
+  // overridden, that agent's catalog default applies (the repo's defaultModel
+  // may belong to the other CLI); otherwise inherit the repo's defaultModel.
+  const [auditModel, setAuditModel] = useState(
+    repo.prAuditModel ??
+      (repo.prAuditAgent && repo.prAuditAgent !== repo.agent
+        ? defaultModelForAgent(repo.prAuditAgent as AgentId)
+        : repo.defaultModel),
+  );
+  const [auditLanguage, setAuditLanguage] = useState(repo.prAuditLanguage);
+  const [auditPostOnPr, setAuditPostOnPr] = useState(repo.prAuditPostOnPr);
   const [autoHealDeploy, setAutoHealDeploy] = useState(repo.autoHealDeployments);
   const [releaseEnabled, setReleaseEnabled] = useState(repo.releaseEnabled);
   const [resolveConflicts, setResolveConflicts] = useState(repo.autoResolveMergeConflicts);
@@ -278,6 +297,92 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
             }}
             help="A read-only pass after the PR opens that checks the diff against the issue and flags gaps. Never changes state on failure."
           />
+          <AutoToggle
+            label="Audit PRs with an AI review"
+            checked={autoPrAudit}
+            onChange={(v) => {
+              setAutoPrAudit(v);
+              persist({ autoPrAudit: v });
+            }}
+            help="A read-only, whole-PR review (Bugbot/CodeRabbit style) posted on the issue after the PR opens. Advisory only — it never merges, blocks, or edits anything."
+          >
+            <Field
+              label={
+                <span className="inline-flex items-center gap-1.5">
+                  Audit agent
+                  <HelpTip content="CLI agent that runs the audit. Switching agents resets the audit model to that agent's default." />
+                </span>
+              }
+            >
+              <AgentSelect
+                value={auditAgent}
+                onChange={(v) => {
+                  const nextModel = defaultModelForAgent(v);
+                  setAuditAgent(v);
+                  setAuditModel(nextModel);
+                  persist({ prAuditAgent: v, prAuditModel: nextModel });
+                }}
+                className="h-8 text-xs"
+              />
+            </Field>
+            <Field
+              label={
+                <span className="inline-flex items-center gap-1.5">
+                  Audit model
+                  <HelpTip content="Model used for the audit run." />
+                </span>
+              }
+            >
+              <ModelSelect
+                value={auditModel}
+                onChange={(v) => {
+                  setAuditModel(v);
+                  persist({ prAuditModel: v });
+                }}
+                agent={auditAgent}
+                className="h-8 text-xs"
+              />
+            </Field>
+            <Field
+              label={
+                <span className="inline-flex items-center gap-1.5">
+                  Review language
+                  <HelpTip content="Language the review is written in (e.g. en, de, pt-BR). English is the default." />
+                </span>
+              }
+            >
+              <Input
+                value={auditLanguage}
+                onChange={(e) => setAuditLanguage(e.target.value)}
+                onBlur={() => {
+                  const code = auditLanguage.trim() || "en";
+                  setAuditLanguage(code);
+                  if (!/^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$/.test(code)) {
+                    error(
+                      "Invalid review language",
+                      `"${code}" is not a language code — use a simple or BCP 47 code like en, de, or pt-BR.`,
+                    );
+                    return;
+                  }
+                  persist({ prAuditLanguage: code });
+                }}
+                placeholder="en"
+                className="h-8 w-24 font-mono text-xs"
+              />
+            </Field>
+            <div className="flex items-center gap-2.5 self-end pb-1.5">
+              <Switch
+                checked={auditPostOnPr}
+                onChange={(v) => {
+                  setAuditPostOnPr(v);
+                  persist({ prAuditPostOnPr: v });
+                }}
+                aria-label="Also comment on the PR"
+              />
+              <span className="text-sm">Also comment on the PR</span>
+              <HelpTip content="Mirror the review on the pull request in addition to the issue." />
+            </div>
+          </AutoToggle>
           <AutoToggle
             label="Address PR review feedback"
             checked={autoFeedback}

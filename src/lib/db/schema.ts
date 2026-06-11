@@ -108,6 +108,15 @@ export const repos = sqliteTable("repos", {
   // targeted, debounced sync for this repo. Null/empty leaves polling as the
   // sole sync path; the secret doubles as the per-repo opt-in switch.
   webhookSecret: text("webhook_secret"),
+  // Opt-in AI PR audit (issue #168, default off). A read-only, whole-PR review
+  // (Bugbot/CodeRabbit style) runs after a PR opens and is posted on the issue
+  // as an idempotent comment. Agent/model null inherits the repo's agent and
+  // defaultModel; the language is a simple/BCP 47 code, English by default.
+  autoPrAudit: integer("auto_pr_audit", { mode: "boolean" }).notNull().default(false),
+  prAuditAgent: text("pr_audit_agent"),
+  prAuditModel: text("pr_audit_model"),
+  prAuditLanguage: text("pr_audit_language").notNull().default("en"),
+  prAuditPostOnPr: integer("pr_audit_post_on_pr", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 

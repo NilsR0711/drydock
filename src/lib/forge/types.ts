@@ -1,6 +1,7 @@
 import type {
   GhIssue,
   IssueComment,
+  IssueCommentRef,
   IssueDetail,
   PrCheck,
   ReactionContent,
@@ -16,6 +17,7 @@ import type {
 export type ForgeIssue = GhIssue;
 export type {
   IssueComment,
+  IssueCommentRef,
   IssueDetail,
   PrCheck,
   ReactionContent,
@@ -63,6 +65,14 @@ export interface ForgeClient {
    */
   prMergeCommitSha?(prNumber: number): Promise<string | null>;
   commentIssue(issueNumber: number, body: string): Promise<void>;
+  // --- PR-audit comment upsert (issue #168) -------------------------------
+  // Optional: forges without them degrade to plain commentIssue posts.
+  /** List an issue's comments with stable ids (idempotent comment upsert). */
+  listIssueComments?(issueNumber: number): Promise<IssueCommentRef[]>;
+  /** Edit one of our prior issue comments in place (idempotent upsert). */
+  updateIssueComment?(issueNumber: number, commentId: string, body: string): Promise<void>;
+  /** Post a comment on the PR/MR itself (the optional audit mirror). */
+  commentPr?(prNumber: number, body: string): Promise<void>;
   createIssue(title: string, body: string): Promise<number>;
   failedRunLog(prNumber: number): Promise<string>;
   /** The PR/MR's unified diff, or an empty string on any failure (best-effort). */
