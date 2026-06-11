@@ -87,6 +87,18 @@ export const repoInputSchema = z.object({
   // Per-repo inbound webhook secret (issue #61). Non-empty enables webhook-driven
   // sync; null/empty disables it and leaves polling as the sole sync path.
   webhookSecret: z.string().nullish(),
+  // Opt-in AI PR audit (issue #168). Agent/model null inherits the repo's
+  // agent/defaultModel; the output language is a simple or BCP 47 code.
+  autoPrAudit: z.boolean().default(false),
+  prAuditAgent: z.enum(["claude", "codex"]).nullish(),
+  prAuditModel: z.string().min(1).refine(isKnownModelId, { message: "unknown model id" }).nullish(),
+  prAuditLanguage: z
+    .string()
+    .regex(/^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$/, {
+      message: "prAuditLanguage must be a simple or BCP 47 language code",
+    })
+    .default("en"),
+  prAuditPostOnPr: z.boolean().default(false),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 
