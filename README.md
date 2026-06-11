@@ -208,12 +208,16 @@ and migrated automatically on first start — there are no setup steps. Then ope
 add a repository, and start queuing issues.
 
 ```bash
-drydock --help         # all flags
+drydock --help         # all flags and subcommands
 drydock --version      # installed version
 drydock --port 8080                   # change port (default: 3737)
 # Non-loopback binds require an explicit opt-in because the dashboard has no auth:
 DRYDOCK_ALLOW_REMOTE=1 drydock --host 0.0.0.0 --port 8080
 drydock update         # update a global install (reports current → latest, skips if already current)
+drydock backup         # WAL-safe DB snapshot, works while the server runs
+drydock restore <path> # replace the DB with a backup (server must be stopped)
+drydock doctor         # scriptable health checks, non-zero exit on failure
+drydock service install   # run the dock at login (launchd / systemd user unit)
 ```
 
 You still need the `claude` and (for GitHub) `gh` CLIs on `PATH` — see [Requirements](#requirements).
@@ -343,7 +347,18 @@ pnpm mcp            # start the local stdio MCP server (see "MCP server")
 ## Operations
 
 - **Backups** — `pnpm backup` writes a consistent SQLite snapshot into `data/backups/` and
-  prunes anything older than 7 days. Schedule it daily via cron/launchd.
+  prunes anything older than 7 days. Schedule it daily via cron/launchd. Packaged installs
+  use `drydock backup [path]` instead (default target `<data dir>/backups/`, never prunes)
+  and `drydock restore <path>` to roll back — restore refuses while a drydock instance is
+  running and clears stale WAL/SHM sidecars. Both are WAL-aware via better-sqlite3's native
+  `.backup()`, so a backup taken under a live server is still consistent.
+- **Diagnostics** — `drydock doctor` prints one line per probe (gh auth, claude/codex CLIs,
+  GitLab token validity per configured base URL, free disk space at the data dir,
+  `PRAGMA integrity_check`, instance lock) and exits non-zero on any failed probe, so it
+  drops straight into cron/CI scripts.
+- **Run at login** — `drydock service install` generates and loads a launchd agent (macOS)
+  or systemd user unit (Linux) that runs `drydock serve` at login and restarts it on
+  crashes; `drydock service uninstall` removes it again.
 - **Retention & pruning** — finished jobs' verbose log events are pruned past the
   **log retention** window (default 30 days; cost summary rows are kept). A daily in-process
   sweep runs automatically; for a manual run use `pnpm db:prune [--days <n>] [--no-vacuum]`,
