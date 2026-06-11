@@ -3,6 +3,18 @@ import { getBroker, type Subscriber } from "@/lib/stream/broker";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Resume point for a reconnect: EventSource sends the last seen event id as
+ * the `Last-Event-ID` header; a `?after=` query param works as a manual
+ * fallback. Returns undefined when no usable id is presented.
+ */
+function parseAfterId(req: NextRequest): number | undefined {
+  const raw = req.headers.get("last-event-id") ?? new URL(req.url).searchParams.get("after");
+  if (raw === null) return undefined;
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : undefined;
+}
+
 // Route Handlers are reserved for SSE (SPEC §9); mutations go through Server Actions.
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -10,20 +22,35 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (!Number.isInteger(jobId) || jobId <= 0) {
     return new Response("Invalid job id", { status: 400 });
   }
+  const afterId = parseAfterId(req);
   const broker = getBroker();
   const encoder = new TextEncoder();
+
+  let sub: Subscriber | undefined;
+  const unsubscribe = () => {
+    if (!sub) return;
+    broker.unsubscribe(jobId, sub);
+    sub = undefined;
+  };
 
   const stream = new ReadableStream({
     start(controller) {
       const write = (event: { id?: number; type: string; payload: unknown }) => {
         const data = JSON.stringify(event.payload);
         const idLine = event.id !== undefined ? `id: ${event.id}\n` : "";
-        controller.enqueue(encoder.encode(`${idLine}event: ${event.type}\ndata: ${data}\n\n`));
+        try {
+          controller.enqueue(encoder.encode(`${idLine}event: ${event.type}\ndata: ${data}\n\n`));
+        } catch {
+          // Controller already closed between disconnect and cleanup — drop
+          // the event rather than throw back into the broker's fan-out.
+        }
       };
 
-      // Replay the last 200 persisted events, then go live. A corrupt persisted
-      // payload must not kill the whole stream, so parse each row defensively.
-      for (const row of broker.replay(jobId)) {
+      // Replay persisted events — everything after the client's Last-Event-ID
+      // on a resume, the last 200 on a fresh connect — then go live. A corrupt
+      // persisted payload must not kill the whole stream, so parse each row
+      // defensively.
+      for (const row of broker.replay(jobId, undefined, afterId)) {
         let payload: unknown;
         try {
           payload = JSON.parse(row.payload);
@@ -33,16 +60,22 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         write({ id: row.id, type: row.type, payload });
       }
 
-      const sub: Subscriber = { send: write };
+      sub = { send: write };
       broker.subscribe(jobId, sub);
       req.signal.addEventListener("abort", () => {
-        broker.unsubscribe(jobId, sub);
+        unsubscribe();
         try {
           controller.close();
         } catch {
           // already closed
         }
       });
+    },
+    // The runtime cancels the stream on client disconnect, possibly without
+    // the abort listener firing — unsubscribe here too so a dead subscriber
+    // never lingers in the broker.
+    cancel() {
+      unsubscribe();
     },
   });
 
