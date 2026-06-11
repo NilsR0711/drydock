@@ -33,7 +33,23 @@ export async function runOneShotAndRecordCost(opts: {
   timeoutMs?: number;
   runner?: CommandRunner;
   db?: DB;
+  /** HTTP transport override for http providers (tests). */
+  fetchImpl?: typeof fetch;
 }): Promise<OneShotResult> {
+  // HTTP providers (openrouter, issue #169) have no CLI to spawn — dispatch
+  // to the API one-shot, which mirrors the OneShotResult contract.
+  if (opts.provider.kind === "http") {
+    const { runOpenRouterOneShot } = await import("@/lib/openrouter/one-shot");
+    return runOpenRouterOneShot({
+      model: opts.model,
+      prompt: opts.prompt,
+      repoId: opts.repoId,
+      type: opts.type,
+      timeoutMs: opts.timeoutMs,
+      db: opts.db,
+      fetchImpl: opts.fetchImpl,
+    });
+  }
   const runner = opts.runner ?? spawnRunner;
   const db = opts.db ?? getDb();
   const cmdOpts: CommandOptions | undefined =

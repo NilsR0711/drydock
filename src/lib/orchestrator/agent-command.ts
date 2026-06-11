@@ -10,6 +10,9 @@ import { getSettings } from "@/lib/settings/service";
  * always shells out to the right binary.
  */
 export function commandForAgent(provider: AgentProvider, db: DB): string {
+  // HTTP providers have no binary (issue #169); the placeholder only feeds
+  // diagnostics like "failed to start openrouter: …" and is never spawned.
+  if (provider.kind === "http") return provider.id;
   const s = getSettings(db);
   return provider.id === "codex" ? s.codexPath : s.claudePath;
 }

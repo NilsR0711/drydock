@@ -250,6 +250,23 @@ export function getOpenRouterModel(id: string, db: DB = getDb()): OpenRouterMode
   return db.select().from(openrouterModels).where(eq(openrouterModels.id, id)).get();
 }
 
+/**
+ * Estimate the USD cost of a generation from catalog pricing (per-token USD
+ * rates). Fallback only: OpenRouter's stream usage accounting reports the
+ * exact cost and always wins when present. Unknown models estimate at 0 —
+ * execution paths reject models missing from the catalog before any request.
+ */
+export function catalogCostEstimate(
+  modelId: string,
+  promptTokens: number,
+  completionTokens: number,
+  db: DB = getDb(),
+): number {
+  const row = getOpenRouterModel(modelId, db);
+  if (!row) return 0;
+  return promptTokens * row.promptCostPerToken + completionTokens * row.completionCostPerToken;
+}
+
 /** Failure backoff: 5 min doubling per consecutive failure, capped at 1 h. */
 const BACKOFF_BASE_SEC = 5 * 60;
 const BACKOFF_CAP_SEC = 3600;

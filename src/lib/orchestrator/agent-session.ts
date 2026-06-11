@@ -59,6 +59,10 @@ export interface AgentSessionDeps {
   resumeModel?: string;
   /** Limit-resume path (issue #166): resume with this turn budget instead of the tight CI-fix budget. */
   resumeMaxTurns?: number;
+  /** HTTP transport override for http providers like openrouter (tests, issue #169). */
+  fetchImpl?: typeof fetch;
+  /** Tool executor override for http providers' tool loops (tests, issue #169). */
+  toolExecutor?: import("@/lib/openrouter/tools").ToolExecutor;
 }
 
 export interface AgentSessionResult {
@@ -279,6 +283,21 @@ export async function spawnAgentSession(
   const runner = deps.runner ?? spawnStreamRunner;
   const broker = deps.broker ?? getBroker();
   const provider = deps.provider ?? getAgentProvider(job.agent);
+  // HTTP providers (openrouter, issue #169) have no CLI to spawn — dispatch to
+  // the API tool-loop session, which mirrors the AgentSessionResult contract
+  // including limit gating, timeout, cost cap, and usage persistence.
+  if (provider.kind === "http") {
+    const { runOpenRouterJobSession } = await import("@/lib/openrouter/session");
+    return runOpenRouterJobSession(job, prompt, cwd, {
+      db,
+      broker: deps.broker,
+      timeoutMs: deps.timeoutMs,
+      costCapUsd: deps.costCapUsd,
+      sideSession: deps.sideSession,
+      fetchImpl: deps.fetchImpl,
+      toolExecutor: deps.toolExecutor,
+    });
+  }
   const command = deps.command ?? provider.defaultCommand;
   const model = job.model ?? provider.defaultModel;
   const parser = provider.createParser();
@@ -429,6 +448,28 @@ export async function resumeAgentSession(
   const runner = deps.runner ?? spawnStreamRunner;
   const broker = deps.broker ?? getBroker();
   const provider = deps.provider ?? getAgentProvider(job.agent);
+  const prompt =
+    deps.resumePrompt ??
+    renderTemplate(resolveTemplateContent(job.repoId, TEMPLATE_NAMES.ciFix, db), {
+      CI_LOG: failedLog,
+    });
+  // HTTP providers (openrouter, issue #169) cannot resume a session — run a
+  // fresh API tool-loop with the fix/continuation prompt instead, accumulating
+  // usage additively like every other resume.
+  if (provider.kind === "http") {
+    const { runOpenRouterJobSession } = await import("@/lib/openrouter/session");
+    return runOpenRouterJobSession(job, prompt, cwd, {
+      db,
+      broker: deps.broker,
+      timeoutMs: deps.timeoutMs,
+      costCapUsd: deps.costCapUsd,
+      sideSession: deps.sideSession,
+      additive: true,
+      maxTurns: deps.resumeMaxTurns ?? provider.resumeMaxTurns,
+      fetchImpl: deps.fetchImpl,
+      toolExecutor: deps.toolExecutor,
+    });
+  }
   const command = deps.command ?? provider.defaultCommand;
   // Price what is actually executed: resumes default to the provider's resume
   // model (see the args below), never the job's start model. Pricing job.model
@@ -440,11 +481,6 @@ export async function resumeAgentSession(
   const maxTurns = deps.resumeMaxTurns ?? provider.resumeMaxTurns;
   const parser = provider.createParser();
   parser.onParseError = (error) => broker.publish(job.id, { type: "parse_error", payload: error });
-  const prompt =
-    deps.resumePrompt ??
-    renderTemplate(resolveTemplateContent(job.repoId, TEMPLATE_NAMES.ciFix, db), {
-      CI_LOG: failedLog,
-    });
 
   // Pre-spawn limit gate (issue #166): same refusal as spawnAgentSession.
   const gated = limitGateResult(provider, job, broker, db);
