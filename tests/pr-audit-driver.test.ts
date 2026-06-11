@@ -480,3 +480,31 @@ describe("runPrAuditPass", () => {
     expect(result).toBeNull();
   });
 });
+
+describe("startPrAudit", () => {
+  it("throws for an unknown job", async () => {
+    const { startPrAudit } = await import("@/lib/orchestrator/pr-audit-driver");
+    expect(() => startPrAudit(999, db)).toThrow(/not found/);
+  });
+
+  it("throws when the job has no PR yet", async () => {
+    const { startPrAudit } = await import("@/lib/orchestrator/pr-audit-driver");
+    const repo = addRepo({ path: "/r", name: "r" }, db);
+    syncIssuesFromGh(repo.id, [{ number: 1, title: "T", labels: [] }], db);
+    const job = createJob({ repoId: repo.id, issueNumber: 1 }, db);
+    expect(() => startPrAudit(job.id, db)).toThrow(/no PR/i);
+  });
+
+  it("kicks off an audit pass against the job's PR", async () => {
+    const { startPrAudit } = await import("@/lib/orchestrator/pr-audit-driver");
+    const { repo: _repo, job } = setupJob();
+    const { forge, issueComments } = fakeForge();
+
+    const started = startPrAudit(job.id, db, { forge, generate: okGenerator });
+    expect(started.prNumber).toBe(7);
+    await started.done;
+
+    expect(issueComments).toHaveLength(1);
+    expect(issueComments[0]).toContain("Drydock PR audit");
+  });
+});

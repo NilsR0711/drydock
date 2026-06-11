@@ -70,6 +70,7 @@ describe("MCP tool registry", () => {
         "list_repos",
         "remove_from_queue",
         "requeue_job",
+        "run_pr_audit",
         "set_drain_mode",
         "set_issue_labels",
         "sync_repo_issues",
@@ -270,6 +271,80 @@ describe("MCP tool registry", () => {
       saveSettings({ paused: true }, db);
       await expect(run("set_drain_mode", { on: false }, db)).resolves.toBeDefined();
       await expect(run("update_settings", { paused: false }, db)).resolves.toBeDefined();
+    });
+  });
+});
+
+describe("run_pr_audit tool (issue #168)", () => {
+  let db: DB;
+
+  beforeEach(() => {
+    db = getDb();
+    db.delete(jobEvents).run();
+    db.delete(jobs).run();
+    db.delete(issues).run();
+    db.delete(repos).run();
+    db.delete(settings).run();
+    saveSettings({ paused: false, draining: false, dailyCostLimitUsd: 10 }, db);
+    // An empty diff makes the pass settle deterministically without spawning
+    // any agent CLI: it records pr_audit_failed and posts nothing.
+    __setForgeFactory(
+      () =>
+        ({
+          prDiff: vi.fn(async () => ""),
+          prChecks: vi.fn(async () => []),
+          viewIssue: vi.fn(async () => {
+            throw new Error("unused");
+          }),
+          commentIssue: vi.fn(async () => {}),
+        }) as never,
+    );
+  });
+
+  afterEach(() => {
+    __setForgeFactory(null);
+  });
+
+  it("rejects a job without a PR", async () => {
+    const repoId = seedRepo(db);
+    const jobId = db
+      .insert(jobs)
+      .values({ repoId, issueNumber: 1, status: "queued" })
+      .returning()
+      .get().id;
+    await expect(run("run_pr_audit", { jobId }, db)).rejects.toThrow(/no PR/i);
+  });
+
+  it("rejects while Drydock is paused", async () => {
+    saveSettings({ paused: true }, db);
+    const repoId = seedRepo(db);
+    const jobId = db
+      .insert(jobs)
+      .values({ repoId, issueNumber: 1, status: "ci_running", prNumber: 7 })
+      .returning()
+      .get().id;
+    await expect(run("run_pr_audit", { jobId }, db)).rejects.toThrow(/paused/i);
+  });
+
+  it("starts an audit for a job with an open PR", async () => {
+    const repoId = seedRepo(db);
+    const jobId = db
+      .insert(jobs)
+      .values({ repoId, issueNumber: 1, status: "ci_running", prNumber: 7 })
+      .returning()
+      .get().id;
+
+    const result = (await run("run_pr_audit", { jobId }, db)) as Record<string, unknown>;
+    expect(result.status).toBe("audit_started");
+    expect(result.prNumber).toBe(7);
+
+    await vi.waitFor(() => {
+      const failed = db
+        .select()
+        .from(jobEvents)
+        .all()
+        .filter((e) => e.type === "pr_audit_failed");
+      expect(failed).toHaveLength(1);
     });
   });
 });

@@ -4,6 +4,7 @@ import { JobMetrics } from "@/components/job-metrics";
 import { JobStopButton } from "@/components/job-stop-button";
 import { LogViewer } from "@/components/log-viewer";
 import { PageHeader } from "@/components/page-header";
+import { PrAuditButton } from "@/components/pr-audit-button";
 import { PrQuestionPanel } from "@/components/pr-question-panel";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -50,7 +51,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             </span>
           </span>
         }
-        actions={inFlight ? <JobStopButton jobId={job.id} /> : undefined}
+        actions={
+          job.prNumber != null || inFlight ? (
+            <span className="flex items-center gap-2">
+              {job.prNumber != null && <PrAuditButton jobId={job.id} />}
+              {inFlight && <JobStopButton jobId={job.id} />}
+            </span>
+          ) : undefined
+        }
       />
 
       {isError && (

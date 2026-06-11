@@ -5,8 +5,10 @@ import { getAgentProvider, isAgentId } from "@/lib/agents/registry";
 import type { AgentProvider } from "@/lib/agents/types";
 import { type AgentId, WAITABLE_LIMIT_KINDS } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
+import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
 import type { CommandRunner } from "@/lib/exec/runner";
+import { getForge } from "@/lib/forge/registry";
 import type { IssueCommentRef, IssueDetail, PrCheck } from "@/lib/github/gh";
 import {
   auditWasTruncated,
@@ -24,7 +26,7 @@ import { redactSecrets } from "@/lib/log/redact";
 import { defaultModelForAgent } from "@/lib/models";
 import { getSettings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
-import { recordEvent } from "./jobs";
+import { getJob, recordEvent } from "./jobs";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
 import { latchProviderLimit, limitAutoWaitEnabled, ProviderLimitError } from "./provider-limit";
 
@@ -316,4 +318,40 @@ export async function runPrAuditPass(deps: PrAuditPassDeps): Promise<PrAuditResu
       }
     }
   }
+}
+
+export interface StartedPrAudit {
+  job: Job;
+  prNumber: number;
+  /** Settles when the pass finishes; the pass itself never rejects. */
+  done: Promise<PrAuditResult | null>;
+}
+
+/**
+ * Validate and kick off a manual audit run for a job's open PR (issue #168).
+ * Shared by the job-page server action and the MCP tool: both fire and forget
+ * the returned `done` promise, while tests await it. Throws only on input
+ * errors (unknown job, no PR, unknown repo) — the pass itself is best-effort.
+ */
+export function startPrAudit(
+  jobId: number,
+  db: DB = getDb(),
+  opts: { forge?: AuditForge; generate?: PrAuditGenerator } = {},
+): StartedPrAudit {
+  const job = getJob(jobId, db);
+  if (!job) throw new Error(`job ${jobId} not found`);
+  if (job.prNumber == null) throw new Error("This job has no PR to audit yet.");
+  const repo = getRepo(job.repoId, db);
+  if (!repo) throw new Error(`repo ${job.repoId} not found`);
+
+  const forge = opts.forge ?? getForge(repo);
+  const done = runPrAuditPass({
+    job,
+    prNumber: job.prNumber,
+    repo,
+    forge,
+    db,
+    generate: opts.generate,
+  });
+  return { job, prNumber: job.prNumber, done };
 }
