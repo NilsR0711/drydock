@@ -11,6 +11,7 @@ export const NOTIFICATION_EVENTS = [
   "release_published",
   "cost_limit",
   "claude_limit",
+  "codex_limit",
   "automation_paused",
 ] as const;
 
@@ -25,5 +26,6 @@ export const NOTIFICATION_EVENT_LABELS: Record<NotificationEvent, string> = {
   release_published: "Release published",
   cost_limit: "Daily cost limit reached",
   claude_limit: "Claude usage limit reached or cleared",
+  codex_limit: "Codex usage limit reached or cleared",
   automation_paused: "Automation paused or draining",
 };

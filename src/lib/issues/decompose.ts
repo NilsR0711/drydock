@@ -1,4 +1,5 @@
 import { logError } from "@/lib/log/logger";
+import { ProviderLimitError } from "@/lib/orchestrator/provider-limit";
 import type { SubtaskStatus } from "@/lib/orchestrator/subtask-state";
 
 /**
@@ -99,6 +100,9 @@ export async function decompose(
       const titles = proposed.map((t) => t.trim()).filter(Boolean);
       if (titles.length >= MIN_SUBTASKS) return { titles, source: "agent" };
     } catch (err) {
+      // A waitable provider limit must propagate (issue #167): swallowing it
+      // would stamp the issue as decomposed-empty and never retry it.
+      if (err instanceof ProviderLimitError) throw err;
       logError(`[decompose] agent fallback failed for issue #${input.number}`, err);
     }
   }

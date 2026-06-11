@@ -29,6 +29,7 @@ import type { Repo } from "@/lib/db/schema";
 import type { IssueDetail } from "@/lib/github/gh";
 import { syncIssuesFromGh } from "@/lib/issues/service";
 import { listSubtasks, replaceSubtasks } from "@/lib/issues/subtasks";
+import { ProviderLimitError, providerLimitBlocked } from "@/lib/orchestrator/provider-limit";
 import {
   buildSubtaskGenerator,
   type DecomposeForge,
@@ -40,6 +41,7 @@ import {
   subtaskPromptSection,
 } from "@/lib/orchestrator/subtask-driver";
 import { addRepo } from "@/lib/repos/service";
+import { saveSettings } from "@/lib/settings/service";
 
 let db: DB;
 let repo: Repo;
@@ -139,9 +141,91 @@ describe("buildSubtaskGenerator", () => {
     });
     expect(await generate({ number: 1, title: "T", body: "x" })).toEqual([]);
   });
+
+  it("latches the provider and throws when the one-shot hits a usage limit (issue #167)", async () => {
+    const runner = vi.fn(async () => ({
+      stdout: "",
+      stderr: "ERROR: You've hit your usage limit. Try again at 9:01 PM.",
+      exitCode: 1,
+    }));
+    const generate = buildSubtaskGenerator({
+      provider: codexProvider,
+      command: "codex",
+      model: "gpt-5-codex",
+      cwd: "/r",
+      db,
+      runner,
+    });
+    await expect(generate({ number: 1, title: "T", body: "x" })).rejects.toBeInstanceOf(
+      ProviderLimitError,
+    );
+    expect(providerLimitBlocked("codex", db)?.kind).toBe("usage_limit");
+  });
+
+  it("treats a limited one-shot as a plain failure when auto-wait is disabled", async () => {
+    saveSettings({ codexLimitAutoWait: false }, db);
+    const runner = vi.fn(async () => ({
+      stdout: "",
+      stderr: "ERROR: You've hit your usage limit. Try again at 9:01 PM.",
+      exitCode: 1,
+    }));
+    const generate = buildSubtaskGenerator({
+      provider: codexProvider,
+      command: "codex",
+      model: "gpt-5-codex",
+      cwd: "/r",
+      db,
+      runner,
+    });
+    expect(await generate({ number: 1, title: "T", body: "x" })).toEqual([]);
+    expect(providerLimitBlocked("codex", db)).toBeUndefined();
+  });
+
+  it("never latches on auth failures — those need an operator", async () => {
+    const runner = vi.fn(async () => ({ stdout: "", stderr: "Not logged in", exitCode: 1 }));
+    const generate = buildSubtaskGenerator({
+      provider: codexProvider,
+      command: "codex",
+      model: "gpt-5-codex",
+      cwd: "/r",
+      db,
+      runner,
+    });
+    expect(await generate({ number: 1, title: "T", body: "x" })).toEqual([]);
+    expect(providerLimitBlocked("codex", db)).toBeUndefined();
+  });
 });
 
 describe("decomposeRepo", () => {
+  it("aborts the sweep on a provider limit without stamping the issue (issue #167)", async () => {
+    syncIssuesFromGh(
+      repo.id,
+      [
+        { number: 7, title: "Big", labels: [] },
+        { number: 8, title: "Also big", labels: [] },
+      ],
+      db,
+    );
+    const { forge } = fakeForge({
+      7: detail({ number: 7, body: "prose body without a checklist" }),
+      8: detail({ number: 8, body: "more prose" }),
+    });
+    const limitGenerate = vi.fn(async () => {
+      throw new ProviderLimitError({ agent: "codex", kind: "usage_limit", rawSnippet: "limit" });
+    });
+    await expect(
+      decomposeRepo(repo, forge, [{ number: 7 }, { number: 8 }], db, { generate: limitGenerate }),
+    ).rejects.toBeInstanceOf(ProviderLimitError);
+    // The remaining candidate is not attempted — it would only bounce too.
+    expect(forge.viewIssue).toHaveBeenCalledTimes(1);
+
+    // The issue was not stamped: a later sweep decomposes it normally.
+    const okGenerate = vi.fn(async () => ["One", "Two", "Three"]);
+    await decomposeRepo(repo, forge, [{ number: 7 }], db, { generate: okGenerate });
+    expect(okGenerate).toHaveBeenCalled();
+    expect(listSubtasks(repo.id, 7, db).map((s) => s.title)).toEqual(["One", "Two", "Three"]);
+  });
+
   it("decomposes a checklist issue, persists subtasks, and comments once", async () => {
     syncIssuesFromGh(repo.id, [{ number: 5, title: "Big", labels: [] }], db);
     const { forge, comments } = fakeForge({

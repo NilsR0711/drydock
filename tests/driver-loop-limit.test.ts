@@ -5,7 +5,7 @@ import { type Job, jobEvents, jobs } from "@/lib/db/schema";
 import type { ForgeClient } from "@/lib/forge/types";
 import { driveTick } from "@/lib/orchestrator/driver-loop";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
-import { latchProviderLimit } from "@/lib/orchestrator/provider-limit";
+import { clearProviderLimit, latchProviderLimit } from "@/lib/orchestrator/provider-limit";
 import { setDrainMode } from "@/lib/orchestrator/runtime";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
@@ -135,6 +135,46 @@ describe("driveTick claude-limit gating (issue #166)", () => {
     expect(getJob(next.id, db)?.status).toBe("queued");
   });
 
+  it("skips decomposition for a repo whose agent is limit-latched (issue #167)", async () => {
+    latchProviderLimit(
+      { agent: "codex", kind: "usage_limit", rawSnippet: "limit", resetAt: nowSec() + 3600 },
+      db,
+    );
+    const decomposing = addRepo(
+      { path: "/dec", name: "dec", agent: "codex", autoDecompose: true },
+      db,
+    );
+    const decompose = vi.fn(async () => {});
+    const started: number[] = [];
+    const d = deps(started, {
+      decompose,
+      fetchIssues: vi.fn(async (path: string) =>
+        path === "/dec"
+          ? [
+              {
+                number: 1,
+                title: "Big",
+                labels: [{ name: "drydock:queue" }],
+                authorAssociation: "OWNER",
+              },
+            ]
+          : [],
+      ),
+    });
+    await driveTick(d as never);
+    expect(decompose).not.toHaveBeenCalled();
+
+    // Once the latch clears, the sweep decomposes again.
+    clearProviderLimit("codex", db);
+    await driveTick(d as never);
+    expect(decompose).toHaveBeenCalledWith(
+      expect.objectContaining({ id: decomposing.id }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it("does not count waiting_limit toward the auto-process failed-attempt budget", async () => {
     activeLatch(); // keep the parked job parked; this test is about labelling
     const auto = addRepo(
@@ -172,5 +212,100 @@ describe("driveTick claude-limit gating (issue #166)", () => {
     // the limit-parked issue must not — its wait is not a failed attempt.
     expect(addLabels).toHaveBeenCalledWith(10, ["drydock:needs-human"]);
     expect(addLabels).not.toHaveBeenCalledWith(9, expect.anything());
+  });
+});
+
+describe("driveTick codex-limit gating (issue #167)", () => {
+  function codexLatch() {
+    latchProviderLimit(
+      { agent: "codex", kind: "usage_limit", rawSnippet: "limit", resetAt: nowSec() + 3600 },
+      db,
+    );
+  }
+
+  /** A codex job parked by the limit branch of run-job. */
+  function parkedCodexJob(issueNumber: number): Job {
+    const job = createJob({ repoId, issueNumber, agent: "codex" }, db);
+    transitionJob(job.id, "working", {}, db);
+    return transitionJob(
+      job.id,
+      "waiting_limit",
+      {
+        errorMessage: "Codex usage limit reached — waiting for the quota to reset",
+        availableAt: nowSec() + 3600,
+        limitKind: "usage_limit",
+        sessionId: "th_1",
+      },
+      db,
+    );
+  }
+
+  it("does not claim codex jobs while the codex latch blocks, but starts claude", async () => {
+    codexLatch();
+    const codex = createJob({ repoId, issueNumber: 1, agent: "codex" }, db);
+    const claude = createJob({ repoId, issueNumber: 2, agent: "claude" }, db);
+    const started: number[] = [];
+    await driveTick(deps(started) as never);
+    expect(started).toContain(claude.id);
+    expect(started).not.toContain(codex.id);
+    expect(getJob(codex.id, db)?.status).toBe("queued");
+  });
+
+  it("excludes both agents when both latches block", async () => {
+    codexLatch();
+    activeLatch();
+    const codex = createJob({ repoId, issueNumber: 1, agent: "codex" }, db);
+    const claude = createJob({ repoId, issueNumber: 2, agent: "claude" }, db);
+    const started: number[] = [];
+    await driveTick(deps(started) as never);
+    expect(started).toEqual([]);
+    expect(getJob(codex.id, db)?.status).toBe("queued");
+    expect(getJob(claude.id, db)?.status).toBe("queued");
+  });
+
+  it("claims codex jobs as usual when codex auto-wait is disabled", async () => {
+    codexLatch();
+    saveSettings({ codexLimitAutoWait: false }, db);
+    const codex = createJob({ repoId, issueNumber: 1, agent: "codex" }, db);
+    const started: number[] = [];
+    await driveTick(deps(started) as never);
+    expect(started).toContain(codex.id);
+  });
+
+  it("requeues codex limit-parked jobs once the codex latch clears, with a codex reason", async () => {
+    const parked = parkedCodexJob(4);
+    const started: number[] = [];
+    await driveTick(deps(started) as never);
+
+    const fresh = getJob(parked.id, db);
+    expect(started).toContain(parked.id);
+    expect(fresh?.status).toBe("merged");
+    expect(fresh?.limitKind).toBe("usage_limit");
+    const reasons = db
+      .select()
+      .from(jobEvents)
+      .where(eq(jobEvents.jobId, parked.id))
+      .all()
+      .map((e) => (JSON.parse(e.payload) as { reason?: string }).reason ?? "");
+    expect(reasons).toContain("codex_limit_cleared");
+    expect(commentIssue).toHaveBeenCalledWith(4, expect.stringMatching(/codex/i));
+  });
+
+  it("a blocking claude latch never holds back codex parked jobs", async () => {
+    activeLatch(); // claude blocked, codex free
+    const parked = parkedCodexJob(5);
+    const started: number[] = [];
+    await driveTick(deps(started) as never);
+    expect(started).toContain(parked.id);
+    expect(getJob(parked.id, db)?.status).toBe("merged");
+  });
+
+  it("leaves codex parked jobs parked while the codex latch blocks", async () => {
+    codexLatch();
+    const parked = parkedCodexJob(6);
+    const started: number[] = [];
+    await driveTick(deps(started) as never);
+    expect(getJob(parked.id, db)?.status).toBe("waiting_limit");
+    expect(started).toEqual([]);
   });
 });

@@ -9,7 +9,7 @@ import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
 import { getBroker, type LogBroker } from "@/lib/stream/broker";
 import { transitionJob } from "./jobs";
-import { claudeLimitBlocked } from "./provider-limit";
+import { agentLimitBlocked } from "./provider-limit";
 import { clearAbort, registerAbort } from "./singleton";
 
 export interface AgentSessionDeps {
@@ -106,11 +106,12 @@ const LIMIT_BLOCKED_EXIT = -3;
 const STDERR_TAIL_MAX = 16_384;
 
 /**
- * Pre-spawn gate (issue #166): while the provider's limit latch is blocking,
- * refuse to start a session at all — every caller (driver jobs, CI fixes,
- * review-feedback side sessions) would only burn a spawn against a quota that
- * is known to be exhausted. Returns the refusal result, or undefined when the
- * session may proceed. Only Claude has a latch today.
+ * Pre-spawn gate (issues #166/#167): while the provider's limit latch is
+ * blocking, refuse to start a session at all — every caller (driver jobs, CI
+ * fixes, review-feedback side sessions) would only burn a spawn against a
+ * quota that is known to be exhausted. Returns the refusal result, or
+ * undefined when the session may proceed. Latches are per agent, so only the
+ * latched provider's sessions are refused.
  */
 function limitGateResult(
   provider: AgentProvider,
@@ -118,8 +119,7 @@ function limitGateResult(
   broker: LogBroker,
   db: DB,
 ): AgentSessionResult | undefined {
-  if (provider.id !== "claude") return undefined;
-  const latch = claudeLimitBlocked(db);
+  const latch = agentLimitBlocked(provider.id, db);
   if (!latch) return undefined;
   broker.publish(job.id, {
     type: "error",

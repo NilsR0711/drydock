@@ -1,21 +1,35 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import type { ProviderLimitInfo, ProviderLimitKind } from "@/lib/agents/types";
+import type { AgentId, ProviderLimitInfo, ProviderLimitKind } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { settings } from "@/lib/db/schema";
 import { getSettings } from "@/lib/settings/service";
 
 /**
- * Global, DB-persisted provider-limit latch (issue #166, ADR 030). When a
- * Claude session fails on an exhausted quota, the orchestrator latches the
- * provider: the driver stops claiming Claude jobs, the babysitter defers CI
- * fixes, and parked work resumes automatically once the window elapses.
+ * Global, DB-persisted provider-limit latch (issues #166/#167, ADR 030). When
+ * an agent session fails on an exhausted quota, the orchestrator latches that
+ * provider: the driver stops claiming its jobs, the babysitter defers CI
+ * fixes, and parked work resumes automatically once the window elapses. The
+ * latch is keyed per agent, so a blocked Claude never stalls Codex work and
+ * vice versa.
  *
  * The latch lives in the settings key-value table (its own key, not the
  * "global" settings blob) so it survives a process restart: a Drydock that
  * reboots mid-window must not immediately re-spend a spawn against a quota
  * it already knows is exhausted.
  */
+
+/**
+ * Thrown by one-shot paths (decomposition, issue #167) when the agent CLI
+ * failed on a waitable provider limit: the caller aborts its sweep instead of
+ * persisting the failure as a normal outcome, and retries after the latch.
+ */
+export class ProviderLimitError extends Error {
+  constructor(readonly info: ProviderLimitInfo) {
+    super(`${info.agent} ${info.kind}: ${info.rawSnippet}`);
+    this.name = "ProviderLimitError";
+  }
+}
 
 export interface ProviderLimitLatch {
   agent: string;
@@ -152,14 +166,21 @@ export function clearProviderLimit(agent: string, db: DB = getDb()): void {
 }
 
 /**
- * The active Claude latch, gated by the operator's auto-wait toggle: with the
- * toggle off Drydock behaves exactly as before this feature (no claim gating,
- * no parking, no deferral).
+ * Whether the operator's auto-wait toggle is on for `agent` (issues #166,
+ * #167). With the toggle off Drydock behaves exactly as before the feature
+ * for that agent: no claim gating, no parking, no deferral.
  */
-export function claudeLimitBlocked(
+export function limitAutoWaitEnabled(agent: AgentId, db: DB = getDb()): boolean {
+  const settings = getSettings(db);
+  return agent === "codex" ? settings.codexLimitAutoWait : settings.claudeLimitAutoWait;
+}
+
+/** The active latch for `agent`, gated by its operator auto-wait toggle. */
+export function agentLimitBlocked(
+  agent: AgentId,
   db: DB = getDb(),
   now: number = nowSec(),
 ): ProviderLimitLatch | undefined {
-  if (!getSettings(db).claudeLimitAutoWait) return undefined;
-  return providerLimitBlocked("claude", db, now);
+  if (!limitAutoWaitEnabled(agent, db)) return undefined;
+  return providerLimitBlocked(agent, db, now);
 }

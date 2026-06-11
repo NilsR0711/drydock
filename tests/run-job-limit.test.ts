@@ -162,6 +162,83 @@ describe("runJob provider-limit parking (issue #166)", () => {
   });
 });
 
+describe("runJob codex provider-limit parking (issue #167)", () => {
+  function codexLimit(overrides: Partial<SessionLimitInfo> = {}): SessionLimitInfo {
+    return {
+      agent: "codex",
+      kind: "usage_limit",
+      rawSnippet: "You've hit your usage limit. Try again at 9:01 PM.",
+      ...overrides,
+    };
+  }
+
+  it("parks a usage-limited codex job in waiting_limit with a codex reason", async () => {
+    const deps = baseDeps({ runSession: limitSession(codexLimit()) });
+    const job = createJob({ repoId, issueNumber: 20, agent: "codex" }, db);
+    const result = await runJob(job.id, deps as never);
+
+    expect(result.status).toBe("waiting_limit");
+    expect(result.limitKind).toBe("usage_limit");
+    expect(result.errorMessage).toMatch(/codex usage limit/i);
+    expect(eventReasons(job.id)).toContain("codex_usage_limit");
+    // The codex latch blocks codex work, never claude work.
+    expect(providerLimitBlocked("codex", db)?.kind).toBe("usage_limit");
+    expect(providerLimitBlocked("claude", db)).toBeUndefined();
+    expect(deps.notify).not.toHaveBeenCalledWith("needs_human", expect.anything());
+  });
+
+  it("labels codex rate limits and overloads with provider-accurate wording", async () => {
+    const rate = baseDeps({
+      runSession: limitSession(codexLimit({ kind: "rate_limit", retryAfterMs: 30_000 })),
+    });
+    const rateJob = createJob({ repoId, issueNumber: 21, agent: "codex" }, db);
+    const rateResult = await runJob(rateJob.id, rate as never);
+    expect(rateResult.errorMessage).toMatch(/openai api rate limit/i);
+
+    const over = baseDeps({ runSession: limitSession(codexLimit({ kind: "overloaded" })) });
+    const overJob = createJob({ repoId, issueNumber: 22, agent: "codex" }, db);
+    const overResult = await runJob(overJob.id, over as never);
+    expect(overResult.errorMessage).toMatch(/openai api overloaded/i);
+  });
+
+  it("falls back to needs_human when the codex auto-wait toggle is disabled", async () => {
+    saveSettings({ codexLimitAutoWait: false }, db);
+    const deps = baseDeps({ runSession: limitSession(codexLimit()) });
+    const job = createJob({ repoId, issueNumber: 23, agent: "codex" }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("needs_human");
+    expect(result.errorMessage).toMatch(/usage limit/i);
+  });
+
+  it("the claude toggle does not affect codex parking", async () => {
+    saveSettings({ claudeLimitAutoWait: false }, db);
+    const deps = baseDeps({ runSession: limitSession(codexLimit()) });
+    const job = createJob({ repoId, issueNumber: 24, agent: "codex" }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("waiting_limit");
+  });
+
+  it("clears the codex latch streak after a successful codex session", async () => {
+    latchProviderLimit(codexLimit({ resetAt: nowSec() - 10 }), db);
+    const deps = baseDeps();
+    const job = createJob({ repoId, issueNumber: 25, agent: "codex" }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("merged");
+    expect(getProviderLimitLatch("codex", db)).toBeUndefined();
+  });
+
+  it("routes codex auth failures to needs_human", async () => {
+    const deps = baseDeps({
+      runSession: limitSession(codexLimit({ kind: "auth", rawSnippet: "Not logged in" })),
+    });
+    const job = createJob({ repoId, issueNumber: 26, agent: "codex" }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("needs_human");
+    expect(result.errorMessage).toMatch(/authentication/i);
+    expect(providerLimitBlocked("codex", db)).toBeUndefined();
+  });
+});
+
 describe("runJob limit-resume (issue #166)", () => {
   function parkedJob(issueNumber: number, patch: Partial<Job> = {}): Job {
     const job = createJob({ repoId, issueNumber }, db);

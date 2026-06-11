@@ -74,6 +74,7 @@ describe("settings", () => {
       "release_published",
       "cost_limit",
       "claude_limit",
+      "codex_limit",
       "automation_paused",
     ]);
   });

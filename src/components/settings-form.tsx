@@ -160,6 +160,21 @@ export function SettingsForm({ initial }: { initial: Settings }) {
             />
           </div>
 
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">Auto-wait on Codex usage limits</p>
+              <p className="text-xs text-muted-foreground">
+                Park jobs when the Codex quota or rate limit is exhausted and resume them
+                automatically once capacity returns, instead of paging you.
+              </p>
+            </div>
+            <Switch
+              checked={s.codexLimitAutoWait}
+              onChange={(v) => set("codexLimitAutoWait", v)}
+              aria-label="Auto-wait on Codex usage limits"
+            />
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Poll interval (s)" hint="How often to check for new issues.">
               <Input

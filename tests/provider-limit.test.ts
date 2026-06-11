@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { ProviderLimitInfo } from "@/lib/agents/types";
 import { createDb, type DB } from "@/lib/db/client";
 import {
-  claudeLimitBlocked,
+  agentLimitBlocked,
   clearProviderLimit,
   getProviderLimitLatch,
   latchProviderLimit,
@@ -114,11 +114,32 @@ describe("providerLimitBlocked", () => {
   });
 });
 
-describe("claudeLimitBlocked", () => {
-  it("respects the auto-wait settings toggle", () => {
+describe("agentLimitBlocked", () => {
+  it("gates the claude latch on the claude auto-wait toggle", () => {
     latchProviderLimit(usageLimit(), db, NOW);
-    expect(claudeLimitBlocked(db, NOW + 10)?.kind).toBe("usage_limit");
+    expect(agentLimitBlocked("claude", db, NOW + 10)?.kind).toBe("usage_limit");
     saveSettings({ claudeLimitAutoWait: false }, db);
-    expect(claudeLimitBlocked(db, NOW + 10)).toBeUndefined();
+    expect(agentLimitBlocked("claude", db, NOW + 10)).toBeUndefined();
+  });
+
+  it("gates the codex latch on the codex auto-wait toggle (issue #167)", () => {
+    latchProviderLimit(usageLimit({ agent: "codex", rawSnippet: "usage limit" }), db, NOW);
+    expect(agentLimitBlocked("codex", db, NOW + 10)?.kind).toBe("usage_limit");
+    saveSettings({ codexLimitAutoWait: false }, db);
+    expect(agentLimitBlocked("codex", db, NOW + 10)).toBeUndefined();
+  });
+
+  it("keeps agents independent: a codex latch never blocks claude", () => {
+    latchProviderLimit(usageLimit({ agent: "codex" }), db, NOW);
+    expect(agentLimitBlocked("claude", db, NOW + 10)).toBeUndefined();
+    expect(agentLimitBlocked("codex", db, NOW + 10)?.kind).toBe("usage_limit");
+  });
+
+  it("the codex toggle does not gate claude and vice versa", () => {
+    latchProviderLimit(usageLimit(), db, NOW);
+    latchProviderLimit(usageLimit({ agent: "codex" }), db, NOW);
+    saveSettings({ codexLimitAutoWait: false }, db);
+    expect(agentLimitBlocked("claude", db, NOW + 10)?.kind).toBe("usage_limit");
+    expect(agentLimitBlocked("codex", db, NOW + 10)).toBeUndefined();
   });
 });

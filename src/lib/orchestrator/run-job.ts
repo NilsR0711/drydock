@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { listAdrs } from "@/lib/adr/service";
 import { getAgentProvider } from "@/lib/agents/registry";
+import type { AgentId } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
@@ -26,7 +27,7 @@ import {
 import { ciBabysitter, type ResumeOutcome, resumeFailureReason } from "./ci-babysitter";
 import { getJob, recordEvent, transitionJob } from "./jobs";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
-import { clearProviderLimit, latchProviderLimit } from "./provider-limit";
+import { clearProviderLimit, latchProviderLimit, limitAutoWaitEnabled } from "./provider-limit";
 import { InvalidTransitionError } from "./state-machine";
 import {
   markSubtasksDone,
@@ -91,15 +92,16 @@ export function planPromptSection(plan: string): string {
 /** Event-aware notification sink: routes a lifecycle event + message downstream. */
 type NotifyEvent = (event: NotificationEvent, text: string) => Promise<void>;
 
-/** Operator-facing description of a parked job's limit kind (issue #166). */
-export function limitParkMessage(kind: SessionLimitInfo["kind"]): string {
+/** Operator-facing description of a parked job's limit kind (issues #166/#167). */
+export function limitParkMessage(kind: SessionLimitInfo["kind"], agent: AgentId): string {
+  const [vendor, label] = agent === "codex" ? ["OpenAI", "Codex"] : ["Anthropic", "Claude"];
   switch (kind) {
     case "rate_limit":
-      return "Claude API rate limit hit — waiting for the window to clear";
+      return `${vendor} API rate limit hit — waiting for the window to clear`;
     case "overloaded":
-      return "Anthropic API overloaded — waiting before retrying";
+      return `${vendor} API overloaded — waiting before retrying`;
     default:
-      return "Claude usage limit reached — waiting for the quota to reset";
+      return `${label} usage limit reached — waiting for the quota to reset`;
   }
 }
 
@@ -282,7 +284,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       job.id,
       "waiting_limit",
       {
-        errorMessage: limitParkMessage(limit.kind),
+        errorMessage: limitParkMessage(limit.kind, limit.agent),
         availableAt: blockedUntil,
         limitKind: limit.kind,
       },
@@ -292,7 +294,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       const resumesAt = new Date(blockedUntil * 1000).toISOString().slice(0, 16).replace("T", " ");
       await commentIssue(
         job.issueNumber,
-        `⏳ Drydock paused this job: ${limitParkMessage(limit.kind)}. It will retry automatically (next attempt around ${resumesAt} UTC).`,
+        `⏳ Drydock paused this job: ${limitParkMessage(limit.kind, limit.agent)}. It will retry automatically (next attempt around ${resumesAt} UTC).`,
       );
     } catch (err) {
       logError(`[run-job] limit-park comment failed for job ${job.id}`, err);
@@ -529,12 +531,12 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       }
       // Re-read the toggle: the session may have run for many minutes, and an
       // operator flipping auto-wait mid-session must take effect immediately.
-      if (!getSettings(db).claudeLimitAutoWait) {
+      if (!limitAutoWaitEnabled(provider.id, db)) {
         if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
         return transitionJob(
           job.id,
           "needs_human",
-          { errorMessage: `${limitParkMessage(limit.kind)} (auto-wait is disabled)` },
+          { errorMessage: `${limitParkMessage(limit.kind, limit.agent)} (auto-wait is disabled)` },
           db,
         );
       }
@@ -550,9 +552,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       );
     }
 
-    // A successful session ends the provider-limit streak (issue #166): the
-    // next limit detection starts a fresh backoff instead of compounding.
-    if (provider.id === "claude") clearProviderLimit("claude", db);
+    // A successful session ends the provider-limit streak (issues #166/#167):
+    // the next limit detection starts a fresh backoff instead of compounding.
+    clearProviderLimit(provider.id, db);
 
     // Per-repo ADR gate: hold the merge while ADRs await review (SPEC opt-in).
     if (repo.adrGating) {
