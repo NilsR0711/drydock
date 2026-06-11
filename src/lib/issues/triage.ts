@@ -5,6 +5,7 @@ import type { GhIssue, IssueDetail } from "@/lib/github/gh";
 import { logError } from "@/lib/log/logger";
 import { authorAllowed, repoAutomation } from "@/lib/repos/automation";
 import { evaluateIssue } from "./evaluator";
+import { mirrorLabelsLocal } from "./service";
 
 /** The forge operations auto-triage performs; a subset of ForgeClient. */
 export interface TriageForge {
@@ -61,28 +62,6 @@ export function computeTriageHash(listed: { title: string; labels: { name: strin
   let h = 5381;
   for (let i = 0; i < key.length; i++) h = ((h << 5) + h + key.charCodeAt(i)) | 0;
   return (h >>> 0).toString(16);
-}
-
-function mirrorLabelsLocal(repoId: number, number: number, add: string[], db: DB): void {
-  const row = db
-    .select()
-    .from(issues)
-    .where(and(eq(issues.repoId, repoId), eq(issues.number, number)))
-    .get();
-  if (!row) return;
-  let labels: string[];
-  try {
-    const v = JSON.parse(row.labels);
-    labels = Array.isArray(v) ? v : [];
-  } catch {
-    labels = [];
-  }
-  const next = [...labels];
-  for (const l of add) if (!next.includes(l)) next.push(l);
-  db.update(issues)
-    .set({ labels: JSON.stringify(next) })
-    .where(eq(issues.id, row.id))
-    .run();
 }
 
 function markTriaged(repoId: number, number: number, hash: string, db: DB): void {
@@ -166,7 +145,7 @@ export async function triageIssue(
       listed.number,
       `auto-triage: applied ${labelList} — reasons: ${reasons.join("; ")}.`,
     );
-    mirrorLabelsLocal(repo.id, listed.number, applied, db);
+    mirrorLabelsLocal(repo.id, listed.number, applied, [], db);
   }
 
   markTriaged(repo.id, listed.number, hash, db);

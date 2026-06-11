@@ -8,6 +8,12 @@ import { NOTIFICATION_EVENTS } from "@/lib/notify/events";
 
 export const settingsSchema = z.object({
   paused: z.boolean().default(false),
+  // Operator-set drain mode: stop picking up new work, let in-flight jobs
+  // finish. DB-backed (like `paused`) so it works across processes — the MCP
+  // server runs as its own process and could never reach the orchestrator's
+  // in-memory shutdown flag. The in-process flag in orchestrator/runtime.ts
+  // remains for transient graceful-shutdown draining only.
+  draining: z.boolean().default(false),
   dailyCostLimitUsd: z.number().nonnegative().default(10),
   pollIntervalSec: z.number().int().positive().default(30),
   maxTurns: z.number().int().positive().default(40),
@@ -86,13 +92,14 @@ export function saveSettings(patch: Partial<Settings>, db: DB = getDb()): Settin
 
 export interface GateResult {
   allowed: boolean;
-  reason?: "paused" | "cost_limit" | "repo_cost_limit";
+  reason?: "paused" | "draining" | "cost_limit" | "repo_cost_limit";
 }
 
 /** Whether the driver loop may start new jobs right now (SPEC §6.1). */
 export function jobsAllowed(db: DB = getDb()): GateResult {
   const s = getSettings(db);
   if (s.paused) return { allowed: false, reason: "paused" };
+  if (s.draining) return { allowed: false, reason: "draining" };
   if (todayCost(db) >= s.dailyCostLimitUsd) return { allowed: false, reason: "cost_limit" };
   return { allowed: true };
 }

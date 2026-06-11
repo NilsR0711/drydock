@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { type ReleaseRun, releaseRuns } from "@/lib/db/schema";
 import type { SemverBump } from "@/lib/version/semver";
@@ -54,6 +54,36 @@ export function createReleaseRun(input: CreateReleaseRunInput, db: DB = getDb())
 
 export function getReleaseRun(id: number, db: DB = getDb()): ReleaseRun | undefined {
   return db.select().from(releaseRuns).where(eq(releaseRuns.id, id)).get();
+}
+
+/**
+ * States in which a run is actively walking the publish pipeline. `error` runs
+ * are parked (retryable), not in flight, so they never block a new run.
+ */
+const RELEASE_IN_FLIGHT_STATES: readonly ReleaseStatus[] = [
+  "detected",
+  "evaluating",
+  "proposed",
+  "publishing",
+];
+
+/**
+ * The repo's currently in-flight release run, if any. Lets the manual publish
+ * action refuse to start a second concurrent run (e.g. a double submit, or a
+ * manual publish racing the auto sweep) that could cut a duplicate or empty
+ * release for the same PR window.
+ */
+export function activeReleaseRun(repoId: number, db: DB = getDb()): ReleaseRun | undefined {
+  return db
+    .select()
+    .from(releaseRuns)
+    .where(
+      and(
+        eq(releaseRuns.repoId, repoId),
+        inArray(releaseRuns.status, [...RELEASE_IN_FLIGHT_STATES]),
+      ),
+    )
+    .get();
 }
 
 /**

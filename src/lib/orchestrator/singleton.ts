@@ -1,12 +1,12 @@
 import { inArray } from "drizzle-orm";
-import { getDb } from "@/lib/db/client";
+import { type DB, getDb } from "@/lib/db/client";
 import { pruneOldData } from "@/lib/db/prune";
 import { jobs } from "@/lib/db/schema";
 import { logError } from "@/lib/log/logger";
 import { notifyDraining } from "@/lib/notify/lifecycle";
 import { recoverOnStartup } from "./driver";
 import { startDriverLoop, stopDriverLoop } from "./driver-loop";
-import { transitionJob } from "./jobs";
+import { getJob, transitionJob } from "./jobs";
 import { acquireInstanceLock, setDrainMode, waitForIdle } from "./runtime";
 import { reapOrphanedWorktrees } from "./worktree-reaper";
 
@@ -49,6 +49,27 @@ export function abortJob(jobId: number, graceMs = DEFAULT_ABORT_GRACE_MS): boole
   abort(graceMs);
   abortHandles.delete(jobId);
   return true;
+}
+
+/**
+ * Reconcile cross-process aborts: kill agent subprocesses whose job row was
+ * flipped to `aborted` by another process (e.g. the MCP server's abort_job,
+ * which cannot reach this process's abort registry). Polled from the driver
+ * tick, mirroring how the DB-backed pause/drain flags are. Returns the job
+ * ids whose subprocess was signalled.
+ */
+export function reconcileExternalAborts(db: DB = getDb()): number[] {
+  const killed: number[] = [];
+  for (const jobId of [...abortHandles.keys()]) {
+    // Isolate per-handle failures: one throwing abort callback must not stop
+    // the reconciliation of the remaining externally-aborted jobs.
+    try {
+      if (getJob(jobId, db)?.status === "aborted" && abortJob(jobId)) killed.push(jobId);
+    } catch (err) {
+      logError(`[orchestrator] external-abort kill failed for job ${jobId}`, err);
+    }
+  }
+  return killed;
 }
 
 /**

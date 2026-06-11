@@ -108,6 +108,13 @@ describe("jobsAllowed gate", () => {
     expect(jobsAllowed(db)).toEqual({ allowed: false, reason: "paused" });
   });
 
+  it("blocks when draining (DB-backed so it crosses processes)", () => {
+    saveSettings({ draining: true }, db);
+    expect(jobsAllowed(db)).toEqual({ allowed: false, reason: "draining" });
+    saveSettings({ draining: false }, db);
+    expect(jobsAllowed(db).allowed).toBe(true);
+  });
+
   it("blocks when today's cost reaches the limit", () => {
     saveSettings({ dailyCostLimitUsd: 1 }, db);
     db.insert(jobs)

@@ -2,7 +2,7 @@ process.env.DRYDOCK_DB = ":memory:";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/lib/db/client";
-import { issues, repos } from "@/lib/db/schema";
+import { issues, jobs, repos } from "@/lib/db/schema";
 import { __setForgeFactory } from "@/lib/forge/registry";
 import {
   addToQueueAction,
@@ -16,6 +16,8 @@ import {
   startIssueAction,
   viewIssueAction,
 } from "@/lib/issues/actions";
+import { transitionJob } from "@/lib/orchestrator/jobs";
+import { enqueueJob } from "@/lib/orchestrator/queue";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -156,6 +158,69 @@ describe("issue server actions", () => {
       const repoId = seedRepoWithIssue(9);
       const job = await startIssueAction(repoId, 9, { agent: "codex" });
       expect(job.agent).toBe("codex");
+    });
+
+    it("defaults the agent to the repo's agent, not a hardcoded one", async () => {
+      const db = getDb();
+      const repo = db
+        .insert(repos)
+        .values({ path: "/cx", name: "cx", queueLabel: "drydock:queue", agent: "codex" })
+        .returning()
+        .get();
+      db.insert(issues)
+        .values({ repoId: repo.id, number: 14, title: "seed", labels: "[]", priority: 0 })
+        .run();
+      const job = await startIssueAction(repo.id, 14);
+      expect(job.agent).toBe("codex");
+    });
+
+    it("rejects an unknown model id instead of persisting it verbatim", async () => {
+      const repoId = seedRepoWithIssue(15);
+      await expect(startIssueAction(repoId, 15, { model: "claude-fake-99" })).rejects.toThrow(
+        /unknown model/i,
+      );
+    });
+
+    it("rejects an unknown agent instead of persisting it verbatim", async () => {
+      const repoId = seedRepoWithIssue(16);
+      await expect(startIssueAction(repoId, 16, { agent: "gemini" })).rejects.toThrow(
+        /unknown agent/i,
+      );
+    });
+  });
+
+  describe("startIssueAction dedupe (no duplicate live jobs per issue)", () => {
+    it("stamps the driver-loop dedupe key so manual and driver jobs share one guard", async () => {
+      const repoId = seedRepoWithIssue(20);
+      const job = await startIssueAction(repoId, 20);
+      expect(job.dedupeKey).toBe(`${repoId}:20`);
+    });
+
+    it("refuses a second start while a live job exists (double click)", async () => {
+      const repoId = seedRepoWithIssue(21);
+      await startIssueAction(repoId, 21);
+      await expect(startIssueAction(repoId, 21)).rejects.toThrow(/already active/i);
+      const rows = getDb()
+        .select()
+        .from(jobs)
+        .all()
+        .filter((j) => j.repoId === repoId && j.issueNumber === 21);
+      expect(rows).toHaveLength(1);
+    });
+
+    it("refuses to start an issue the driver loop already enqueued", async () => {
+      const repoId = seedRepoWithIssue(22);
+      // Simulates the driver-loop enqueue for the same issue.
+      enqueueJob({ repoId, issueNumber: 22 });
+      await expect(startIssueAction(repoId, 22)).rejects.toThrow(/already active/i);
+    });
+
+    it("allows a new start once the previous job is terminal", async () => {
+      const repoId = seedRepoWithIssue(23);
+      const first = await startIssueAction(repoId, 23);
+      transitionJob(first.id, "aborted");
+      const second = await startIssueAction(repoId, 23);
+      expect(second.id).not.toBe(first.id);
     });
   });
 
