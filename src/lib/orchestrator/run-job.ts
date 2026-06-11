@@ -243,8 +243,12 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   // resuming, not a cheap CI fix.
   const resumeLimitSession =
     deps.resumeLimitSession ??
-    ((j: Job, prompt: string, cwd: string) =>
-      resumeAgentSession(j, j.sessionId as string, "", cwd, {
+    ((j: Job, prompt: string, cwd: string) => {
+      // The limit-resume branch only fires with a recorded session id; guard
+      // anyway so a concurrently cleared row fails loudly instead of passing
+      // null into the CLI's --resume flag.
+      if (!j.sessionId) throw new Error(`job ${j.id} has no session id to resume after a limit`);
+      return resumeAgentSession(j, j.sessionId, "", cwd, {
         db,
         provider,
         command,
@@ -253,7 +257,8 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         resumePrompt: prompt,
         resumeModel: j.model ?? repo.defaultModel,
         resumeMaxTurns: j.maxTurns,
-      }));
+      });
+    });
 
   /**
    * Park the job on a transient provider limit (issue #166): latch the
@@ -522,7 +527,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
           db,
         );
       }
-      if (!settings.claudeLimitAutoWait) {
+      // Re-read the toggle: the session may have run for many minutes, and an
+      // operator flipping auto-wait mid-session must take effect immediately.
+      if (!getSettings(db).claudeLimitAutoWait) {
         if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
         return transitionJob(
           job.id,
@@ -617,6 +624,10 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // ci_failed is included so a throw between the babysitter's ci_failed and
     // retrying transitions parks the job for a human instead of stranding it
     // in a non-terminal state forever (which would block sequential repos).
+    // waiting_limit is deliberately NOT included: a job that parked on a
+    // provider limit is in a self-recovering state — the driver requeues it
+    // when the latch clears — and a late throw must not degrade it to
+    // needs_human (issue #166).
     if (["working", "ci_running", "ci_failed", "retrying"].includes(current.status)) {
       if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
       try {

@@ -141,6 +141,35 @@ describe("classifyClaudeFailure", () => {
       ).toBeUndefined();
     });
 
+    it("ignores incidental mentions of rate limits in unrelated failure output", () => {
+      // A failed session whose output merely *discusses* rate limiting (e.g. a
+      // tool response echoed into the result) is not a provider condition.
+      expect(
+        classifyClaudeFailure({
+          ...failed,
+          resultText: "The downstream API applies a rate limit per client; added caching.",
+          resultIsError: true,
+        }),
+      ).toBeUndefined();
+    });
+
+    it("ignores incidental mentions of overload in unrelated failure output", () => {
+      expect(
+        classifyClaudeFailure({
+          ...failed,
+          stderr: "worker pool overloaded, dropping task",
+        }),
+      ).toBeUndefined();
+    });
+
+    it("still matches the real exceeded-rate-limit phrasing", () => {
+      const info = classifyClaudeFailure({
+        ...failed,
+        stderr: "Number of request tokens has exceeded your per-minute rate limit",
+      });
+      expect(info?.kind).toBe("rate_limit");
+    });
+
     it("returns undefined for empty output", () => {
       expect(classifyClaudeFailure({ exitCode: 1, stderr: "   " })).toBeUndefined();
     });

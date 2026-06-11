@@ -37,14 +37,19 @@ const RULES: readonly Rule[] = [
   { kind: "usage_limit", pattern: /usage limit reached/i },
   { kind: "usage_limit", pattern: /\b(?:\d+-hour|session|weekly) limit reached/i },
   { kind: "usage_limit", pattern: /limit will reset at/i },
-  // API rate limits (HTTP 429).
-  { kind: "rate_limit", pattern: /rate.?limit/i },
+  // API rate limits (HTTP 429). Deliberately anchored to the CLI's structured
+  // shapes and "limit was hit" phrasings — a bare /rate.?limit/ would also
+  // match failure output that merely *discusses* rate limiting (e.g. a tool
+  // response echoed into the result text).
+  { kind: "rate_limit", pattern: /rate.?limit_error/i },
   { kind: "rate_limit", pattern: /api error:?\s*429\b/i },
   { kind: "rate_limit", pattern: /too many requests/i },
-  // Anthropic overload (HTTP 529).
+  { kind: "rate_limit", pattern: /\brate.?limit(?:ed)?\b.{0,60}\b(?:exceeded|reached|hit)\b/i },
+  { kind: "rate_limit", pattern: /\b(?:exceeded|reached|hit)\b.{0,60}\brate.?limit/i },
+  // Anthropic overload (HTTP 529) — only the structured CLI signals; the bare
+  // word "overloaded" appears in too much unrelated failure output.
   { kind: "overloaded", pattern: /overloaded_error/i },
   { kind: "overloaded", pattern: /api error:?\s*529\b/i },
-  { kind: "overloaded", pattern: /\boverloaded\b/i },
 ];
 
 /** `…usage limit reached|1749924000` → reset epoch (seconds). */

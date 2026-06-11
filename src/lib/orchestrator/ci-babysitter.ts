@@ -163,9 +163,15 @@ function handleFixLimit(
     db,
   );
   // The attempt never reached the PR; give the retry back and wait out the
-  // latch from ci_running (the deferral gate above owns the waiting).
+  // latch from ci_running (the deferral gate above owns the waiting). Floored
+  // at 0 so an unexpected call path can never push the counter negative.
   return {
-    job: transitionJob(job.id, "ci_running", { ciRetryCount: job.ciRetryCount - 1 }, db),
+    job: transitionJob(
+      job.id,
+      "ci_running",
+      { ciRetryCount: Math.max(0, job.ciRetryCount - 1) },
+      db,
+    ),
     done: false,
   };
 }
