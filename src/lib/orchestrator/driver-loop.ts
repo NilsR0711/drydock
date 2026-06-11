@@ -204,7 +204,12 @@ async function resumeLimitParkedJobs(
   deps: DriveTickDeps,
   db: DB,
 ): Promise<void> {
-  const label = agent === "codex" ? "Codex capacity" : "Claude quota";
+  const label =
+    agent === "codex"
+      ? "Codex capacity"
+      : agent === "openrouter"
+        ? "OpenRouter window"
+        : "Claude quota";
   const parked = listJobsByStatus(["waiting_limit"], db).filter((j) => j.agent === agent);
   for (const job of parked) {
     try {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { chatCompletion, OPENROUTER_CHAT_URL, OpenRouterHttpError } from "@/lib/openrouter/client";
+import {
+  chatCompletion,
+  checkOpenRouterKey,
+  OPENROUTER_CHAT_URL,
+  OpenRouterHttpError,
+} from "@/lib/openrouter/client";
 
 function sse(...events: string[]): string {
   return `${events.map((e) => `data: ${e}`).join("\n\n")}\n\ndata: [DONE]\n\n`;
@@ -192,5 +197,44 @@ describe("chatCompletion (issue #169)", () => {
       fetchImpl: fetchReturning(stream),
     });
     expect(result.usage).toEqual({ promptTokens: 0, completionTokens: 0, costUsd: 0 });
+  });
+});
+
+describe("CodeRabbit findings on PR #187 (issue #169)", () => {
+  it("checkOpenRouterKey arms an abort signal so a stalled probe cannot hang", async () => {
+    let signal: AbortSignal | null | undefined;
+    const probe: typeof fetch = async (_u, init) => {
+      signal = init?.signal;
+      return new Response("{}", { status: 200 });
+    };
+    const res = await checkOpenRouterKey("sk-or-v1-k", probe);
+    expect(res).toEqual({ ok: true });
+    expect(signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("treats a stream that dies before any completion as a transport failure", async () => {
+    const truncated = 'data: {"choices":[{"delta":{"content":"par"},"finish_reason":null}]}\n\n';
+    const err = await chatCompletion({
+      apiKey: "sk-or-v1-k",
+      model: "openai/gpt-4o-mini",
+      messages: [{ role: "user", content: "hi" }],
+      fetchImpl: fetchReturning(truncated),
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(OpenRouterHttpError);
+    expect(err.status).toBe(502);
+    expect(err.body).toMatch(/ended before completion/i);
+  });
+
+  it("accepts a finished stream whose [DONE] marker was lost in transit", async () => {
+    const noDone =
+      'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"cost":0.001}}\n\n';
+    const result = await chatCompletion({
+      apiKey: "sk-or-v1-k",
+      model: "openai/gpt-4o-mini",
+      messages: [{ role: "user", content: "hi" }],
+      fetchImpl: fetchReturning(noDone),
+    });
+    expect(result.text).toBe("ok");
+    expect(result.finishReason).toBe("stop");
   });
 });

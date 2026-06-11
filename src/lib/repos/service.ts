@@ -150,8 +150,9 @@ export function updateRepo(id: number, input: Partial<RepoInput>, db: DB = getDb
   // Re-validate the effective agent/model pair whenever either side changes,
   // so switching agents can never leave the repo on a model the new agent
   // cannot run (issue #169).
+  let current: Repo | undefined;
   if (data.agent !== undefined || data.defaultModel !== undefined) {
-    const current = db.select().from(repos).where(eq(repos.id, id)).get();
+    current = db.select().from(repos).where(eq(repos.id, id)).get();
     if (!current) throw new Error(`repo ${id} not found`);
     assertModelAllowedForAgent(
       data.agent ?? current.agent,
@@ -160,7 +161,7 @@ export function updateRepo(id: number, input: Partial<RepoInput>, db: DB = getDb
     );
   }
   if (Object.keys(data).length === 0) {
-    const current = db.select().from(repos).where(eq(repos.id, id)).get();
+    current ??= db.select().from(repos).where(eq(repos.id, id)).get();
     if (!current) throw new Error(`repo ${id} not found`);
     return current;
   }

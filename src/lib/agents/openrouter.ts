@@ -21,6 +21,8 @@ export const openrouterProvider: AgentProvider = {
   defaultCommand: "",
   supportsResume: false,
   resumeModel: "",
+  // Not dead despite supportsResume=false: the HTTP "resume" runs a fresh
+  // tool-loop with the fix prompt, and this is that run's turn budget.
   resumeMaxTurns: 20,
   // No static default: OpenRouter models come from the synced catalog, the
   // effective model resolves from job → repo → settings.openrouterDefaultModel.

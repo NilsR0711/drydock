@@ -314,5 +314,37 @@ describe("agent-session dispatch for http providers (issue #169)", () => {
     const after = getJob(job.id, db);
     expect(after?.costUsd).toBeCloseTo(0.06, 9);
     expect(after?.totalInputTokens).toBe(210);
+    expect(after?.totalOutputTokens).toBe(45);
+  });
+});
+
+describe("CodeRabbit findings on PR #187 (issue #169)", () => {
+  it("enforces the session deadline through tool execution", async () => {
+    const seq = sequenceFetch([toolCallStream("run_command", { command: "sleep" })]);
+    const executor = vi.fn(
+      (_call: unknown, _cwd: unknown, opts?: { signal?: AbortSignal }) =>
+        new Promise<ToolExecResult>((resolve) => {
+          // A "hung" tool that only returns when the session aborts it.
+          opts?.signal?.addEventListener("abort", () =>
+            resolve({ content: "aborted", isError: true }),
+          );
+        }),
+    );
+    const res = await runOpenRouterJobSession(makeJob(), "p", "/tmp/wt", {
+      db,
+      broker: new LogBroker(db),
+      timeoutMs: 80,
+      fetchImpl: seq.fetch,
+      toolExecutor: executor as never,
+    });
+    expect(res.timedOut).toBe(true);
+    expect(res.exitCode).toBe(-1);
+    // The executor received the abort signal and the remaining budget.
+    const opts = (executor.mock.calls[0] as unknown[])[2] as {
+      signal?: AbortSignal;
+      timeoutMs?: number;
+    };
+    expect(opts?.signal).toBeInstanceOf(AbortSignal);
+    expect(opts?.timeoutMs).toBeLessThanOrEqual(80);
   });
 });

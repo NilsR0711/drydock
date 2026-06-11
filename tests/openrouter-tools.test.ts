@@ -104,3 +104,46 @@ describe("executeOpenRouterTool", () => {
     expect(unknown.content).toMatch(/unknown tool/i);
   });
 });
+
+describe("CodeRabbit findings on PR #187 (issue #169)", () => {
+  it("does not expose server environment secrets to run_command", async () => {
+    process.env.DRYDOCK_TEST_SECRET = "super-secret-value";
+    try {
+      const res = await call("run_command", { command: 'echo "VALUE=[$DRYDOCK_TEST_SECRET]"' });
+      expect(res.isError).toBe(false);
+      expect(res.content).toContain("VALUE=[]");
+      expect(res.content).not.toContain("super-secret-value");
+    } finally {
+      delete process.env.DRYDOCK_TEST_SECRET;
+    }
+  });
+
+  it("keeps PATH so run_command still finds binaries", async () => {
+    const res = await call("run_command", { command: "node -e 'console.log(40+2)'" });
+    expect(res.isError).toBe(false);
+    expect(res.content).toContain("42");
+  });
+
+  it("caps run_command by the remaining session budget", async () => {
+    const res = await executeOpenRouterTool(
+      { id: "t", name: "run_command", arguments: JSON.stringify({ command: "sleep 30" }) },
+      cwd,
+      { timeoutMs: 500 },
+    );
+    expect(res.isError).toBe(true);
+    expect(res.content).toMatch(/timed out/i);
+  }, 10_000);
+
+  it("kills run_command when the session abort signal fires", async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 200);
+    const started = Date.now();
+    const res = await executeOpenRouterTool(
+      { id: "t", name: "run_command", arguments: JSON.stringify({ command: "sleep 30" }) },
+      cwd,
+      { signal: controller.signal },
+    );
+    expect(res.isError).toBe(true);
+    expect(Date.now() - started).toBeLessThan(5000);
+  }, 10_000);
+});

@@ -61,7 +61,7 @@ describe("runOpenRouterOneShot (issue #169)", () => {
     expect(rows[0]).toMatchObject({ repoId, type: "decompose", costUsd: 0.002 });
   });
 
-  it("estimates cost from catalog pricing when the stream omits it", async () => {
+  it("estimates cost from catalog pricing when the stream reports zero cost", async () => {
     db.insert(openrouterModels)
       .values({
         id: "openai/gpt-4o-mini",

@@ -163,6 +163,13 @@ export async function runOpenRouterJobSession(
     deps.timeoutMs && deps.timeoutMs > 0 ? Date.now() + deps.timeoutMs : Number.POSITIVE_INFINITY;
   const controller = new AbortController();
   registerAbort(job.id, () => controller.abort());
+  // One session-wide deadline timer (not per request): the abort must also
+  // fire while a tool command is running, not only during chat completions.
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  if (Number.isFinite(deadline) && deps.timeoutMs) {
+    deadlineTimer = setTimeout(() => controller.abort(), deps.timeoutMs);
+    deadlineTimer.unref?.();
+  }
 
   let costUsd = 0;
   let inputTokens = 0;
@@ -175,11 +182,8 @@ export async function runOpenRouterJobSession(
   try {
     let turn = 0;
     for (;;) {
-      if (controller.signal.aborted) {
-        exitCode = 1;
-        broker.publish(job.id, { type: "error", payload: { stderr: "session aborted" } });
-        break;
-      }
+      // Timeout first: the deadline timer also aborts the controller, so a
+      // timed-out session must not be misreported as an operator abort.
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) {
         timedOut = true;
@@ -188,6 +192,11 @@ export async function runOpenRouterJobSession(
           type: "error",
           payload: { stderr: `session timed out after ${deps.timeoutMs}ms` },
         });
+        break;
+      }
+      if (controller.signal.aborted) {
+        exitCode = 1;
+        broker.publish(job.id, { type: "error", payload: { stderr: "session aborted" } });
         break;
       }
       if (turn >= maxTurns) {
@@ -200,26 +209,16 @@ export async function runOpenRouterJobSession(
       }
       turn += 1;
 
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      if (Number.isFinite(remainingMs)) {
-        timer = setTimeout(() => controller.abort(), remainingMs);
-        timer.unref?.();
-      }
-      let completion: Awaited<ReturnType<typeof chatCompletion>>;
-      try {
-        completion = await chatCompletion({
-          apiKey,
-          model,
-          messages,
-          tools: OPENROUTER_SESSION_TOOLS,
-          siteUrl: settings.openrouterSiteUrl || undefined,
-          appName: settings.openrouterAppName || undefined,
-          fetchImpl: deps.fetchImpl,
-          signal: controller.signal,
-        });
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
+      const completion = await chatCompletion({
+        apiKey,
+        model,
+        messages,
+        tools: OPENROUTER_SESSION_TOOLS,
+        siteUrl: settings.openrouterSiteUrl || undefined,
+        appName: settings.openrouterAppName || undefined,
+        fetchImpl: deps.fetchImpl,
+        signal: controller.signal,
+      });
 
       inputTokens += completion.usage.promptTokens;
       outputTokens += completion.usage.completionTokens;
@@ -270,7 +269,18 @@ export async function runOpenRouterJobSession(
         toolCalls: completion.toolCalls,
       });
       for (const call of completion.toolCalls) {
-        const result = await executor(call, cwd);
+        // Hand the executor the session's abort signal and remaining budget so
+        // a long-running command can never outlive the deadline or ignore an
+        // operator abort.
+        const result = await executor(call, cwd, {
+          signal: controller.signal,
+          timeoutMs: Number.isFinite(deadline) ? Math.max(1, deadline - Date.now()) : undefined,
+        });
+        if (controller.signal.aborted) {
+          // The loop head settles whether this was a timeout or an abort.
+          messages.push({ role: "tool", content: "ERROR: session aborted", toolCallId: call.id });
+          break;
+        }
         broker.publish(job.id, {
           type: "user",
           payload: {
@@ -304,6 +314,7 @@ export async function runOpenRouterJobSession(
       });
     }
   } finally {
+    if (deadlineTimer) clearTimeout(deadlineTimer);
     clearAbort(job.id);
   }
 

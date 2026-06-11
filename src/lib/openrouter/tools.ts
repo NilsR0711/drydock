@@ -85,7 +85,19 @@ export interface ToolExecResult {
   isError: boolean;
 }
 
-export type ToolExecutor = (call: OpenRouterToolCall, cwd: string) => Promise<ToolExecResult>;
+/** Session-scoped bounds the executor must honor (deadline and abort). */
+export interface ToolExecOptions {
+  /** Aborted when the session is cancelled or times out — kills running commands. */
+  signal?: AbortSignal;
+  /** Remaining session budget in ms; caps a command's own timeout. */
+  timeoutMs?: number;
+}
+
+export type ToolExecutor = (
+  call: OpenRouterToolCall,
+  cwd: string,
+  opts?: ToolExecOptions,
+) => Promise<ToolExecResult>;
 
 const readArgs = z.object({ path: z.string().min(1) });
 const writeArgs = z.object({ path: z.string().min(1), content: z.string() });
@@ -110,23 +122,48 @@ function truncate(text: string, max: number): string {
   return `${text.slice(0, max)}\n… [truncated ${text.length - max} characters]`;
 }
 
+/**
+ * Minimal environment for model-issued commands. The command string is
+ * model-controlled and its output is shipped back to OpenRouter, so the full
+ * `process.env` (API keys, forge tokens) must never be inherited — only what
+ * shells and toolchains need to function.
+ */
+const TOOL_ENV: NodeJS.ProcessEnv = {
+  PATH: process.env.PATH ?? "",
+  HOME: process.env.HOME ?? "",
+  TMPDIR: process.env.TMPDIR,
+  TEMP: process.env.TEMP,
+  TMP: process.env.TMP,
+  LANG: process.env.LANG,
+  NODE_ENV: process.env.NODE_ENV ?? "production",
+};
+
 function runCommand(
   command: string,
   cwd: string,
   timeoutSec: number,
+  signal?: AbortSignal,
 ): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> {
   return new Promise((resolve) => {
     exec(
       command,
-      { cwd, timeout: timeoutSec * 1000, killSignal: "SIGKILL", maxBuffer: 8 * 1024 * 1024 },
+      {
+        cwd,
+        env: TOOL_ENV,
+        timeout: timeoutSec * 1000,
+        killSignal: "SIGKILL",
+        maxBuffer: 8 * 1024 * 1024,
+        signal,
+      },
       (error, stdout, stderr) => {
         const killed = error !== null && (error as { killed?: boolean }).killed === true;
+        const aborted = signal?.aborted === true;
         const exitCode = error === null ? 0 : ((error as { code?: number }).code ?? 1);
         resolve({
           exitCode: typeof exitCode === "number" ? exitCode : 1,
           stdout: String(stdout),
           stderr: String(stderr),
-          timedOut: killed,
+          timedOut: killed || aborted,
         });
       },
     );
@@ -138,7 +175,7 @@ function runCommand(
  * (never thrown): the model sees the message and can correct itself, and a
  * malformed call can never crash the session loop.
  */
-export const executeOpenRouterTool: ToolExecutor = async (call, cwd) => {
+export const executeOpenRouterTool: ToolExecutor = async (call, cwd, opts) => {
   let args: unknown;
   try {
     args = call.arguments.trim() === "" ? {} : JSON.parse(call.arguments);
@@ -172,8 +209,14 @@ export const executeOpenRouterTool: ToolExecutor = async (call, cwd) => {
       }
       case "run_command": {
         const { command, timeout_seconds } = runArgs.parse(args);
-        const timeoutSec = timeout_seconds ?? DEFAULT_COMMAND_TIMEOUT_SEC;
-        const res = await runCommand(command, cwd, timeoutSec);
+        // The session's remaining wall-clock budget caps the command's own
+        // timeout, so a long tool run can never outlive the session deadline.
+        const budgetSec =
+          opts?.timeoutMs !== undefined && opts.timeoutMs > 0
+            ? Math.max(1, Math.ceil(opts.timeoutMs / 1000))
+            : Number.POSITIVE_INFINITY;
+        const timeoutSec = Math.min(timeout_seconds ?? DEFAULT_COMMAND_TIMEOUT_SEC, budgetSec);
+        const res = await runCommand(command, cwd, timeoutSec, opts?.signal);
         const body = truncate(
           `exit code: ${res.exitCode}\nstdout:\n${res.stdout}\nstderr:\n${res.stderr}`,
           COMMAND_OUTPUT_MAX_CHARS,

@@ -97,7 +97,12 @@ type NotifyEvent = (event: NotificationEvent, text: string) => Promise<void>;
 
 /** Operator-facing description of a parked job's limit kind (issues #166/#167). */
 export function limitParkMessage(kind: SessionLimitInfo["kind"], agent: AgentId): string {
-  const [vendor, label] = agent === "codex" ? ["OpenAI", "Codex"] : ["Anthropic", "Claude"];
+  const [vendor, label] =
+    agent === "codex"
+      ? ["OpenAI", "Codex"]
+      : agent === "openrouter"
+        ? ["OpenRouter", "OpenRouter"]
+        : ["Anthropic", "Claude"];
   switch (kind) {
     case "rate_limit":
       return `${vendor} API rate limit hit — waiting for the window to clear`;

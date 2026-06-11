@@ -14,19 +14,31 @@ export const OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key";
  * Probe whether an API key is accepted (settings "Test connection" button):
  * a cheap authenticated GET against the key endpoint, no tokens spent.
  */
+/** Bound for the key probe so a stalled connect can never pin the settings action. */
+const KEY_PROBE_TIMEOUT_MS = 10_000;
+
 export async function checkOpenRouterKey(
   apiKey: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), KEY_PROBE_TIMEOUT_MS);
+  timer.unref?.();
   try {
     const res = await fetchImpl(OPENROUTER_KEY_URL, {
       headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
     });
     if (res.ok) return { ok: true };
     const body = (await res.text().catch(() => "")).slice(0, 200);
     return { ok: false, error: `OpenRouter HTTP ${res.status}: ${body}` };
   } catch (err) {
+    if (controller.signal.aborted) {
+      return { ok: false, error: `OpenRouter key probe timed out after ${KEY_PROBE_TIMEOUT_MS}ms` };
+    }
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -240,6 +252,7 @@ export async function chatCompletion(opts: {
 
   let text = "";
   let finishReason: string | null = null;
+  let sawDone = false;
   const usage: OpenRouterUsage = { promptTokens: 0, completionTokens: 0, costUsd: 0 };
   const drafts = new Map<number, ToolCallDraft>();
 
@@ -247,7 +260,10 @@ export async function chatCompletion(opts: {
     if (!line || line.startsWith(":")) continue; // keep-alive comments
     if (!line.startsWith("data:")) continue;
     const data = line.slice(5).trim();
-    if (data === "[DONE]") break;
+    if (data === "[DONE]") {
+      sawDone = true;
+      break;
+    }
     let parsed: z.infer<typeof chunkSchema>;
     try {
       parsed = chunkSchema.parse(JSON.parse(data));
@@ -276,6 +292,13 @@ export async function chatCompletion(opts: {
       usage.completionTokens = parsed.usage.completion_tokens ?? usage.completionTokens;
       usage.costUsd = parsed.usage.cost ?? usage.costUsd;
     }
+  }
+
+  // A transport that dies before [DONE] *and* before any finish_reason left
+  // us with a partial message: surface it as a retryable failure instead of
+  // returning a truncated "success" that would also under-record spend.
+  if (!sawDone && finishReason === null) {
+    throw new OpenRouterHttpError(502, "OpenRouter stream ended before completion");
   }
 
   const toolCalls: OpenRouterToolCall[] = [...drafts.entries()]

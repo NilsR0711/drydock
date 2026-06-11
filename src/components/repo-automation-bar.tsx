@@ -123,8 +123,11 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [planFirst, setPlanFirst] = useState(repo.planFirst);
   const [verifyPr, setVerifyPr] = useState(repo.verifyPr);
   const [autoPrAudit, setAutoPrAudit] = useState(repo.autoPrAudit);
+  // PR audits run on the CLI agents only; an OpenRouter repo without an
+  // explicit audit agent falls back to claude so the select never holds a
+  // value its option list cannot show (issue #169).
   const [auditAgent, setAuditAgent] = useState<AgentId>(
-    (repo.prAuditAgent ?? repo.agent) as AgentId,
+    (repo.prAuditAgent ?? (repo.agent === "openrouter" ? "claude" : repo.agent)) as AgentId,
   );
   // Effective audit model: an explicit override wins; with only the agent
   // overridden, that agent's catalog default applies (the repo's defaultModel

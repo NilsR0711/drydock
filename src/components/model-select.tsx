@@ -43,11 +43,13 @@ export function ModelSelect({
             No synced models — refresh the catalog in Settings
           </option>
         )}
-        {value !== "" && !openrouterModels.some((m) => m.id === value) && (
-          <option value={value} disabled>
-            {value} (no longer in catalog)
-          </option>
-        )}
+        {openrouterModels.length > 0 &&
+          value !== "" &&
+          !openrouterModels.some((m) => m.id === value) && (
+            <option value={value} disabled>
+              {value} (no longer in catalog)
+            </option>
+          )}
         {openrouterModels.map((m) => (
           <option key={m.id} value={m.id}>
             {m.isFree ? `${m.label} (free)` : m.label}

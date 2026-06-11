@@ -8,6 +8,7 @@ import { commandForAgent } from "@/lib/orchestrator/agent-command";
 import { driveTick } from "@/lib/orchestrator/driver-loop";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { latchProviderLimit } from "@/lib/orchestrator/provider-limit";
+import { limitParkMessage } from "@/lib/orchestrator/run-job";
 import { setDrainMode } from "@/lib/orchestrator/runtime";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
@@ -121,5 +122,35 @@ describe("driveTick openrouter limit gating (issue #169)", () => {
 describe("commandForAgent for http providers (issue #169)", () => {
   it("never resolves a CLI binary for openrouter", () => {
     expect(commandForAgent(openrouterProvider, db)).toBe("openrouter");
+  });
+});
+
+describe("CodeRabbit findings on PR #187 (issue #169)", () => {
+  it("labels the resume breadcrumb with OpenRouter, not Claude", async () => {
+    const commentIssue = vi.fn(async (..._args: unknown[]) => {});
+    const job = createJob({ repoId, issueNumber: 7, agent: "openrouter" }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(
+      job.id,
+      "waiting_limit",
+      { errorMessage: "waiting", availableAt: nowSec() - 10, limitKind: "rate_limit" },
+      db,
+    );
+    await driveTick(
+      deps([], { forgeFor: () => ({ commentIssue }) as unknown as ForgeClient }) as never,
+    );
+    expect(commentIssue).toHaveBeenCalled();
+    const body = String(commentIssue.mock.calls[0]?.[1]);
+    expect(body).toContain("OpenRouter");
+    expect(body).not.toContain("Claude");
+  });
+
+  it("limitParkMessage names OpenRouter for openrouter limits", () => {
+    expect(limitParkMessage("rate_limit", "openrouter")).toContain("OpenRouter");
+    expect(limitParkMessage("usage_limit", "openrouter")).toContain("OpenRouter");
+    expect(limitParkMessage("rate_limit", "openrouter")).not.toContain("Anthropic");
+    // CLI agents keep their existing wording.
+    expect(limitParkMessage("rate_limit", "claude")).toContain("Anthropic");
+    expect(limitParkMessage("usage_limit", "codex")).toContain("Codex");
   });
 });
