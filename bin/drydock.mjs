@@ -61,12 +61,45 @@ export function parseArgs(argv) {
     return { mode: "update" };
   }
 
+  if (argv[0] === "backup") {
+    if (argv.length > 2) throw new Error(`unexpected argument: ${argv[2]}`);
+    return { mode: "backup", path: argv[1] };
+  }
+
+  if (argv[0] === "restore") {
+    if (argv.length < 2) throw new Error("missing backup path: usage `drydock restore <path>`");
+    if (argv.length > 2) throw new Error(`unexpected argument: ${argv[2]}`);
+    return { mode: "restore", path: argv[1] };
+  }
+
+  if (argv[0] === "doctor") {
+    if (argv.length > 1) throw new Error(`unexpected argument: ${argv[1]}`);
+    return { mode: "doctor" };
+  }
+
+  if (argv[0] === "service") {
+    const action = argv[1];
+    if (action !== "install" && action !== "uninstall") {
+      throw new Error(
+        action
+          ? `unknown service action: ${action} (expected install or uninstall)`
+          : "missing service action: usage `drydock service install|uninstall`",
+      );
+    }
+    if (argv.length > 2) throw new Error(`unexpected argument: ${argv[2]}`);
+    return { mode: "service", action };
+  }
+
+  // `drydock serve` is an explicit alias for the default mode so scripts and
+  // service units can spell out what they launch.
+  const flags = argv[0] === "serve" ? argv.slice(1) : argv;
+
   let host = DEFAULT_HOST;
   let port = DEFAULT_PORT;
   let open = false;
 
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
+  for (let i = 0; i < flags.length; i++) {
+    const arg = flags[i];
 
     if (arg === "--open") {
       open = true;
@@ -76,7 +109,7 @@ export function parseArgs(argv) {
     const value = (flag) => {
       const eq = `${flag}=`;
       if (arg.startsWith(eq)) return arg.slice(eq.length);
-      const next = argv[i + 1];
+      const next = flags[i + 1];
       if (next === undefined) throw new Error(`missing value for ${flag}`);
       i++;
       return next;
@@ -132,7 +165,11 @@ const HELP = `drydock — autonomously turn GitHub issues into pull requests
 
 Usage:
   drydock [options]      Start the server and dashboard
+  drydock serve          Same as running with no subcommand
   drydock update         Update to the latest published version
+  drydock backup [path]  Snapshot the database (WAL-safe, works while running);
+                         default target: <data dir>/backups/drydock-<timestamp>.db
+  drydock restore <path> Replace the database with a backup (server must be stopped)
 
 Options:
   -p, --port <number>   Port to listen on (default: ${DEFAULT_PORT})
@@ -365,6 +402,26 @@ async function main(argv) {
     case "update":
       await runUpdate();
       return;
+    case "backup": {
+      const { runBackupCommand } = await import("./ops.mjs");
+      process.exit(
+        await runBackupCommand(directive.path, {
+          dbPath: resolveDbPath(),
+          dataDir: resolveDataDir(),
+        }),
+      );
+      return;
+    }
+    case "restore": {
+      const { resolveLockPath, runRestoreCommand } = await import("./ops.mjs");
+      process.exit(
+        await runRestoreCommand(directive.path, {
+          dbPath: resolveDbPath(),
+          lockPath: resolveLockPath(),
+        }),
+      );
+      return;
+    }
     default:
       await serve(directive);
   }
