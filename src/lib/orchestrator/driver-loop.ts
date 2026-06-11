@@ -531,10 +531,24 @@ async function defaultOpenRouterCatalogSync(db: DB): Promise<void> {
 let timer: ReturnType<typeof setTimeout> | undefined;
 let running = false;
 let ticking = false;
+let lastTickAt: number | null = null;
+let loopIntervalMs: number | null = null;
 
 export interface StartLoopOptions {
   intervalMs?: number;
   tick?: () => Promise<void>;
+}
+
+export interface DriverLoopStatus {
+  running: boolean;
+  /** Epoch ms of the last tick *start*. A hung tick freezes this, so the
+   * health endpoint can detect a wedged loop by its age (issue #183). */
+  lastTickAt: number | null;
+  intervalMs: number | null;
+}
+
+export function driverLoopStatus(): DriverLoopStatus {
+  return { running, lastTickAt, intervalMs: loopIntervalMs };
 }
 
 /**
@@ -547,6 +561,7 @@ export function startDriverLoop(opts: StartLoopOptions = {}): void {
   running = true;
   const tick = opts.tick ?? (() => driveTick());
   const intervalMs = opts.intervalMs ?? getSettings().pollIntervalSec * 1000;
+  loopIntervalMs = intervalMs;
 
   const schedule = () => {
     timer = setTimeout(run, intervalMs);
@@ -555,6 +570,7 @@ export function startDriverLoop(opts: StartLoopOptions = {}): void {
     if (!running) return;
     if (!ticking) {
       ticking = true;
+      lastTickAt = Date.now();
       try {
         await tick();
       } catch (err) {
