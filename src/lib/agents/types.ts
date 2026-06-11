@@ -23,6 +23,10 @@ export interface StreamParser {
   readonly totalCacheReadInputTokens: number;
   /** Cost in USD reported by the stream, or 0 when the agent omits it. */
   readonly costUsd: number;
+  /** Final result text from the stream, when the agent emitted one (issue #166). */
+  readonly resultText?: string;
+  /** Whether the stream's final result was flagged as an error (issue #166). */
+  readonly resultIsError?: boolean;
   /**
    * Invoked for every stdout line the parser could not decode. The line is
    * skipped, never thrown, so a malformed line can't crash the orchestrator
@@ -49,6 +53,44 @@ export interface ResumeArgsOptions extends BuildArgsOptions {
 export interface OneShotArgsOptions {
   prompt: string;
   model: string;
+}
+
+/**
+ * How a failed agent session maps to a provider-side condition (issue #166).
+ * `usage_limit`, `rate_limit` and `overloaded` are transient — the orchestrator
+ * can park the work and retry once the window resets. `auth` and `billing`
+ * need an operator and must never auto-wait.
+ */
+export type ProviderLimitKind = "usage_limit" | "rate_limit" | "overloaded" | "auth" | "billing";
+
+/** Kinds the orchestrator may park-and-retry instead of escalating to a human. */
+export const WAITABLE_LIMIT_KINDS: readonly ProviderLimitKind[] = [
+  "usage_limit",
+  "rate_limit",
+  "overloaded",
+];
+
+/** Normalized provider limit/auth failure, classified from CLI output. */
+export interface ProviderLimitInfo {
+  agent: AgentId;
+  kind: ProviderLimitKind;
+  /** Epoch seconds when the limit window resets, when the CLI reported one. */
+  resetAt?: number;
+  /** Suggested wait before retrying, when the CLI reported one. */
+  retryAfterMs?: number;
+  /** Short, secret-redacted excerpt of the triggering output for logs/events. */
+  rawSnippet: string;
+}
+
+/** Everything a provider gets to classify a finished, failed session. */
+export interface ClassifyFailureInput {
+  exitCode: number;
+  /** Tail of the session's stderr output. */
+  stderr: string;
+  /** Final result text from the stream, when the CLI emitted one. */
+  resultText?: string;
+  /** Whether the stream's result event was flagged as an error. */
+  resultIsError?: boolean;
 }
 
 /**
@@ -87,6 +129,12 @@ export interface AgentProvider {
   buildStreamOneShotArgs(opts: OneShotArgsOptions): string[] | null;
   /** Create a fresh incremental parser for this agent's stdout. */
   createParser(): StreamParser;
+  /**
+   * Classify a failed session as a provider limit/auth condition (issue #166),
+   * or undefined when the failure carries no recognizable provider signal.
+   * Optional: agents without limit detection simply fail generically.
+   */
+  classifyFailure?(input: ClassifyFailureInput): ProviderLimitInfo | undefined;
   /**
    * Estimate cost in USD from token counts (used when the stream omits it).
    * Cache token counts are optional; providers without cache pricing (codex)

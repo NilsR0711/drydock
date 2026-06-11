@@ -1,5 +1,6 @@
 import { estimateCost } from "@/lib/orchestrator/pricing";
 import { StreamJsonParser } from "@/lib/stream/parser";
+import { classifyClaudeFailure } from "./claude-limits";
 import type { AgentProvider } from "./types";
 
 /** CI-fix resume runs on Haiku with a tighter turn budget (SPEC §6.3). */
@@ -65,6 +66,10 @@ export const claudeProvider: AgentProvider = {
   ],
 
   createParser: () => new StreamJsonParser(),
+
+  // Limit/auth detection from CLI output (issue #166): lets the orchestrator
+  // park-and-resume on transient quota exhaustion instead of paging a human.
+  classifyFailure: classifyClaudeFailure,
 
   estimateCost,
 };
