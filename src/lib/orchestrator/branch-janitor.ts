@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
-import { type Job, jobEvents, type Repo } from "@/lib/db/schema";
+import { type Job, jobEvents, jobs as jobsTable, type Repo } from "@/lib/db/schema";
 import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient } from "@/lib/forge/types";
 import { logError } from "@/lib/log/logger";
@@ -42,12 +42,15 @@ function isDrydockBranch(branch: string | null): branch is string {
   return branch?.startsWith(DRYDOCK_BRANCH_PREFIX) ?? false;
 }
 
-/** Job ids whose merged branch was already deleted by a prior sweep. */
-function cleanedJobIds(db: DB): Set<number> {
+/** This repo's job ids whose merged branch was already deleted by a prior
+ * sweep. Scoped to the repo via a join so the lookup stays proportional to one
+ * repo's history instead of every repo's, as the event log grows. */
+function cleanedJobIds(repoId: number, db: DB): Set<number> {
   const rows = db
     .select({ jobId: jobEvents.jobId, payload: jobEvents.payload })
     .from(jobEvents)
-    .where(eq(jobEvents.type, JANITOR_EVENT))
+    .innerJoin(jobsTable, eq(jobEvents.jobId, jobsTable.id))
+    .where(and(eq(jobEvents.type, JANITOR_EVENT), eq(jobsTable.repoId, repoId)))
     .all();
   const cleaned = new Set<number>();
   for (const row of rows) {
@@ -66,9 +69,14 @@ function cleanedJobIds(db: DB): Set<number> {
  * unstamped and is retried next sweep. A branch still referenced by a live
  * (non-terminal) job is never deleted, however unlikely the collision.
  */
-async function cleanupMergedBranches(jobs: Job[], forge: ForgeClient, db: DB): Promise<void> {
+async function cleanupMergedBranches(
+  repoId: number,
+  jobs: Job[],
+  forge: ForgeClient,
+  db: DB,
+): Promise<void> {
   if (typeof forge.deleteBranch !== "function") return;
-  const cleaned = cleanedJobIds(db);
+  const cleaned = cleanedJobIds(repoId, db);
   const liveBranches = new Set(
     jobs
       .filter((j) => !["merged", "aborted"].includes(j.status))
@@ -145,6 +153,9 @@ async function escalateConflict(
     // merged or an operator aborted the job while the probe was in flight.
     const fresh = getJob(job.id, db);
     if (!fresh || !REFRESH_STATES.has(fresh.status)) return;
+    // Deliberate pair of status events: transitionJob logs the generic
+    // {from, to} entry, while this one carries the *why* (reason + PR) for the
+    // job timeline — same pattern as the CI babysitter and limit-resume paths.
     recordEvent(job.id, "status", { reason: "merge_conflict", prNumber }, db);
     transitionJob(job.id, "needs_human", { errorMessage: reason }, db);
   } catch (err) {
@@ -165,7 +176,7 @@ export async function runBranchJanitorSweep(deps: JanitorDeps = {}): Promise<voi
     try {
       const forge = deps.forgeFor?.(repo) ?? getForge(repo);
       const jobs = listJobs(repo.id, db);
-      await cleanupMergedBranches(jobs, forge, db);
+      await cleanupMergedBranches(repo.id, jobs, forge, db);
       await refreshOpenPrs(repo, jobs, forge, db);
     } catch (err) {
       logError(`[janitor] sweep failed for ${repo.name}`, err);
