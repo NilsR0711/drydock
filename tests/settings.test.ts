@@ -77,6 +77,7 @@ describe("settings", () => {
       "claude_limit",
       "codex_limit",
       "openrouter_limit",
+      "auth_expired",
       "automation_paused",
     ]);
   });

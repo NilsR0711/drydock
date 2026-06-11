@@ -1,5 +1,6 @@
 import type { AgentId } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
+import type { CredentialFailure } from "@/lib/orchestrator/credential-status";
 import type { NotificationEvent } from "./events";
 import { defaultTransports, dispatch, type NotifyTransports } from "./notifier";
 
@@ -83,6 +84,40 @@ export async function notifyProviderLimitEdge(
     if (!state.active) return;
     state.active = false;
     await dispatch(messages.event, messages.cleared, db, transports);
+  }
+}
+
+/**
+ * Two-sided edge notification for the credential watchdog (issue #177): one
+ * message when a probe round first finds dead credentials (naming each failing
+ * target so the operator knows what to fix), one when a later round finds
+ * everything healthy again and the queue resumes. Re-arms after each recovery.
+ */
+export async function notifyCredentialEdge(
+  failures: readonly CredentialFailure[],
+  state: EdgeState,
+  db: DB = getDb(),
+  transports: NotifyTransports = defaultTransports,
+): Promise<void> {
+  if (failures.length > 0) {
+    if (state.active) return;
+    state.active = true;
+    const targets = failures.map((f) => `${f.label}: ${f.message}`).join("; ");
+    await dispatch(
+      "auth_expired",
+      `🔑 Credential check failed — new jobs are paused until auth is restored. ${targets}`,
+      db,
+      transports,
+    );
+  } else {
+    if (!state.active) return;
+    state.active = false;
+    await dispatch(
+      "auth_expired",
+      "🔑 Credentials restored — the queue is resuming.",
+      db,
+      transports,
+    );
   }
 }
 
