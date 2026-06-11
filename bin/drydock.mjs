@@ -170,6 +170,8 @@ Usage:
   drydock backup [path]  Snapshot the database (WAL-safe, works while running);
                          default target: <data dir>/backups/drydock-<timestamp>.db
   drydock restore <path> Replace the database with a backup (server must be stopped)
+  drydock doctor         Health checks: gh/claude/codex auth, GitLab tokens, disk
+                         space, DB integrity, instance lock; exits non-zero on failure
 
 Options:
   -p, --port <number>   Port to listen on (default: ${DEFAULT_PORT})
@@ -417,6 +419,17 @@ async function main(argv) {
       process.exit(
         await runRestoreCommand(directive.path, {
           dbPath: resolveDbPath(),
+          lockPath: resolveLockPath(),
+        }),
+      );
+      return;
+    }
+    case "doctor": {
+      const { resolveLockPath, runDoctorCommand } = await import("./ops.mjs");
+      process.exit(
+        await runDoctorCommand({
+          dbPath: resolveDbPath(),
+          dataDir: resolveDataDir(),
           lockPath: resolveLockPath(),
         }),
       );

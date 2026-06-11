@@ -5,6 +5,7 @@
 // return an exit code so they stay unit-testable; bin/drydock.mjs owns the
 // process boundary.
 
+import { spawn } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -12,6 +13,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statfsSync,
   statSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -194,5 +196,293 @@ export async function runRestoreCommand(
   rmSync(`${dbPath}-shm`, { force: true });
   renameSync(tmp, dbPath);
   log(`Restored ${sourcePath} → ${dbPath}`);
+  return 0;
+}
+
+// --- doctor ----------------------------------------------------------------
+
+/** Per-probe wall-clock bound so one hung CLI or endpoint can't wedge doctor. */
+const PROBE_TIMEOUT_MS = 15_000;
+
+/** Free-space thresholds for the data dir probe. */
+const DISK_FAIL_BYTES = 200 * 1024 * 1024; // SQLite + WAL need headroom to commit.
+const DISK_WARN_BYTES = 1024 * 1024 * 1024;
+
+/**
+ * Run a CLI and capture its output; rejects on spawn failure or timeout.
+ *
+ * @param {string} cmd
+ * @param {string[]} args
+ * @returns {Promise<{ exitCode: number, stdout: string, stderr: string }>}
+ */
+function defaultRunner(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`'${cmd}' timed out after ${PROBE_TIMEOUT_MS}ms`));
+    }, PROBE_TIMEOUT_MS);
+    timer.unref?.();
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ exitCode: code ?? 1, stdout, stderr });
+    });
+  });
+}
+
+/** First line of CLI output, trimmed and bounded, for one-line probe reports. */
+function firstLine(text) {
+  return (
+    String(text || "")
+      .trim()
+      .split("\n")[0] ?? ""
+  ).slice(0, 120);
+}
+
+/**
+ * Read the repo rows the doctor needs (agents in use, GitLab endpoints) from
+ * the SQLite DB. Returns an empty list when the DB or table does not exist
+ * yet — a fresh install must not make repo-derived probes fail.
+ *
+ * @param {string} dbPath
+ * @returns {Promise<{ agent: string, platform: string, apiBaseUrl: string | null, apiToken: string | null }[]>}
+ */
+async function readRepoRows(dbPath) {
+  if (!existsSync(dbPath)) return [];
+  try {
+    const Database = await loadDatabase();
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      return db
+        .prepare(
+          "SELECT agent, platform, api_base_url AS apiBaseUrl, api_token AS apiToken FROM repos",
+        )
+        .all();
+    } finally {
+      db.close();
+    }
+  } catch {
+    // Unreadable or unmigrated DB — the integrity probe reports that story.
+    return [];
+  }
+}
+
+/** Probe one CLI's presence via `--version`. */
+async function probeCliVersion(runner, command) {
+  try {
+    const res = await runner(command, ["--version"]);
+    if (res.exitCode === 0) return { status: "ok", detail: firstLine(res.stdout) || "installed" };
+    return {
+      status: "fail",
+      detail: `'${command} --version' exited ${res.exitCode}: ${firstLine(res.stderr || res.stdout)}`,
+    };
+  } catch (err) {
+    return { status: "fail", detail: `'${command}' not found (${firstLine(String(err))})` };
+  }
+}
+
+/**
+ * `drydock doctor`: one health probe per line — GitHub CLI auth, agent CLIs,
+ * GitLab token validity per configured base URL, free disk space at the data
+ * dir, `PRAGMA integrity_check`, and the instance lock. Returns a non-zero
+ * exit code when any probe fails so the command is scriptable. Definitive
+ * failures (bad auth, missing required CLI, corrupt DB, full disk) fail;
+ * transient conditions (network errors, stale locks) only warn.
+ *
+ * @param {{ dbPath: string, dataDir: string, lockPath: string,
+ *           runner?: (cmd: string, args: string[]) => Promise<{ exitCode: number, stdout: string, stderr: string }>,
+ *           fetchImpl?: typeof fetch,
+ *           statfsImpl?: (path: string) => { bavail: number | bigint, bsize: number | bigint },
+ *           pidAlive?: (pid: number) => boolean,
+ *           log?: (line: string) => void, error?: (line: string) => void }} deps
+ * @returns {Promise<number>} exit code
+ */
+export async function runDoctorCommand({
+  dbPath,
+  dataDir,
+  lockPath,
+  runner = defaultRunner,
+  fetchImpl = fetch,
+  statfsImpl = statfsSync,
+  pidAlive,
+  log = console.log,
+  error = console.error,
+}) {
+  const repos = await readRepoRows(dbPath);
+  const agentsInUse = new Set(repos.map((r) => r.agent));
+
+  /** @type {{ name: string, status: string, detail: string }[]} */
+  const results = [];
+
+  // GitHub CLI auth — required by every non-GitLab repo and the default setup.
+  try {
+    const res = await runner("gh", ["auth", "status"]);
+    results.push(
+      res.exitCode === 0
+        ? { name: "github auth", status: "ok", detail: "gh auth status passed" }
+        : {
+            name: "github auth",
+            status: "fail",
+            detail: `gh auth status exited ${res.exitCode}: ${firstLine(res.stderr || res.stdout)}`,
+          },
+    );
+  } catch (err) {
+    results.push({
+      name: "github auth",
+      status: "fail",
+      detail: `gh CLI not found (${firstLine(String(err))})`,
+    });
+  }
+
+  // Agent CLIs: claude is the default agent and always required; codex only
+  // fails when a configured repo actually uses it.
+  results.push({ name: "claude cli", ...(await probeCliVersion(runner, "claude")) });
+  const codex = await probeCliVersion(runner, "codex");
+  if (codex.status === "fail" && !agentsInUse.has("codex")) {
+    results.push({
+      name: "codex cli",
+      status: "skip",
+      detail: "not installed (no repo uses codex)",
+    });
+  } else {
+    results.push({ name: "codex cli", ...codex });
+  }
+
+  // GitLab token validity, one probe per distinct configured base URL.
+  const gitlabBases = new Map();
+  for (const repo of repos) {
+    if (repo.platform !== "gitlab" || !repo.apiBaseUrl || !repo.apiToken) continue;
+    const base = repo.apiBaseUrl.trim().replace(/\/+$/, "");
+    if (base && !gitlabBases.has(base)) gitlabBases.set(base, repo.apiToken);
+  }
+  if (gitlabBases.size === 0) {
+    results.push({ name: "gitlab token", status: "skip", detail: "no GitLab repos configured" });
+  }
+  for (const [base, token] of gitlabBases) {
+    let host = base;
+    try {
+      host = new URL(base).host;
+    } catch {
+      // Keep the raw base as the display name.
+    }
+    const name = `gitlab ${host}`;
+    try {
+      const res = await fetchImpl(`${base}/api/v4/user`, {
+        headers: { "PRIVATE-TOKEN": token },
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+      if (res.status === 401 || res.status === 403) {
+        results.push({
+          name,
+          status: "fail",
+          detail: `token rejected (HTTP ${res.status}) — update it in the repo's forge settings`,
+        });
+      } else if (res.ok) {
+        results.push({ name, status: "ok", detail: "token accepted" });
+      } else {
+        results.push({
+          name,
+          status: "warn",
+          detail: `HTTP ${res.status} — could not verify token`,
+        });
+      }
+    } catch (err) {
+      results.push({
+        name,
+        status: "warn",
+        detail: `unreachable — could not verify token (${firstLine(String(err))})`,
+      });
+    }
+  }
+
+  // Free disk space where the DB (plus WAL and backups) lives.
+  try {
+    const stat = statfsImpl(dataDir);
+    const free = Number(stat.bavail) * Number(stat.bsize);
+    const human = `${(free / 1024 ** 3).toFixed(1)} GiB free at ${dataDir}`;
+    if (free < DISK_FAIL_BYTES) {
+      results.push({ name: "disk space", status: "fail", detail: human });
+    } else if (free < DISK_WARN_BYTES) {
+      results.push({ name: "disk space", status: "warn", detail: human });
+    } else {
+      results.push({ name: "disk space", status: "ok", detail: human });
+    }
+  } catch (err) {
+    results.push({
+      name: "disk space",
+      status: "warn",
+      detail: `could not stat ${dataDir} (${firstLine(String(err))})`,
+    });
+  }
+
+  // Database integrity. A missing DB is a fresh install, not a failure.
+  if (!existsSync(dbPath)) {
+    results.push({ name: "db integrity", status: "skip", detail: "no database yet" });
+  } else {
+    try {
+      const Database = await loadDatabase();
+      const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+      try {
+        const rows = db.pragma("integrity_check");
+        const ok = Array.isArray(rows) && rows.length === 1 && rows[0]?.integrity_check === "ok";
+        results.push(
+          ok
+            ? { name: "db integrity", status: "ok", detail: "PRAGMA integrity_check passed" }
+            : {
+                name: "db integrity",
+                status: "fail",
+                detail: "PRAGMA integrity_check reported errors",
+              },
+        );
+      } finally {
+        db.close();
+      }
+    } catch (err) {
+      results.push({
+        name: "db integrity",
+        status: "fail",
+        detail: `could not open database (${firstLine(String(err))})`,
+      });
+    }
+  }
+
+  // Instance lock: informative — a running dock is healthy, a stale lock warns.
+  const lock = readLockState(lockPath, pidAlive ? { pidAlive } : {});
+  if (lock.state === "held") {
+    results.push({
+      name: "instance lock",
+      status: "ok",
+      detail: `instance running (pid ${lock.pid})`,
+    });
+  } else if (lock.state === "stale") {
+    results.push({
+      name: "instance lock",
+      status: "warn",
+      detail: "stale lock file (holder is dead); the next start takes it over",
+    });
+  } else {
+    results.push({ name: "instance lock", status: "ok", detail: "no instance running" });
+  }
+
+  for (const { name, status, detail } of results) {
+    log(`${status.padEnd(5)}${name.padEnd(28)}${detail}`);
+  }
+  const failed = results.filter((r) => r.status === "fail").length;
+  if (failed > 0) {
+    error(`doctor: ${failed} probe(s) failed.`);
+    return 1;
+  }
   return 0;
 }
