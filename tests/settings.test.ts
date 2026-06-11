@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
 import { MODELS } from "@/lib/models";
+import { saveCredentialStatus } from "@/lib/orchestrator/credential-status";
 import { addRepo } from "@/lib/repos/service";
 import { getSettings, jobsAllowed, repoJobsAllowed, saveSettings } from "@/lib/settings/service";
 
@@ -76,6 +77,7 @@ describe("settings", () => {
       "claude_limit",
       "codex_limit",
       "openrouter_limit",
+      "auth_expired",
       "automation_paused",
     ]);
   });
@@ -178,6 +180,41 @@ describe("jobsAllowed gate", () => {
   it("allows when under limit and not paused", () => {
     saveSettings({ dailyCostLimitUsd: 100 }, db);
     expect(jobsAllowed(db).allowed).toBe(true);
+  });
+
+  it("blocks with reason auth while credential failures are persisted (issue #177)", () => {
+    saveCredentialStatus(
+      {
+        checkedAt: 1,
+        failures: [{ target: "github", label: "GitHub CLI auth", message: "token invalid" }],
+      },
+      db,
+    );
+    expect(jobsAllowed(db)).toEqual({ allowed: false, reason: "auth" });
+  });
+
+  it("resumes automatically once a healthy probe clears the failures", () => {
+    saveCredentialStatus(
+      {
+        checkedAt: 1,
+        failures: [{ target: "github", label: "GitHub CLI auth", message: "token invalid" }],
+      },
+      db,
+    );
+    saveCredentialStatus({ checkedAt: 2, failures: [] }, db);
+    expect(jobsAllowed(db).allowed).toBe(true);
+  });
+
+  it("reports paused over auth when both gates are closed", () => {
+    saveSettings({ paused: true }, db);
+    saveCredentialStatus(
+      {
+        checkedAt: 1,
+        failures: [{ target: "github", label: "GitHub CLI auth", message: "token invalid" }],
+      },
+      db,
+    );
+    expect(jobsAllowed(db)).toEqual({ allowed: false, reason: "paused" });
   });
 });
 

@@ -33,6 +33,7 @@ function deps(started: number[], over: Record<string, unknown> = {}) {
       db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, jobId)).run();
       return db.select().from(jobs).where(eq(jobs.id, jobId)).get() as Job;
     }),
+    credentialProbe: vi.fn(async () => {}),
     ...over,
   };
 }

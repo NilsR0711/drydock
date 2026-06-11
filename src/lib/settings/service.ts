@@ -5,6 +5,7 @@ import { todayCost } from "@/lib/db/cost-queries";
 import { repos, settings } from "@/lib/db/schema";
 import { isKnownModelId } from "@/lib/models";
 import { NOTIFICATION_EVENTS } from "@/lib/notify/events";
+import { getCredentialFailures } from "@/lib/orchestrator/credential-status";
 
 export const settingsSchema = z.object({
   paused: z.boolean().default(false),
@@ -125,7 +126,7 @@ export function saveSettings(patch: Partial<Settings>, db: DB = getDb()): Settin
 
 export interface GateResult {
   allowed: boolean;
-  reason?: "paused" | "draining" | "cost_limit" | "repo_cost_limit";
+  reason?: "paused" | "draining" | "auth" | "cost_limit" | "repo_cost_limit";
 }
 
 /** Whether the driver loop may start new jobs right now (SPEC §6.1). */
@@ -133,6 +134,10 @@ export function jobsAllowed(db: DB = getDb()): GateResult {
   const s = getSettings(db);
   if (s.paused) return { allowed: false, reason: "paused" };
   if (s.draining) return { allowed: false, reason: "draining" };
+  // Credential watchdog gate (issue #177): expired gh/GitLab/agent auth stops
+  // new work from starting against dead credentials; in-flight jobs finish.
+  // The next healthy probe clears the persisted failures and re-opens the gate.
+  if (getCredentialFailures(db).length > 0) return { allowed: false, reason: "auth" };
   if (todayCost(db) >= s.dailyCostLimitUsd) return { allowed: false, reason: "cost_limit" };
   return { allowed: true };
 }

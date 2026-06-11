@@ -13,6 +13,7 @@ export const NOTIFICATION_EVENTS = [
   "claude_limit",
   "codex_limit",
   "openrouter_limit",
+  "auth_expired",
   "automation_paused",
 ] as const;
 
@@ -29,5 +30,6 @@ export const NOTIFICATION_EVENT_LABELS: Record<NotificationEvent, string> = {
   claude_limit: "Claude usage limit reached or cleared",
   codex_limit: "Codex usage limit reached or cleared",
   openrouter_limit: "OpenRouter limit reached or cleared",
+  auth_expired: "Credentials expired or restored",
   automation_paused: "Automation paused or draining",
 };

@@ -49,6 +49,7 @@ describe("driver loop agent inheritance", () => {
         { number: 7, title: "Bug", labels: [{ name: repo.queueLabel }] },
       ]),
       runJob: vi.fn(async (id: number) => getJob(id, db) as never),
+      credentialProbe: async () => {},
     });
     const job = listJobs(repo.id, db).find((j) => j.issueNumber === 7);
     expect(job?.agent).toBe("codex");

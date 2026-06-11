@@ -3,6 +3,7 @@ import { createDb, type DB } from "@/lib/db/client";
 import {
   type EdgeState,
   notifyCostLimitEdge,
+  notifyCredentialEdge,
   notifyDraining,
   notifyPauseTransition,
   notifyProviderLimitEdge,
@@ -84,6 +85,49 @@ describe("notifyProviderLimitEdge (issues #166/#167)", () => {
     await notifyProviderLimitEdge("codex", false, state, db, transports);
     const exitBody = JSON.stringify(postJson.mock.calls[1]?.[1] ?? {});
     expect(exitBody).toMatch(/codex/i);
+  });
+});
+
+describe("notifyCredentialEdge (issue #177)", () => {
+  const failures = [
+    { target: "github", label: "GitHub CLI auth", message: "token invalid" },
+    { target: "agent:openrouter", label: "OpenRouter API key", message: "HTTP 401" },
+  ];
+
+  it("notifies once when credentials first fail, naming the failing targets", async () => {
+    const state: EdgeState = { active: false };
+    await notifyCredentialEdge(failures, state, db, transports);
+    await notifyCredentialEdge(failures, state, db, transports);
+    expect(postJson).toHaveBeenCalledTimes(1);
+    const body = JSON.stringify(postJson.mock.calls[0]?.[1] ?? {});
+    expect(body).toMatch(/GitHub CLI auth/);
+    expect(body).toMatch(/OpenRouter API key/);
+    expect(body).toMatch(/paused/i);
+  });
+
+  it("notifies once more when credentials recover, then re-arms", async () => {
+    const state: EdgeState = { active: false };
+    await notifyCredentialEdge(failures, state, db, transports);
+    await notifyCredentialEdge([], state, db, transports);
+    expect(postJson).toHaveBeenCalledTimes(2);
+    const exitBody = JSON.stringify(postJson.mock.calls[1]?.[1] ?? {});
+    expect(exitBody).toMatch(/restored|resum/i);
+    await notifyCredentialEdge([], state, db, transports);
+    await notifyCredentialEdge(failures, state, db, transports);
+    expect(postJson).toHaveBeenCalledTimes(3);
+  });
+
+  it("stays silent while credentials are healthy", async () => {
+    const state: EdgeState = { active: false };
+    await notifyCredentialEdge([], state, db, transports);
+    expect(postJson).not.toHaveBeenCalled();
+  });
+
+  it("respects the auth_expired event opt-out", async () => {
+    saveSettings({ notifyEvents: ["pr_merged"] }, db);
+    const state: EdgeState = { active: false };
+    await notifyCredentialEdge(failures, state, db, transports);
+    expect(postJson).not.toHaveBeenCalled();
   });
 });
 

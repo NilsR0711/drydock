@@ -48,6 +48,7 @@ function deps(started: number[], over: Record<string, unknown> = {}) {
       return db.select().from(jobs).where(eq(jobs.id, jobId)).get() as Job;
     }),
     openrouterCatalogSync: vi.fn(async () => {}),
+    credentialProbe: vi.fn(async () => {}),
     ...over,
   };
 }

@@ -105,7 +105,9 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 🪝 **Webhook-driven issue sync** — opt in per repo to receive issue events instead of waiting for the next poll. Set a secret on a repo and Drydock exposes a signature-verified receiver (`/api/webhooks/<id>`); a validated GitHub/GitLab issue event triggers a targeted, debounced sync so new issues surface near-instantly. Polling stays on as the default fallback and shares the same idempotent reconcile, so a change is never double-processed. Since Drydock binds `127.0.0.1`, expose the URL through a tunnel (e.g. `cloudflared`, `ngrok`). See [ADR 029](docs/adr/029-webhook-issue-sync.md).
 
-🔔 **External notifications** — get pinged on Telegram, Slack (incoming webhook) and email (SMTP) for the lifecycle events you care about (job needs human, job failed, PR opened, PR merged, release published, daily cost limit reached, automation paused/draining). Each channel is configured independently, every event has a per-event opt-in, and a one-click test button verifies setup. Delivery is best-effort and never blocks the loop; secrets are redacted from logs. See [ADR 024](docs/adr/024-external-notifications.md).
+🔔 **External notifications** — get pinged on Telegram, Slack (incoming webhook) and email (SMTP) for the lifecycle events you care about (job needs human, job failed, PR opened, PR merged, release published, daily cost limit reached, credentials expired/restored, automation paused/draining). Each channel is configured independently, every event has a per-event opt-in, and a one-click test button verifies setup. Delivery is best-effort and never blocks the loop; secrets are redacted from logs. See [ADR 024](docs/adr/024-external-notifications.md).
+
+🔑 **Credential watchdog** — periodic auth probes (on startup, then every 15 minutes) catch expired credentials *before* the queue dies overnight: `gh auth status` for GitHub repos, a cheap authenticated API call per configured GitLab base URL, the agent CLIs, and the OpenRouter API key. On failure a persistent navbar banner names the dead credential, a notification fires once per outage, and new job starts are gated while in-flight jobs finish; the next healthy probe resumes the queue automatically — no manual toggle. Only definitive auth failures (non-zero `gh auth status`, HTTP 401/403, missing CLI/key) trip the gate; network hiccups, 5xx and timeouts never pause the queue, and the GitHub probe yields to the rate-limit governor so it never burns budget jobs are waiting on.
 
 🆙 **Update-available notice** — a passive, dismissible navbar banner appears when a newer Drydock release is published. The check queries the latest stable GitHub release (drafts/prereleases skipped), is cached for an hour, and dedupes concurrent checks onto a single upstream call; any network or parse error advertises no update, so a transient hiccup never raises a false alarm. Global installs get a `drydock update` hint.
 
@@ -348,6 +350,9 @@ pnpm mcp            # start the local stdio MCP server (see "MCP server")
   persisted or streamed.
 - **Pause / cost limit** — flip the global pause or hit the daily cost limit and the driver
   loop stops claiming new work; in-flight jobs finish cleanly.
+- **Credential watchdog** — expired `gh`/GitLab/agent credentials gate new job starts the
+  same way (banner + notification included) and the queue resumes on its own once the next
+  probe sees healthy auth.
 
 ## MCP server
 

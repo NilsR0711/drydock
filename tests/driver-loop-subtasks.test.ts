@@ -26,6 +26,7 @@ function tickDeps(over: Record<string, unknown>) {
     runJob: vi.fn(async () => ({}) as never),
     triage: vi.fn(async () => []),
     reviewFeedback: vi.fn(async () => {}),
+    credentialProbe: vi.fn(async () => {}),
     ...over,
   };
 }
