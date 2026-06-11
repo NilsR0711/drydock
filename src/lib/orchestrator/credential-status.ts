@@ -52,15 +52,17 @@ export function getCredentialStatus(db: DB = getDb()): CredentialStatus | undefi
   }
 }
 
-/** Persist the latest probe round, replacing any previous status. */
+/**
+ * Persist the latest probe round, replacing any previous status. An atomic
+ * upsert: the MCP server runs as its own process, so a select-then-insert
+ * could race a concurrent writer on the same key.
+ */
 export function saveCredentialStatus(status: CredentialStatus, db: DB = getDb()): void {
   const value = JSON.stringify(status);
-  const existing = db.select().from(settings).where(eq(settings.key, CREDENTIAL_STATUS_KEY)).get();
-  if (existing) {
-    db.update(settings).set({ value }).where(eq(settings.key, CREDENTIAL_STATUS_KEY)).run();
-  } else {
-    db.insert(settings).values({ key: CREDENTIAL_STATUS_KEY, value }).run();
-  }
+  db.insert(settings)
+    .values({ key: CREDENTIAL_STATUS_KEY, value })
+    .onConflictDoUpdate({ target: settings.key, set: { value } })
+    .run();
 }
 
 /**
