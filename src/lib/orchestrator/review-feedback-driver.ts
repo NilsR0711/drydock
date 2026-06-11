@@ -6,6 +6,7 @@ import type { Job, Repo } from "@/lib/db/schema";
 import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient, ReviewThread } from "@/lib/forge/types";
 import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
+import { withPriority } from "@/lib/github/priority";
 import { logError } from "@/lib/log/logger";
 import { repoAutomation } from "@/lib/repos/automation";
 import { commandForAgent } from "./agent-command";
@@ -41,6 +42,8 @@ export interface DriveFeedbackDeps {
   forgeFor?: (repo: Repo) => ForgeClient;
   /** Process one job's PR feedback (injectable for tests). */
   processJob?: (repo: Repo, job: Job, forge: ForgeClient) => Promise<void>;
+  /** Limit the sweep to one repo (webhook-triggered sweeps, issue #180). */
+  repoId?: number;
 }
 
 export async function driveReviewFeedback(deps: DriveFeedbackDeps = {}): Promise<void> {
@@ -48,6 +51,7 @@ export async function driveReviewFeedback(deps: DriveFeedbackDeps = {}): Promise
   const processJob = deps.processJob ?? defaultProcessJob;
 
   for (const repo of listRepos(db)) {
+    if (deps.repoId != null && repo.id !== deps.repoId) continue;
     if (!repoAutomation(repo).autoReviewFeedback) continue;
     try {
       const forge = deps.forgeFor?.(repo) ?? getForge(repo);
@@ -138,6 +142,70 @@ export function buildAgentApply(
       }
     }
   };
+}
+
+/**
+ * Run a sweep serialized against every other sweep (issue #180): the cadence
+ * sweep in the driver loop and webhook-triggered sweeps share one promise
+ * chain, so two sweeps can never process the same PR's feedback concurrently
+ * (which would double-spawn agent side sessions for the same thread). A
+ * rejection propagates to its own caller but never breaks the chain.
+ */
+let sweepChain: Promise<void> = Promise.resolve();
+
+export function runReviewFeedbackSweep(deps: DriveFeedbackDeps = {}): Promise<void> {
+  const run = sweepChain.then(() => driveReviewFeedback(deps));
+  sweepChain = run.catch(() => {});
+  return run;
+}
+
+/** How long to wait after the last review delivery before sweeping, so a bot
+ * review burst (one review + many comments) coalesces into one sweep. */
+export const REVIEW_SWEEP_DEBOUNCE_MS = 2_000;
+
+type SweepRunner = (repoId: number) => Promise<void>;
+
+// Low priority mirrors the cadence sweep in the driver loop: feedback forge
+// calls always yield the rate-limit budget to active jobs.
+const defaultSweepRunner: SweepRunner = (repoId) =>
+  withPriority("low", () => runReviewFeedbackSweep({ repoId }));
+
+let sweepRunner: SweepRunner = defaultSweepRunner;
+const pendingSweeps = new Map<number, ReturnType<typeof setTimeout>>();
+
+/**
+ * Schedule a debounced, repo-targeted sweep after a verified review webhook
+ * delivery (issue #180), so new feedback is picked up within seconds instead
+ * of at the next driver tick. Repeated triggers within the window collapse
+ * into one run; distinct repos are independent. Failures are isolated and
+ * logged so a broken sweep never throws into the receiver's request path.
+ */
+export function triggerReviewFeedbackSweep(
+  repoId: number,
+  delayMs = REVIEW_SWEEP_DEBOUNCE_MS,
+): void {
+  const existing = pendingSweeps.get(repoId);
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(() => {
+    pendingSweeps.delete(repoId);
+    void sweepRunner(repoId).catch((err) => {
+      logError(`[webhook] review-feedback sweep failed for repo ${repoId}`, err);
+    });
+  }, delayMs);
+  // A pending sweep must not keep the Node process alive on its own.
+  (timer as { unref?: () => void }).unref?.();
+  pendingSweeps.set(repoId, timer);
+}
+
+/** Test seam: override (or, with `null`, reset) the triggered-sweep runner. */
+export function __setReviewSweepRunner(override: SweepRunner | null): void {
+  sweepRunner = override ?? defaultSweepRunner;
+}
+
+/** Test helper: number of repos with a triggered sweep currently pending. */
+export function __pendingReviewSweepCount(): number {
+  return pendingSweeps.size;
 }
 
 /** Production composition: real forge, worktree, and agent session. */

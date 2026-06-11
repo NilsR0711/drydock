@@ -41,7 +41,7 @@ import {
   workerId,
 } from "./queue";
 import { driveReleaseManagement } from "./release-management-driver";
-import { driveReviewFeedback } from "./review-feedback-driver";
+import { runReviewFeedbackSweep } from "./review-feedback-driver";
 import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
 import { reconcileExternalAborts } from "./singleton";
@@ -451,7 +451,9 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   // Drive the opt-in PR review-feedback lifecycle (issue #18) as a low-priority
   // background sweep, so its forge calls yield the rate-limit budget to active
   // jobs. Repos that have not opted in are skipped cheaply inside the sweep.
-  const reviewFeedback = deps.reviewFeedback ?? ((d: DB) => driveReviewFeedback({ db: d }));
+  // Serialized against webhook-triggered sweeps (issue #180) so two sweeps
+  // never process the same PR's feedback concurrently.
+  const reviewFeedback = deps.reviewFeedback ?? ((d: DB) => runReviewFeedbackSweep({ db: d }));
   try {
     await withPriority("low", () => reviewFeedback(db));
   } catch (err) {
