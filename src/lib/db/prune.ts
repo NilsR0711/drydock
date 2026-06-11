@@ -36,18 +36,18 @@ export function pruneOldData(db: DB = getDb(), opts: PruneOptions = {}): PruneRe
   const nowSec = Math.floor((opts.now?.getTime() ?? Date.now()) / 1000);
   const cutoff = nowSec - days * SECONDS_PER_DAY;
 
+  // Delete via an IN (SELECT …) subquery rather than materializing the expired
+  // job IDs into bound parameters: job summary rows are kept forever, so the
+  // expired set grows monotonically and binding one variable per ID would hit
+  // SQLite's SQLITE_MAX_VARIABLE_NUMBER (32766) after enough lifetime jobs,
+  // permanently breaking the sweep (and the VACUUM behind it).
   const expiredJobs = db
     .select({ id: jobs.id })
     .from(jobs)
-    .where(and(isNotNull(jobs.finishedAt), lt(jobs.finishedAt, cutoff)))
-    .all()
-    .map((r) => r.id);
+    .where(and(isNotNull(jobs.finishedAt), lt(jobs.finishedAt, cutoff)));
 
-  let jobEventsDeleted = 0;
-  if (expiredJobs.length > 0) {
-    const res = db.delete(jobEvents).where(inArray(jobEvents.jobId, expiredJobs)).run();
-    jobEventsDeleted = res.changes;
-  }
+  const res = db.delete(jobEvents).where(inArray(jobEvents.jobId, expiredJobs)).run();
+  const jobEventsDeleted = res.changes;
 
   // VACUUM cannot run inside a transaction; better-sqlite3 executes it directly.
   if (vacuum) db.run(sql`VACUUM`);

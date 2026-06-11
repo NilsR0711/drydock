@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { parsePruneArgs, pruneOldData } from "@/lib/db/prune";
@@ -96,6 +97,30 @@ describe("pruneOldData", () => {
     addEvent(job, nowSec - 10 * DAY);
 
     expect(pruneOldData(db, { vacuum: false, now }).jobEventsDeleted).toBe(1);
+  });
+
+  it("survives more expired jobs than SQLite's bound-parameter limit (32766)", () => {
+    const now = new Date();
+    const nowSec = Math.floor(now.getTime() / 1000);
+    const old = nowSec - 40 * DAY;
+    // 33,000 expired jobs: binding one SQL variable per job ID (the previous
+    // implementation) exceeds SQLITE_MAX_VARIABLE_NUMBER and throws
+    // "too many SQL variables", permanently breaking the sweep and VACUUM.
+    db.run(
+      sql.raw(
+        `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 33000)
+         INSERT INTO jobs (repo_id, issue_number, status, finished_at)
+         SELECT ${repoId}, n, 'merged', ${old} FROM seq`,
+      ),
+    );
+    const [first, second] = db.select({ id: jobs.id }).from(jobs).limit(2).all();
+    addEvent(first?.id as number, old);
+    addEvent(second?.id as number, old);
+
+    const result = pruneOldData(db, { days: 30, vacuum: false, now });
+
+    expect(result.jobEventsDeleted).toBe(2);
+    expect(db.select().from(jobEvents).all()).toHaveLength(0);
   });
 
   it("runs VACUUM by default and reports it", () => {
