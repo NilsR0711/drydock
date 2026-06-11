@@ -17,11 +17,25 @@ export function resolveMigrationsDir(): string {
   return process.env.DRYDOCK_MIGRATIONS ?? resolve(process.cwd(), "drizzle");
 }
 
+// In-file `PRAGMA foreign_keys=...` statements emitted by drizzle-kit. These are
+// silent no-ops inside an open transaction (SQLite semantics), so the runner
+// skips them and manages FK enforcement at the connection level instead.
+const FOREIGN_KEYS_PRAGMA = /^PRAGMA\s+foreign_keys\s*=/i;
+
 /**
  * Apply generated drizzle SQL migrations directly via better-sqlite3. We avoid
  * drizzle's own migrator because it imports `node:crypto`, which webpack pulls
  * into the edge compilation of instrumentation.ts and fails to resolve. Reading
  * the SQL ourselves keeps that module out of the bundle graph (ADR 003).
+ *
+ * FK handling: drizzle-kit's sqlite table-rebuild migrations start with
+ * `PRAGMA foreign_keys=OFF;`, but that pragma is a no-op while a transaction is
+ * open — the rebuild's `DROP TABLE` would then run with FK enforcement ON and
+ * fire every `ON DELETE CASCADE`, silently wiping all child rows. So FK
+ * enforcement is disabled at the connection level BEFORE each migration's
+ * transaction, the in-file FK pragmas are skipped, referential integrity is
+ * verified with `PRAGMA foreign_key_check` before commit (a violation rolls
+ * the whole migration back), and enforcement is restored afterwards.
  */
 function applyMigrations(sqlite: Database.Database): void {
   const migrationsFolder = resolveMigrationsDir();
@@ -45,14 +59,28 @@ function applyMigrations(sqlite: Database.Database): void {
   for (const file of files) {
     if (applied.has(file)) continue;
     const sql = readFileSync(join(migrationsFolder, file), "utf8");
-    const run = sqlite.transaction(() => {
-      for (const stmt of sql.split("--> statement-breakpoint")) {
-        const trimmed = stmt.trim();
-        if (trimmed) sqlite.exec(trimmed);
-      }
-      record.run(file);
-    });
-    run();
+    sqlite.pragma("foreign_keys = OFF");
+    try {
+      const run = sqlite.transaction(() => {
+        for (const stmt of sql.split("--> statement-breakpoint")) {
+          const trimmed = stmt.trim();
+          if (!trimmed || FOREIGN_KEYS_PRAGMA.test(trimmed)) continue;
+          sqlite.exec(trimmed);
+        }
+        // With enforcement off, a buggy migration could commit dangling
+        // references. Check before commit so a violation rolls everything back.
+        const violations = sqlite.pragma("foreign_key_check") as unknown[];
+        if (violations.length > 0) {
+          throw new Error(
+            `migration ${file} would leave ${violations.length} foreign key violation(s); rolled back`,
+          );
+        }
+        record.run(file);
+      });
+      run();
+    } finally {
+      sqlite.pragma("foreign_keys = ON");
+    }
   }
 }
 

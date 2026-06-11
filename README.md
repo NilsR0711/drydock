@@ -95,7 +95,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 📡 **Live logs over SSE** — the agent's NDJSON output is parsed incrementally, persisted, and streamed to the browser in real time.
 
-💸 **Cost tracking** — per-job and aggregate spend from the agent's reported `total_cost_usd` (or estimated from tokens), with a **daily cost limit** that gates the driver loop and an optional **per-job cost ceiling** that aborts a single runaway session mid-stream (global default + per-repo override; off when unset). Spend is **exportable** to CSV or JSON from the cost dashboard — per-job line items or aggregates by repo/model, scoped to a date range and repo, with totals that reconcile with the dashboard.
+💸 **Cost tracking** — per-job and aggregate spend from the agent's reported `total_cost_usd` (or estimated from tokens), with a **daily cost limit** that gates the driver loop and an optional **per-job cost ceiling** that aborts a single runaway session mid-stream (global default + per-repo override; off when unset). Spend is **exportable** to CSV or JSON from the cost dashboard — line items (jobs plus one-shot agent calls) or aggregates by repo/model, scoped to a date range and repo, with totals that reconcile with the dashboard.
 
 ⏯️ **Global pause & per-repo controls** — pause or resume the whole dock with one click from the navbar, pick an agent and model per repo, toggle serial vs. parallel processing, and customize the queue label.
 

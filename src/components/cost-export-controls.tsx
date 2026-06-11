@@ -9,7 +9,7 @@ import { useToast } from "@/components/ui/toast";
 import type { CostExportFormat, CostReport } from "@/lib/db/cost-export";
 
 const REPORTS: { value: CostReport; label: string }[] = [
-  { value: "line-items", label: "Per-job line items" },
+  { value: "line-items", label: "Line items (jobs + one-shots)" },
   { value: "by-repo", label: "Aggregate by repo" },
   { value: "by-model", label: "Aggregate by model" },
 ];
