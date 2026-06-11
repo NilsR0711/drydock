@@ -27,6 +27,7 @@ import {
 import { ciBabysitter, type ResumeOutcome, resumeFailureReason } from "./ci-babysitter";
 import { getJob, recordEvent, transitionJob } from "./jobs";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
+import { runPrAuditPass } from "./pr-audit-driver";
 import { clearProviderLimit, latchProviderLimit, limitAutoWaitEnabled } from "./provider-limit";
 import { InvalidTransitionError } from "./state-machine";
 import {
@@ -56,6 +57,8 @@ export interface RunJobDeps {
   }) => Promise<number>;
   runBabysitter?: (job: Job, prNumber: number) => Promise<Job>;
   verify?: (job: Job, prNumber: number) => Promise<void>;
+  /** Run the opt-in AI PR audit after the PR opens (issue #168); injectable for tests. */
+  audit?: (job: Job, prNumber: number) => Promise<void>;
   notify?: NotifyEvent;
   /** Run the read-only plan stage (issue #160); injectable for tests. */
   runPlan?: (job: Job, prompt: string, cwd: string) => Promise<{ text: string; exitCode: number }>;
@@ -354,6 +357,13 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         command,
         model: j.model ?? repo.defaultModel,
       }).then(() => undefined));
+  // Opt-in AI PR audit (issue #168): a read-only whole-PR review posted on the
+  // issue. Best-effort by construction — runPrAuditPass never throws and never
+  // touches job state; it resolves its own agent/model from the repo settings.
+  const runAudit =
+    deps.audit ??
+    ((j: Job, prNumber: number) =>
+      runPrAuditPass({ job: j, prNumber, repo, forge, db }).then(() => undefined));
 
   try {
     wt = await worktrees.prepare(repo, job.id, job.issueNumber);
@@ -607,6 +617,17 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       } catch (verifyErr) {
         const message = verifyErr instanceof Error ? verifyErr.message : String(verifyErr);
         recordEvent(job.id, "error", { message: `verification pass failed: ${message}` }, db);
+      }
+    }
+
+    // Opt-in AI PR audit (issue #168), after the cheaper verification pass.
+    // Wrapped so a failure is logged but never flips the job or blocks merge.
+    if (repo.autoPrAudit) {
+      try {
+        await runAudit(getJob(job.id, db) as Job, prNumber);
+      } catch (auditErr) {
+        const message = auditErr instanceof Error ? auditErr.message : String(auditErr);
+        recordEvent(job.id, "error", { message: `pr audit failed: ${message}` }, db);
       }
     }
 

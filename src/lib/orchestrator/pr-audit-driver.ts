@@ -1,0 +1,319 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { getAgentProvider, isAgentId } from "@/lib/agents/registry";
+import type { AgentProvider } from "@/lib/agents/types";
+import { type AgentId, WAITABLE_LIMIT_KINDS } from "@/lib/agents/types";
+import { type DB, getDb } from "@/lib/db/client";
+import type { Job, Repo } from "@/lib/db/schema";
+import type { CommandRunner } from "@/lib/exec/runner";
+import type { IssueCommentRef, IssueDetail, PrCheck } from "@/lib/github/gh";
+import {
+  auditWasTruncated,
+  buildPrAuditPrompt,
+  type PrAuditInput,
+  type PrAuditResult,
+  parsePrAudit,
+  prAuditMarker,
+  renderPrAuditComment,
+  renderPrAuditFailureComment,
+} from "@/lib/issues/pr-audit";
+import { listSubtasks } from "@/lib/issues/subtasks";
+import { logError } from "@/lib/log/logger";
+import { redactSecrets } from "@/lib/log/redact";
+import { defaultModelForAgent } from "@/lib/models";
+import { getSettings } from "@/lib/settings/service";
+import { commandForAgent } from "./agent-command";
+import { recordEvent } from "./jobs";
+import { runOneShotAndRecordCost } from "./one-shot-runner";
+import { latchProviderLimit, limitAutoWaitEnabled, ProviderLimitError } from "./provider-limit";
+
+/**
+ * The driver-side glue for the opt-in AI PR audit (issue #168): resolving the
+ * audit agent/model from repo settings, the read-only one-shot generator, the
+ * idempotent marker-comment upsert, and the orchestration pass run after a PR
+ * opens (or on a manual trigger). Pure prompt/parse/render logic lives in
+ * `issues/pr-audit.ts`. Every step is best-effort: a failure posts at most a
+ * short failure comment and never throws out — an audit can never corrupt a
+ * job, block a merge, or flip any state. Advisory only by construction.
+ */
+
+/**
+ * Wall-clock bound on the audit one-shot (issue #168). A whole-PR review reads
+ * more context than the verification pass, so it gets a wider window, but a
+ * stall beyond this means a hung process rather than legitimate work.
+ */
+export const PR_AUDIT_TIMEOUT_MS = 6 * 60 * 1000;
+
+/** A one-shot audit generator; null on non-zero exit, bad output, or error. */
+export type PrAuditGenerator = (input: PrAuditInput) => Promise<PrAuditResult | null>;
+
+/** The forge operations the audit pass needs; a subset of ForgeClient. */
+export interface AuditForge {
+  prDiff(prNumber: number): Promise<string>;
+  prChecks(prNumber: number): Promise<PrCheck[]>;
+  viewIssue(issueNumber: number): Promise<IssueDetail>;
+  commentIssue(issueNumber: number, body: string): Promise<void>;
+  listIssueComments?(issueNumber: number): Promise<IssueCommentRef[]>;
+  updateIssueComment?(issueNumber: number, commentId: string, body: string): Promise<void>;
+  commentPr?(prNumber: number, body: string): Promise<void>;
+}
+
+export interface AuditConfig {
+  agent: AgentId;
+  model: string;
+  language: string;
+}
+
+/**
+ * Resolve the audit agent/model/language for a repo (issue #168). A null
+ * prAuditAgent/prAuditModel inherits the repo's agent and defaultModel; when
+ * only the agent is overridden, the model falls back to that agent's catalog
+ * default rather than inheriting a model the other CLI cannot run.
+ */
+export function resolveAuditConfig(repo: Repo): AuditConfig {
+  const agent: AgentId = isAgentId(repo.prAuditAgent) ? repo.prAuditAgent : (repo.agent as AgentId);
+  const model =
+    repo.prAuditModel ?? (agent === repo.agent ? repo.defaultModel : defaultModelForAgent(agent));
+  return { agent, model, language: repo.prAuditLanguage || "en" };
+}
+
+/**
+ * A {@link PrAuditGenerator} backed by a one-shot agent run. The CLI shape
+ * comes from the {@link AgentProvider} (Claude `-p`, Codex `exec`), with a
+ * tight timeout enforced by the runner. Best-effort: a non-zero exit, bad
+ * output, or a thrown error (e.g. a timeout) all yield `null` — except a
+ * waitable provider limit (issues #166/#167), which latches the agent and
+ * throws {@link ProviderLimitError} so the caller defers instead of posting a
+ * failure comment against a quota that is known to be exhausted.
+ */
+export function buildPrAuditGenerator(deps: {
+  provider: AgentProvider;
+  command: string;
+  model: string;
+  cwd: string;
+  repoId?: number;
+  db?: DB;
+  runner?: CommandRunner;
+  timeoutMs?: number;
+}): PrAuditGenerator {
+  const timeoutMs = deps.timeoutMs ?? PR_AUDIT_TIMEOUT_MS;
+  return async (input) => {
+    let text: string;
+    let exitCode: number;
+    let stderr: string;
+    try {
+      ({ text, exitCode, stderr } = await runOneShotAndRecordCost({
+        provider: deps.provider,
+        command: deps.command,
+        model: deps.model,
+        cwd: deps.cwd,
+        prompt: buildPrAuditPrompt(input),
+        repoId: deps.repoId,
+        type: "pr_audit",
+        timeoutMs,
+        runner: deps.runner,
+        db: deps.db,
+      }));
+    } catch {
+      return null;
+    }
+    if (exitCode !== 0) {
+      const limit = deps.provider.classifyFailure?.({ exitCode, stderr, resultText: text });
+      if (limit && WAITABLE_LIMIT_KINDS.includes(limit.kind)) {
+        const db = deps.db ?? getDb();
+        if (limitAutoWaitEnabled(deps.provider.id, db)) {
+          latchProviderLimit(limit, db);
+          throw new ProviderLimitError(limit);
+        }
+      }
+      return null;
+    }
+    return parsePrAudit(text);
+  };
+}
+
+/**
+ * Post `body` as the job's audit comment, editing the existing marker comment
+ * in place when the forge supports it (ADR 019 idempotency pattern). Lookup
+ * and edit are best-effort: any upsert failure degrades to a fresh comment,
+ * since a duplicate is better than a silently lost review.
+ */
+export async function upsertAuditComment(
+  forge: AuditForge,
+  issueNumber: number,
+  marker: string,
+  body: string,
+): Promise<"created" | "updated"> {
+  if (forge.listIssueComments && forge.updateIssueComment) {
+    try {
+      const existing = (await forge.listIssueComments(issueNumber)).find((c) =>
+        c.body.includes(marker),
+      );
+      if (existing) {
+        await forge.updateIssueComment(issueNumber, existing.id, body);
+        return "updated";
+      }
+    } catch (err) {
+      logError(`[pr-audit] comment upsert degraded to a fresh post on #${issueNumber}`, err);
+    }
+  }
+  await forge.commentIssue(issueNumber, body);
+  return "created";
+}
+
+/** Run an async forge read, returning a fallback on any failure (best-effort). */
+async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch {
+    return fallback;
+  }
+}
+
+export interface PrAuditPassDeps {
+  job: Job;
+  prNumber: number;
+  repo: Repo;
+  forge: AuditForge;
+  db: DB;
+  /** Inject a generator (tests); the default runs the agent in a throwaway dir. */
+  generate?: PrAuditGenerator;
+  runner?: CommandRunner;
+}
+
+/**
+ * Run one PR audit pass (issue #168). Assembles the whole-PR context (diff,
+ * CI conclusions, issue body, subtasks), asks a read-only agent for a
+ * structured review in the configured language, and upserts the rendered
+ * markdown on the issue (optionally mirrored on the PR). Skips while Drydock
+ * is globally paused, defers silently on a provider limit (the latch handles
+ * resumption windows), and posts a short failure comment when the agent
+ * produced nothing parseable. Never throws and never touches job state —
+ * callers gate this on `repo.autoPrAudit` or a manual action.
+ */
+export async function runPrAuditPass(deps: PrAuditPassDeps): Promise<PrAuditResult | null> {
+  const { job, prNumber, repo, forge, db } = deps;
+  const config = resolveAuditConfig(repo);
+  const meta = {
+    jobId: job.id,
+    agent: config.agent,
+    model: config.model,
+    language: config.language,
+  };
+  let tmp: string | undefined;
+  try {
+    if (getSettings(db).paused) {
+      recordEvent(job.id, "pr_audit_skipped", { reason: "paused" }, db);
+      return null;
+    }
+    recordEvent(job.id, "pr_audit_started", { ...meta, prNumber }, db);
+
+    const diff = await safe(() => forge.prDiff(prNumber), "");
+    if (!diff.trim()) {
+      recordEvent(job.id, "pr_audit_failed", { reason: "empty diff", prNumber }, db);
+      return null;
+    }
+    const [checks, detail] = await Promise.all([
+      safe<PrCheck[]>(() => forge.prChecks(prNumber), []),
+      safe<IssueDetail | null>(() => forge.viewIssue(job.issueNumber), null),
+    ]);
+    const subtasks = listSubtasks(repo.id, job.issueNumber, db);
+    const input: PrAuditInput = {
+      issueNumber: job.issueNumber,
+      issueTitle: detail?.title ?? `Issue #${job.issueNumber}`,
+      issueBody: detail?.body ?? "",
+      subtasks: subtasks.map((s) => ({ ordinal: s.ordinal, title: s.title })),
+      prNumber,
+      branch: job.branch,
+      diff,
+      checks: checks.map((c) => ({ name: c.name, state: c.state })),
+      language: config.language,
+    };
+
+    let generate = deps.generate;
+    if (!generate) {
+      tmp = await mkdtemp(join(tmpdir(), "drydock-pr-audit-"));
+      const provider = getAgentProvider(config.agent);
+      generate = buildPrAuditGenerator({
+        provider,
+        command: commandForAgent(provider, db),
+        model: config.model,
+        cwd: tmp,
+        repoId: repo.id,
+        db,
+        runner: deps.runner,
+      });
+    }
+
+    let result: PrAuditResult | null;
+    try {
+      result = await generate(input);
+    } catch (err) {
+      if (err instanceof ProviderLimitError) {
+        // Deferred, not failed-for-good: the provider latch (#166/#167) gates
+        // new work until the window resets; no comment is posted against a
+        // quota that is known to be exhausted. Re-run manually or on the next
+        // audited PR.
+        recordEvent(
+          job.id,
+          "pr_audit_failed",
+          { reason: "provider limit", kind: err.info.kind, agent: err.info.agent },
+          db,
+        );
+        return null;
+      }
+      throw err;
+    }
+
+    const marker = prAuditMarker(job.id);
+    if (!result) {
+      const failure = renderPrAuditFailureComment(
+        meta,
+        "the agent returned no parseable review (timeout, non-zero exit, or invalid JSON).",
+      );
+      await upsertAuditComment(forge, job.issueNumber, marker, redactSecrets(failure));
+      recordEvent(job.id, "pr_audit_failed", { reason: "unparseable output", prNumber }, db);
+      return null;
+    }
+
+    const comment = redactSecrets(
+      renderPrAuditComment(result, { ...meta, truncated: auditWasTruncated(input) }),
+    );
+    await upsertAuditComment(forge, job.issueNumber, marker, comment);
+    if (repo.prAuditPostOnPr && forge.commentPr) {
+      // The mirror is best-effort and not upserted: idempotency lives on the
+      // issue comment, the canonical audit thread.
+      await safe(() => forge.commentPr?.(prNumber, comment) ?? Promise.resolve(), undefined);
+    }
+    recordEvent(
+      job.id,
+      "pr_audit_completed",
+      {
+        recommendation: result.recommendation,
+        findings: result.findings.length,
+        blockers: result.findings.filter((f) => f.severity === "blocker").length,
+        prNumber,
+      },
+      db,
+    );
+    return result;
+  } catch (err) {
+    logError(`[pr-audit] audit pass failed for ${repo.name}#${job.issueNumber}`, err);
+    recordEvent(
+      job.id,
+      "pr_audit_failed",
+      { reason: err instanceof Error ? err.message.slice(0, 300) : String(err) },
+      db,
+    );
+    return null;
+  } finally {
+    if (tmp) {
+      try {
+        await rm(tmp, { recursive: true, force: true });
+      } catch {
+        // Best-effort temp cleanup; a leftover dir is harmless.
+      }
+    }
+  }
+}
