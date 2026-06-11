@@ -330,8 +330,9 @@ pnpm mcp            # start the local stdio MCP server (see "MCP server")
   sweep runs automatically; for a manual run use `pnpm db:prune [--days <n>] [--no-vacuum]`,
   which deletes expired events and runs `VACUUM` to reclaim disk. See
   [ADR 023](docs/adr/023-log-retention-and-pruning.md).
-- **Secret redaction** — GitHub/GitLab tokens and `Bearer` values echoed in agent output are
-  scrubbed before any log event is persisted or streamed.
+- **Secret redaction** — GitHub/GitLab tokens, `Bearer`/`Basic` values, Anthropic/OpenAI API
+  keys and Telegram bot tokens echoed in agent output are scrubbed before any log event is
+  persisted or streamed.
 - **Pause / cost limit** — flip the global pause or hit the daily cost limit and the driver
   loop stops claiming new work; in-flight jobs finish cleanly.
 

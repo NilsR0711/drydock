@@ -76,4 +76,57 @@ describe("redactSecrets", () => {
     const url = "https://github.com/owner/repo.git";
     expect(redactSecrets(url)).toBe(url);
   });
+
+  it("redacts Anthropic API keys", () => {
+    const key = `sk-ant-api03-${"Q".repeat(40)}`;
+    expect(redactSecrets(`ANTHROPIC_API_KEY=${key}`)).toBe("ANTHROPIC_API_KEY=[REDACTED]");
+  });
+
+  it("redacts OpenAI API keys (plain and project-scoped)", () => {
+    expect(redactSecrets(`sk-${"a".repeat(40)}`)).toBe("[REDACTED]");
+    expect(redactSecrets(`sk-proj-${"b".repeat(40)}`)).toBe("[REDACTED]");
+  });
+
+  it("does not redact short sk- words that are not keys", () => {
+    expect(redactSecrets("sk-short and sk-ant-short stay")).toBe("sk-short and sk-ant-short stay");
+  });
+
+  it("redacts Telegram bot tokens, including inside a Bot API URL", () => {
+    const token = `123456789:AAH${"x".repeat(32)}`;
+    expect(redactSecrets(`https://api.telegram.org/bot${token}/sendMessage`)).toBe(
+      "https://api.telegram.org/bot[REDACTED]/sendMessage",
+    );
+    expect(redactSecrets(`token ${token} end`)).toBe("token [REDACTED] end");
+  });
+});
+
+describe("redactSecrets on serialized JSON (issue: broker payload corruption)", () => {
+  it("never matches a URL-with-port across JSON string boundaries", () => {
+    // A port URL in one field plus an `@` in a later field used to be swallowed
+    // into one bogus "credential", structurally destroying the payload.
+    const json = JSON.stringify({ t: { u: "https://h:1" }, e: "x@y" });
+    expect(redactSecrets(json)).toBe(json);
+    expect(() => JSON.parse(redactSecrets(json))).not.toThrow();
+  });
+
+  it("keeps sibling fields intact when a URL with a port precedes an email", () => {
+    const json = JSON.stringify({
+      a: "https://example.com:8443",
+      n: 42,
+      email: "ops@example.com",
+    });
+    expect(redactSecrets(json)).toBe(json);
+  });
+
+  it("still redacts real URL credentials inside a JSON string", () => {
+    const json = JSON.stringify({ remote: `https://oauth2:${"z".repeat(20)}@gitlab.com/g/p.git` });
+    const out = redactSecrets(json);
+    expect(JSON.parse(out)).toEqual({ remote: "https://[REDACTED]@gitlab.com/g/p.git" });
+  });
+
+  it("stops a PRIVATE-TOKEN match at the JSON string boundary", () => {
+    const json = JSON.stringify({ h: "PRIVATE-TOKEN: secret", x: 1 });
+    const out = redactSecrets(json);
+    expect(JSON.parse(out)).toEqual({ h: "PRIVATE-TOKEN: [REDACTED]", x: 1 });
+  });
 });
