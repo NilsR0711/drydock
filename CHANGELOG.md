@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.1.6](https://github.com/NilsR0711/drydock/compare/v0.1.5...v0.1.6) (2026-06-11)
+
+
+### Features
+
+* **api:** health endpoint with machine-readable orchestrator metrics ([#195](https://github.com/NilsR0711/drydock/issues/195)) ([9699001](https://github.com/NilsR0711/drydock/commit/969900159bd79e3a0ae3e2aa7833fe9f2908c477)), closes [#183](https://github.com/NilsR0711/drydock/issues/183)
+* **cli:** ops subcommands for packaged installs — backup/restore, doctor, service install ([#194](https://github.com/NilsR0711/drydock/issues/194)) ([e6b35d9](https://github.com/NilsR0711/drydock/commit/e6b35d9892d577cb9d736124e6989dc9f4943505)), closes [#176](https://github.com/NilsR0711/drydock/issues/176)
+* **forge:** event-driven webhook nudges — wake CI babysitter, merge gate, and review sweep ([#192](https://github.com/NilsR0711/drydock/issues/192)) ([e3d4ba9](https://github.com/NilsR0711/drydock/commit/e3d4ba9ab5146fb53b336b69d92039c2168f6460))
+* **models:** add Claude Fable 5 and Sonnet 4.6, fix Opus 4.7 pricing ([#161](https://github.com/NilsR0711/drydock/issues/161)) ([788ea8e](https://github.com/NilsR0711/drydock/commit/788ea8eceed713c896a25349b69716f6c36be0c4)), closes [#157](https://github.com/NilsR0711/drydock/issues/157)
+* OpenRouter API backend with auto-syncing model catalog, incl. free models ([#187](https://github.com/NilsR0711/drydock/issues/187)) ([930595d](https://github.com/NilsR0711/drydock/commit/930595d229616efc084cdf91cf99829534915501))
+* opt-in AI PR audit — read-only whole-PR review posted to the issue (Claude or Codex, locale-aware) ([#186](https://github.com/NilsR0711/drydock/issues/186)) ([08d125d](https://github.com/NilsR0711/drydock/commit/08d125d74d304f807e2e61b8cf312d55efe7425f))
+* **orchestrator:** branch & PR janitor — delete merged remote branches, refresh stale or conflicted PRs ([#193](https://github.com/NilsR0711/drydock/issues/193)) ([671cc55](https://github.com/NilsR0711/drydock/commit/671cc5531e7be5f43082be8c72aec7ec84311584))
+* **orchestrator:** credential watchdog — detect expired gh/GitLab/agent auth before the queue dies ([#190](https://github.com/NilsR0711/drydock/issues/190)) ([7a528e3](https://github.com/NilsR0711/drydock/commit/7a528e3151e4ebd4b130a131a494eb35b8ecd6a9))
+* **orchestrator:** detect Claude usage limits, park jobs, and auto-resume when quota resets ([#184](https://github.com/NilsR0711/drydock/issues/184)) ([50f5400](https://github.com/NilsR0711/drydock/commit/50f540090fc41192addda245b4e04ad7d3d23947))
+* **orchestrator:** detect Codex CLI usage limits, park jobs, and auto-resume when quota resets ([#185](https://github.com/NilsR0711/drydock/issues/185)) ([5b6ca36](https://github.com/NilsR0711/drydock/commit/5b6ca3615e0062d42f9b497139c26355c21164f1)), closes [#167](https://github.com/NilsR0711/drydock/issues/167)
+* **orchestrator:** model escalation ladder — retry failed jobs with a stronger model ([#191](https://github.com/NilsR0711/drydock/issues/191)) ([3cc0def](https://github.com/NilsR0711/drydock/commit/3cc0defdd72f0a6f3190090291f4e9bd19e2611d))
+* **orchestrator:** opt-in plan-first stage before implementation ([#164](https://github.com/NilsR0711/drydock/issues/164)) ([34fab07](https://github.com/NilsR0711/drydock/commit/34fab07cc62a1bea9b15e1a883639ed11a5d2005)), closes [#160](https://github.com/NilsR0711/drydock/issues/160)
+* **orchestrator:** review settle gate before auto-merge ([#163](https://github.com/NilsR0711/drydock/issues/163)) ([a86fbb3](https://github.com/NilsR0711/drydock/commit/a86fbb3ceca4000c994707b1df3d2ca90efec7ac)), closes [#159](https://github.com/NilsR0711/drydock/issues/159)
+* **review-feedback:** trusted-bots allowlist so bot findings can be processed ([#162](https://github.com/NilsR0711/drydock/issues/162)) ([528ff2b](https://github.com/NilsR0711/drydock/commit/528ff2bddd30deb3815e56590911c98b36130baf)), closes [#158](https://github.com/NilsR0711/drydock/issues/158)
+* **ui:** finish design-epic remnants — route boundaries, empty states, fieldset settings ([#165](https://github.com/NilsR0711/drydock/issues/165)) ([a27173f](https://github.com/NilsR0711/drydock/commit/a27173fbda63a2b1970b233c4cf1e9a9876b0755))
+
+
+### Bug Fixes
+
+* **actions:** dedupe manual starts, guard destructive actions, confine symlinked browsing ([#174](https://github.com/NilsR0711/drydock/issues/174)) ([4eef83d](https://github.com/NilsR0711/drydock/commit/4eef83d9ecab625577b0cd188c88a8a61386a9e2))
+* **ci-heal:** abort-aware babysitting, healing slot leaks, review-feedback recovery, squash-merge monitoring ([#172](https://github.com/NilsR0711/drydock/issues/172)) ([74f219d](https://github.com/NilsR0711/drydock/commit/74f219d6e6b0091d46d8e0bf71890a3896c22093))
+* **ci-heal:** make rerun action real, close progressed sessions, guard session reuse ([#153](https://github.com/NilsR0711/drydock/issues/153)) ([4b77679](https://github.com/NilsR0711/drydock/commit/4b7767923ea881d5f7b7a0460323b3082426659c))
+* **db:** migration FK enforcement, prune variable limit, complete cost accounting ([#170](https://github.com/NilsR0711/drydock/issues/170)) ([236d5ca](https://github.com/NilsR0711/drydock/commit/236d5cab5d60d57f8b15a7aad78a0fc2c00903b7))
+* **db:** transactional reorder, LIKE escaping, repo-scoped ADR dedup, per-repo time limits ([#155](https://github.com/NilsR0711/drydock/issues/155)) ([07757e6](https://github.com/NilsR0711/drydock/commit/07757e64a1f67d110f71677911219f6d906d37d3))
+* **forge:** GitLab pagination, ETag paging, SSE resilience, redaction correctness ([#173](https://github.com/NilsR0711/drydock/issues/173)) ([c142bed](https://github.com/NilsR0711/drydock/commit/c142bed46924d88b138fe85b32b333e9dffa4879))
+* **orchestrator:** recover ci_failed jobs, abort race, parked-job enqueue churn ([#152](https://github.com/NilsR0711/drydock/issues/152)) ([6b53c1a](https://github.com/NilsR0711/drydock/commit/6b53c1a72e8dfdfcd796bdecb3f8cfc2664c6f0f))
+* **orchestrator:** worktree retry collision, recovery lock ordering, killed-session exit codes ([#171](https://github.com/NilsR0711/drydock/issues/171)) ([072690b](https://github.com/NilsR0711/drydock/commit/072690bc14a420177907f7e0123fa3e2db0f82f5))
+* **security:** close IPv6 hex SSRF bypass, harden SSE job stream, fix cache token accounting ([#154](https://github.com/NilsR0711/drydock/issues/154)) ([109a1f6](https://github.com/NilsR0711/drydock/commit/109a1f6211d2411524621ab1857a10a758d526a5))
+* **ui:** dialog focus trap, issue-board drop zones, pause sync, cost-limit input guard ([#175](https://github.com/NilsR0711/drydock/issues/175)) ([66761e2](https://github.com/NilsR0711/drydock/commit/66761e2a1c6aa1246a8744b8f8e062eea500bcfd))
+* **ui:** drag-reorder corruption with active search, hydration mismatches, gauge and dialog fixes ([#156](https://github.com/NilsR0711/drydock/issues/156)) ([cdd154b](https://github.com/NilsR0711/drydock/commit/cdd154b422332b898ea49811559474214fc15591))
+
 ## [0.1.5](https://github.com/NilsR0711/drydock/compare/v0.1.4...v0.1.5) (2026-06-04)
 
 
