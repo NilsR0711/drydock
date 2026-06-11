@@ -1,9 +1,26 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Repo } from "@/lib/db/schema";
 import type { CommandResult, CommandRunner } from "@/lib/exec/runner";
 import { EmptyCommitError, WorktreeManager, worktreeHome } from "@/lib/git/worktree";
 
 const repo = { id: 7, path: "/repos/acme", name: "acme", defaultBranch: "main" } as Repo;
+
+// prepare() runs a real rmSync against the derived worktree path, so the
+// suite must never run against the developer's actual ~/.drydock.
+const originalHome = process.env.DRYDOCK_HOME;
+let testHome = "";
+beforeEach(() => {
+  testHome = mkdtempSync(join(tmpdir(), "drydock-worktree-"));
+  process.env.DRYDOCK_HOME = testHome;
+});
+afterEach(() => {
+  rmSync(testHome, { recursive: true, force: true });
+  if (originalHome === undefined) delete process.env.DRYDOCK_HOME;
+  else process.env.DRYDOCK_HOME = originalHome;
+});
 
 function recordingRunner() {
   const calls: { cmd: string; args: string[]; cwd?: string }[] = [];

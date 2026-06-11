@@ -86,8 +86,11 @@ export class WorktreeManager {
       await this.git(["-C", repo.path, "worktree", "remove", "--force", path]).catch(
         () => undefined,
       );
-      await this.git(["-C", repo.path, "worktree", "prune"]).catch(() => undefined);
+      // Prune AFTER the directory is gone: if `worktree remove` failed while
+      // the path still existed, pruning first would still see it as live and
+      // keep the stale registration, failing the re-add below.
       rmSync(path, { recursive: true, force: true });
+      await this.git(["-C", repo.path, "worktree", "prune"]).catch(() => undefined);
       await this.git(["-C", repo.path, "branch", "-D", branch]).catch(() => undefined);
       await this.git(["-C", repo.path, "worktree", "add", "-b", branch, path, repo.defaultBranch]);
     });

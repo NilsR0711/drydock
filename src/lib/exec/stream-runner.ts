@@ -44,6 +44,7 @@ export const spawnStreamRunner: StreamRunner = (cmd, args, cwd, cb) => {
   // SIGKILL timer is stored here so the close listener — registered once at
   // spawn time — can clear it when the process exits naturally before SIGKILL.
   let killTimer: ReturnType<typeof setTimeout> | undefined;
+  let aborted = false;
 
   const handle: StreamHandle = {
     done: new Promise<number>((resolve) => {
@@ -62,6 +63,11 @@ export const spawnStreamRunner: StreamRunner = (cmd, args, cwd, cb) => {
       });
     }),
     abort: (graceMs = 5000) => {
+      // Idempotent: the timeout, the cost-cap guard, and a user abort can all
+      // race to call this; a second call must not re-signal or replace (and
+      // thereby duplicate) the pending SIGKILL escalation.
+      if (aborted) return;
+      aborted = true;
       killProcessTree(child, "SIGTERM");
       killTimer = setTimeout(() => killProcessTree(child, "SIGKILL"), graceMs);
       // Don't let the SIGKILL timer keep the event loop alive on shutdown.

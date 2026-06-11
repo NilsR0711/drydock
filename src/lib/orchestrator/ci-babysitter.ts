@@ -48,6 +48,8 @@ export interface ResumeOutcome {
   spawnError?: Error;
   /** True when the fix session finished but produced no commit to push. */
   noChanges?: boolean;
+  /** True when an outside actor settled the job while the fix session ran. */
+  settledExternally?: boolean;
 }
 
 /** Why a resume cannot have advanced the PR, or null when it may have. */
@@ -56,6 +58,7 @@ export function resumeFailureReason(outcome: ResumeOutcome): string | null {
   if (outcome.costExceeded) return "per-job cost limit reached during the CI fix";
   if (outcome.spawnError) return `CI-fix session failed to start: ${outcome.spawnError.message}`;
   if (outcome.exitCode !== 0) return "CI-fix session exited non-zero";
+  if (outcome.settledExternally) return "job was settled externally during the CI fix";
   if (outcome.noChanges) return "CI-fix session produced no changes";
   return null;
 }

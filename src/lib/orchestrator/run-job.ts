@@ -89,6 +89,8 @@ export function buildCiFixResume(opts: {
   worktrees: Pick<WorktreeApi, "commitAndPush">;
   /** Resolves the job's live worktree; the babysitter only runs while it exists. */
   worktree: () => Worktree | undefined;
+  /** Whether an outside actor (abort, emergency stop) settled the job. */
+  settled?: () => boolean;
   resume: (
     job: Job,
     sessionId: string,
@@ -107,6 +109,11 @@ export function buildCiFixResume(opts: {
       spawnError: result.spawnError,
     };
     if (resumeFailureReason(outcome)) return outcome;
+    // An abort that landed while the fix session ran must win: never push an
+    // aborted job's partial work. The babysitter escalates on the reason; for
+    // an already-settled job its transition throws and runJobCore's catch
+    // returns the settled row untouched.
+    if (opts.settled?.()) return { ...outcome, settledExternally: true };
     try {
       await opts.worktrees.commitAndPush(wt, `Fix CI for #${job.issueNumber}`);
     } catch (err) {
@@ -224,6 +231,10 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         resumeSession: buildCiFixResume({
           worktrees,
           worktree: () => wt,
+          settled: () => {
+            const fresh = getJob(job.id, db);
+            return !fresh || fresh.status === "aborted" || fresh.status === "interrupted";
+          },
           resume: (rj, sessionId, failedLog, cwd) =>
             resumeAgentSession(rj, sessionId, failedLog, cwd, {
               db,
