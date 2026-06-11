@@ -1,9 +1,20 @@
 "use client";
 
-import { Archive, Bell, OctagonAlert, Send, Terminal, Zap } from "lucide-react";
+import {
+  Archive,
+  Bell,
+  Globe,
+  OctagonAlert,
+  PlugZap,
+  RefreshCw,
+  Send,
+  Terminal,
+  Zap,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { AgentSelect } from "@/components/agent-select";
-import { ModelSelect } from "@/components/model-select";
+import { ModelSelect, type OpenRouterModelOption } from "@/components/model-select";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -16,17 +27,38 @@ import { useToast } from "@/components/ui/toast";
 import type { AgentId } from "@/lib/agents/types";
 import { NOTIFICATION_EVENT_LABELS, NOTIFICATION_EVENTS } from "@/lib/notify/events";
 import {
+  refreshOpenRouterCatalogAction,
+  testOpenRouterConnectionAction,
+} from "@/lib/openrouter/actions";
+import {
   saveSettingsAction,
   sendTestNotificationAction,
   togglePauseAction,
 } from "@/lib/settings/actions";
 import type { Settings } from "@/lib/settings/service";
 
-export function SettingsForm({ initial }: { initial: Settings }) {
+/** OpenRouter catalog status passed down from the settings page (issue #169). */
+export interface OpenRouterStatus {
+  models: OpenRouterModelOption[];
+  modelCount: number;
+  lastSuccessAt: number | null;
+  lastError: string | null;
+  stale: boolean;
+}
+
+export function SettingsForm({
+  initial,
+  openrouter,
+}: {
+  initial: Settings;
+  openrouter: OpenRouterStatus;
+}) {
   const [s, setS] = useState(initial);
   const [pending, start] = useTransition();
   const [testing, startTest] = useTransition();
   const [pausing, startPause] = useTransition();
+  const [orBusy, startOr] = useTransition();
+  const router = useRouter();
   const { success, error, info } = useToast();
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => {
@@ -63,6 +95,36 @@ export function SettingsForm({ initial }: { initial: Settings }) {
         success("Settings saved");
       } catch (e) {
         error("Failed to save settings", e instanceof Error ? e.message : String(e));
+      }
+    });
+
+  // Both OpenRouter probes persist the on-screen config first so the test and
+  // the sync use exactly the key/settings the user is looking at.
+  const testOpenRouter = () =>
+    startOr(async () => {
+      try {
+        await saveSettingsAction(s);
+        const result = await testOpenRouterConnectionAction();
+        if (result.ok) success("OpenRouter connection OK");
+        else error("OpenRouter connection failed", result.error);
+      } catch (e) {
+        error("OpenRouter connection failed", e instanceof Error ? e.message : String(e));
+      }
+    });
+
+  const refreshCatalog = () =>
+    startOr(async () => {
+      try {
+        await saveSettingsAction(s);
+        const result = await refreshOpenRouterCatalogAction();
+        if (result.ok) {
+          success(`Catalog refreshed — ${result.modelCount} models synced`);
+          router.refresh();
+        } else {
+          error("Catalog refresh failed", result.error);
+        }
+      } catch (e) {
+        error("Catalog refresh failed", e instanceof Error ? e.message : String(e));
       }
     });
 
@@ -395,6 +457,147 @@ export function SettingsForm({ initial }: { initial: Settings }) {
               ))}
             </div>
           </Field>
+        </div>
+      </Card>
+
+      {/* OpenRouter backend (issue #169) */}
+      <Card pad="lg">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Globe className="h-4 w-4" />
+          </span>
+          <div>
+            <h3 className="text-base font-semibold">OpenRouter</h3>
+            <p className="text-sm text-muted-foreground">
+              Optional API backend with an auto-syncing model catalog, including free models.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">Enable OpenRouter</p>
+              <p className="text-xs text-muted-foreground">
+                Adds OpenRouter-hosted models as a selectable agent per repository. Repository code
+                is sent to OpenRouter and its upstream model providers.
+              </p>
+            </div>
+            <Switch
+              checked={s.openrouterEnabled}
+              onChange={(v) => set("openrouterEnabled", v)}
+              aria-label="Enable OpenRouter"
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="API key"
+              hint="Stored locally; DRYDOCK_OPENROUTER_API_KEY overrides it. Never logged."
+            >
+              <Input
+                type="password"
+                autoComplete="off"
+                placeholder="sk-or-v1-…"
+                value={s.openrouterApiKey}
+                onChange={(e) => set("openrouterApiKey", e.target.value)}
+              />
+            </Field>
+            <Field label="Catalog refresh (hours)" hint="Minimum 0.25 (15 minutes).">
+              <Input
+                type="number"
+                min="0.25"
+                step="0.25"
+                value={s.openrouterCatalogRefreshHours}
+                onChange={(e) => {
+                  const hours = Number(e.target.value);
+                  if (!Number.isFinite(hours) || hours < 0.25) return;
+                  set("openrouterCatalogRefreshHours", hours);
+                }}
+              />
+            </Field>
+            <Field label="Default model" hint="Used when a repo or job has none set.">
+              <ModelSelect
+                agent="openrouter"
+                openrouterModels={openrouter.models}
+                value={s.openrouterDefaultModel}
+                onChange={(v) => set("openrouterDefaultModel", v)}
+              />
+            </Field>
+            <Field label="App attribution" hint="Optional HTTP-Referer / X-Title headers.">
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://your-site.example"
+                  value={s.openrouterSiteUrl}
+                  onChange={(e) => set("openrouterSiteUrl", e.target.value)}
+                />
+                <Input
+                  placeholder="App name"
+                  value={s.openrouterAppName}
+                  onChange={(e) => set("openrouterAppName", e.target.value)}
+                />
+              </div>
+            </Field>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">Free models only</p>
+                <p className="text-xs text-muted-foreground">
+                  Restrict every OpenRouter run to zero-cost catalog models.
+                </p>
+              </div>
+              <Switch
+                checked={s.openrouterFreeModelsOnly}
+                onChange={(v) => set("openrouterFreeModelsOnly", v)}
+                aria-label="Free models only"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">Auto-wait on limits</p>
+                <p className="text-xs text-muted-foreground">
+                  Park jobs on OpenRouter 429s and resume them once the window resets.
+                </p>
+              </div>
+              <Switch
+                checked={s.openrouterLimitAutoWait}
+                onChange={(v) => set("openrouterLimitAutoWait", v)}
+                aria-label="Auto-wait on OpenRouter limits"
+              />
+            </div>
+          </div>
+
+          {s.openrouterEnabled && openrouter.stale && (
+            <Alert tone="warning" icon={OctagonAlert} title="Model catalog is stale">
+              {openrouter.lastError
+                ? `The last sync failed: ${openrouter.lastError}. Pickers keep using the last-good snapshot.`
+                : "The catalog has not synced recently. Pickers keep using the last-good snapshot."}
+            </Alert>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              {openrouter.modelCount > 0
+                ? `${openrouter.modelCount} models synced${
+                    openrouter.lastSuccessAt
+                      ? ` · last sync ${new Date(openrouter.lastSuccessAt * 1000).toLocaleString()}`
+                      : ""
+                  }`
+                : "No models synced yet."}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={testOpenRouter} disabled={orBusy}>
+                {orBusy ? <Spinner size={16} /> : <PlugZap className="h-4 w-4" />}
+                Test connection
+              </Button>
+              <Button variant="outline" onClick={refreshCatalog} disabled={orBusy}>
+                {orBusy ? <Spinner size={16} /> : <RefreshCw className="h-4 w-4" />}
+                Refresh models
+              </Button>
+            </div>
+          </div>
         </div>
       </Card>
 

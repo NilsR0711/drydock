@@ -8,6 +8,27 @@ import { z } from "zod";
  */
 
 export const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
+export const OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key";
+
+/**
+ * Probe whether an API key is accepted (settings "Test connection" button):
+ * a cheap authenticated GET against the key endpoint, no tokens spent.
+ */
+export async function checkOpenRouterKey(
+  apiKey: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetchImpl(OPENROUTER_KEY_URL, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (res.ok) return { ok: true };
+    const body = (await res.text().catch(() => "")).slice(0, 200);
+    return { ok: false, error: `OpenRouter HTTP ${res.status}: ${body}` };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 /** Non-2xx response or a mid-stream error event from OpenRouter. */
 export class OpenRouterHttpError extends Error {

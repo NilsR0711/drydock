@@ -3,7 +3,7 @@
 import { Bot, ShieldCheck, Timer } from "lucide-react";
 import { useState, useTransition } from "react";
 import { AgentSelect } from "@/components/agent-select";
-import { ModelSelect } from "@/components/model-select";
+import { ModelSelect, type OpenRouterModelOption } from "@/components/model-select";
 import { Field } from "@/components/ui/field";
 import { Fieldset } from "@/components/ui/fieldset";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,21 @@ function LabelWithHelp({ text, help }: { text: string; help: string }) {
   );
 }
 
-export function RepoSettingsBar({ repo }: { repo: Repo }) {
+/** Synced OpenRouter picker data passed down from the workspace page (issue #169). */
+export interface OpenRouterPickerProps {
+  enabled: boolean;
+  models: OpenRouterModelOption[];
+  /** Global fallback model used as the preselection when switching agents. */
+  defaultModel: string;
+}
+
+export function RepoSettingsBar({
+  repo,
+  openrouter,
+}: {
+  repo: Repo;
+  openrouter: OpenRouterPickerProps;
+}) {
   const [agent, setAgent] = useState(repo.agent as AgentId);
   const [model, setModel] = useState(repo.defaultModel);
   const [limit, setLimit] = useState(repo.dailyCostLimitUsd.toString());
@@ -62,8 +76,17 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
 
   function changeAgent(value: AgentId) {
     // Switching agents resets the model to that agent's default so the repo
-    // never points at a model the selected agent can't run.
-    const nextModel = defaultModelForAgent(value);
+    // never points at a model the selected agent can't run. OpenRouter's
+    // default comes from the synced catalog (global default, else the first
+    // entry) — without a catalog there is nothing valid to persist.
+    const nextModel =
+      value === "openrouter"
+        ? openrouter.defaultModel || (openrouter.models[0]?.id ?? "")
+        : defaultModelForAgent(value);
+    if (value === "openrouter" && nextModel === "") {
+      error("No synced OpenRouter models", "Refresh the catalog in Settings first.");
+      return;
+    }
     setAgent(value);
     setModel(nextModel);
     persist({ agent: value, defaultModel: nextModel });
@@ -132,7 +155,16 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
             label={<LabelWithHelp text="Agent" help="CLI agent used for new jobs in this repo." />}
             htmlFor="repo-agent-select"
           >
-            <AgentSelect id="repo-agent-select" value={agent} onChange={changeAgent} />
+            <AgentSelect
+              id="repo-agent-select"
+              value={agent}
+              onChange={changeAgent}
+              agents={
+                openrouter.enabled || agent === "openrouter"
+                  ? ["claude", "codex", "openrouter"]
+                  : ["claude", "codex"]
+              }
+            />
           </Field>
           <Field
             label={
@@ -143,7 +175,13 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
             }
             htmlFor="repo-model-select"
           >
-            <ModelSelect id="repo-model-select" value={model} onChange={change} agent={agent} />
+            <ModelSelect
+              id="repo-model-select"
+              value={model}
+              onChange={change}
+              agent={agent}
+              openrouterModels={openrouter.models}
+            />
           </Field>
         </div>
       </Fieldset>
