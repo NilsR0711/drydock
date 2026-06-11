@@ -67,6 +67,8 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 🔌 **Pluggable agents** — choose `claude` or `codex` per repo (with a global default in settings); a preflight check verifies the selected CLI is installed.
 
+🌐 **Opt-in OpenRouter backend** — run jobs against OpenRouter-hosted models, including **free-tier** ones, next to the Claude/Codex CLIs. The model catalog (ids, pricing, capabilities, deprecations) is **mirrored from OpenRouter's Models API into SQLite and refreshed automatically** on a configurable interval, so new models appear in the pickers without a Drydock release; sync failures keep the last-good snapshot working offline. One-shot stages (triage decomposition, verification, plan, PR audit) accept any synced model; implementation jobs are gated to tool-capable models and edit the worktree through a bounded tool loop. Costs use OpenRouter's exact usage accounting (catalog pricing as fallback) and flow into the same budgets and dashboards; 429s park jobs via the provider-limit latch and resume automatically. A global **free-models-only** policy restricts every OpenRouter run to zero-cost models. Off by default — paste an API key and flip the switch in Settings. See [ADR 032](docs/adr/032-openrouter-backend.md).
+
 🦊 **GitHub & GitLab** — choose the platform per repo. GitLab (gitlab.com or self-hosted) uses the REST API v4 with a per-repo base URL + access token — no extra CLI to install.
 
 🛂 **Opt-in autonomous triage** — per repo, let Drydock label incoming issues (deterministic keyword classifier, whitelist-only output) and auto-process the ones that are *ready* and not blocked. Off by default; gated by author association for public repos, a per-issue attempt limit, and all the usual cost/concurrency limits. Never auto-merges.
@@ -262,12 +264,13 @@ Drydock is configured at runtime from the **Settings** page and per-repo control
 | `DRYDOCK_DB` | `<data dir>/drydock.db`¹ | SQLite file path (use `:memory:` for ephemeral runs); overrides the data dir |
 | `DRYDOCK_MIGRATIONS` | `./drizzle` | Folder of generated SQL migrations (set automatically by the `drydock` launcher) |
 | `DRYDOCK_ALLOW_PRIVATE_FORGE` | _unset_ | Set to `1` to allow a GitLab base URL on a private/loopback network (self-hosted); otherwise such targets are refused as an SSRF safeguard |
+| `DRYDOCK_OPENROUTER_API_KEY` | _unset_ | Overrides the OpenRouter API key stored in settings (headless deployments keep the secret out of SQLite) |
 
 ¹ A source checkout (`pnpm dev`/`pnpm start`) defaults `DRYDOCK_DB` to `data/drydock.db` in the
 project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 
-**Settings (global):** pause switch · release management kill-switch (master on/off for the opt-in release pipeline) · daily cost limit · max job cost (per-job USD ceiling that aborts a runaway session mid-stream; 0 = off) · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · auto-wait on Claude and Codex provider limits (per-agent toggles: park jobs hit by usage/rate limits or overloads and resume them automatically when the window resets; default on) · `claude`/`gh` CLI paths · notification channels (Telegram / Slack / email) and per-event opt-in.
-**Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · default model · serial vs. parallel processing · queue label (default `drydock:queue`) · optional job/CI timeout overrides.
+**Settings (global):** pause switch · release management kill-switch (master on/off for the opt-in release pipeline) · daily cost limit · max job cost (per-job USD ceiling that aborts a runaway session mid-stream; 0 = off) · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · auto-wait on Claude and Codex provider limits (per-agent toggles: park jobs hit by usage/rate limits or overloads and resume them automatically when the window resets; default on) · `claude`/`gh` CLI paths · OpenRouter backend (enable switch, API key, catalog refresh interval, default model, free-models-only policy, attribution headers, limit auto-wait, plus test-connection and refresh-models actions) · notification channels (Telegram / Slack / email) and per-event opt-in.
+**Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · agent (`claude`, `codex`, or `openrouter` once enabled) · default model (validated against the synced catalog for OpenRouter) · serial vs. parallel processing · queue label (default `drydock:queue`) · optional job/CI timeout overrides.
 
 ## Screens
 
