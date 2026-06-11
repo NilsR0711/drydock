@@ -126,6 +126,9 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [auditAgent, setAuditAgent] = useState<AgentId>(
     (repo.prAuditAgent ?? repo.agent) as AgentId,
   );
+  // Effective audit model: an explicit override wins; with only the agent
+  // overridden, that agent's catalog default applies (the repo's defaultModel
+  // may belong to the other CLI); otherwise inherit the repo's defaultModel.
   const [auditModel, setAuditModel] = useState(
     repo.prAuditModel ??
       (repo.prAuditAgent && repo.prAuditAgent !== repo.agent
@@ -354,7 +357,13 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
                 onBlur={() => {
                   const code = auditLanguage.trim() || "en";
                   setAuditLanguage(code);
-                  if (!/^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$/.test(code)) return;
+                  if (!/^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$/.test(code)) {
+                    error(
+                      "Invalid review language",
+                      `"${code}" is not a language code — use a simple or BCP 47 code like en, de, or pt-BR.`,
+                    );
+                    return;
+                  }
                   persist({ prAuditLanguage: code });
                 }}
                 placeholder="en"

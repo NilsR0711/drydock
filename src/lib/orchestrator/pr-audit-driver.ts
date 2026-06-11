@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getAgentProvider, isAgentId } from "@/lib/agents/registry";
+import { DEFAULT_AGENT, getAgentProvider, isAgentId } from "@/lib/agents/registry";
 import type { AgentProvider } from "@/lib/agents/types";
 import { type AgentId, WAITABLE_LIMIT_KINDS } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
@@ -74,9 +74,12 @@ export interface AuditConfig {
  * default rather than inheriting a model the other CLI cannot run.
  */
 export function resolveAuditConfig(repo: Repo): AuditConfig {
-  const agent: AgentId = isAgentId(repo.prAuditAgent) ? repo.prAuditAgent : (repo.agent as AgentId);
+  // Defense-in-depth: repo.agent is schema-constrained on writes, but a stored
+  // row is still untrusted input here — gate it instead of casting.
+  const repoAgent: AgentId = isAgentId(repo.agent) ? repo.agent : DEFAULT_AGENT;
+  const agent: AgentId = isAgentId(repo.prAuditAgent) ? repo.prAuditAgent : repoAgent;
   const model =
-    repo.prAuditModel ?? (agent === repo.agent ? repo.defaultModel : defaultModelForAgent(agent));
+    repo.prAuditModel ?? (agent === repoAgent ? repo.defaultModel : defaultModelForAgent(agent));
   return { agent, model, language: repo.prAuditLanguage || "en" };
 }
 
@@ -164,11 +167,16 @@ export async function upsertAuditComment(
   return "created";
 }
 
-/** Run an async forge read, returning a fallback on any failure (best-effort). */
+/**
+ * Run an async forge read, returning a fallback on any failure. Best-effort by
+ * design, but the failure is logged so a degraded audit context (empty diff,
+ * missing issue body) is diagnosable rather than silent.
+ */
 async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {
     return await fn();
-  } catch {
+  } catch (err) {
+    logError("[pr-audit] best-effort read failed, using fallback", err);
     return fallback;
   }
 }

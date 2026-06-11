@@ -98,6 +98,16 @@ describe("resolveAuditConfig", () => {
       language: "en",
     });
   });
+
+  it("defends against an invalid stored repo agent by falling back to the default", () => {
+    const repo = addRepo({ path: "/r", name: "r" }, db);
+    const corrupted = { ...repo, agent: "garbage" } as never;
+    expect(resolveAuditConfig(corrupted)).toEqual({
+      agent: "claude",
+      model: "claude-opus-4-8",
+      language: "en",
+    });
+  });
 });
 
 describe("buildPrAuditGenerator", () => {
