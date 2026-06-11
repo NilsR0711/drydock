@@ -16,7 +16,7 @@ import { agentInstructionsPromptSection } from "@/lib/repos/agent-instructions";
 import { getSettings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
 import { type AgentSessionResult, resumeAgentSession, spawnAgentSession } from "./agent-session";
-import { ciBabysitter } from "./ci-babysitter";
+import { ciBabysitter, type ResumeOutcome, resumeFailureReason } from "./ci-babysitter";
 import { getJob, recordEvent, transitionJob } from "./jobs";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
 import { InvalidTransitionError } from "./state-machine";
@@ -77,6 +77,47 @@ export function planPromptSection(plan: string): string {
 
 /** Event-aware notification sink: routes a lifecycle event + message downstream. */
 type NotifyEvent = (event: NotificationEvent, text: string) => Promise<void>;
+
+/**
+ * Build the babysitter's CI-fix resume callback. The fix session must run in
+ * the job's worktree — the PR branch is checked out there, not in the
+ * operator's primary checkout — and its result must be committed and pushed,
+ * or the PR head never changes and the babysitter burns its whole retry
+ * budget re-observing the same failed checks. Exported for tests.
+ */
+export function buildCiFixResume(opts: {
+  worktrees: Pick<WorktreeApi, "commitAndPush">;
+  /** Resolves the job's live worktree; the babysitter only runs while it exists. */
+  worktree: () => Worktree | undefined;
+  resume: (
+    job: Job,
+    sessionId: string,
+    failedLog: string,
+    cwd: string,
+  ) => Promise<AgentSessionResult>;
+}): (job: Job, sessionId: string, failedLog: string) => Promise<ResumeOutcome> {
+  return async (job, sessionId, failedLog) => {
+    const wt = opts.worktree();
+    if (!wt) throw new Error(`job ${job.id} has no live worktree to resume in`);
+    const result = await opts.resume(job, sessionId, failedLog, wt.path);
+    const outcome: ResumeOutcome = {
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      costExceeded: result.costExceeded,
+      spawnError: result.spawnError,
+    };
+    if (resumeFailureReason(outcome)) return outcome;
+    try {
+      await opts.worktrees.commitAndPush(wt, `Fix CI for #${job.issueNumber}`);
+    } catch (err) {
+      // A fix session that changed nothing cannot turn CI green; report it so
+      // the babysitter escalates instead of polling an unchanged PR head.
+      if (err instanceof EmptyCommitError) return { ...outcome, noChanges: true };
+      throw err;
+    }
+    return outcome;
+  };
+}
 
 /**
  * Run one job end-to-end and notify on its lifecycle. Worktree cleanup and
@@ -164,6 +205,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   const commentIssue =
     deps.commentIssue ??
     ((issueNumber: number, body: string) => forge.commentIssue(issueNumber, body));
+  // Declared before the babysitter deps so the CI-fix resume closure can read
+  // the worktree created below; it stays alive for the whole babysitter call.
+  let wt: Worktree | undefined;
   const runBabysitter =
     deps.runBabysitter ??
     ((j, prNumber) =>
@@ -174,14 +218,21 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         // Review settle gate (issue #159): hold the merge after CI goes green
         // so late bot/human reviews can land first. 0 merges immediately.
         mergeGateMs: repo.mergeGateMinutes * 60_000,
-        resumeSession: (rj, sessionId, failedLog) =>
-          resumeAgentSession(rj, sessionId, failedLog, repo.path, {
-            db,
-            provider,
-            command,
-            timeoutMs,
-            costCapUsd: maxJobCostUsd,
-          }).then(() => undefined),
+        // CI fixes run in the job's worktree and are committed + pushed there;
+        // resuming in repo.path edited the operator's checkout and could never
+        // move the PR head.
+        resumeSession: buildCiFixResume({
+          worktrees,
+          worktree: () => wt,
+          resume: (rj, sessionId, failedLog, cwd) =>
+            resumeAgentSession(rj, sessionId, failedLog, cwd, {
+              db,
+              provider,
+              command,
+              timeoutMs,
+              costCapUsd: maxJobCostUsd,
+            }),
+        }),
         // Opt-in structured CI auto-healing (issue #16, ADR 017).
         autoHeal: repo.autoHealCi
           ? { headSha: (pr) => forge.prHeadSha(pr), provider: repo.platform }
@@ -204,7 +255,6 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         model: j.model ?? repo.defaultModel,
       }).then(() => undefined));
 
-  let wt: Worktree | undefined;
   try {
     wt = await worktrees.prepare(repo, job.id, job.issueNumber);
     recordEvent(job.id, "worktree", { path: wt.path, branch: wt.branch }, db);
@@ -279,6 +329,14 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     }
 
     const session = await runSession(getJob(job.id, db) as Job, prompt, wt.path);
+    // Defense in depth against concurrent aborts (abort action, emergency
+    // stop, graceful shutdown): the kill races the session result, so re-read
+    // the job and never commit, push, or open a PR for one that has settled.
+    const afterSession = getJob(job.id, db) as Job;
+    if (afterSession.status === "aborted" || afterSession.status === "interrupted") {
+      if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
+      return afterSession;
+    }
     if (session.timedOut) {
       if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
       return transitionJob(

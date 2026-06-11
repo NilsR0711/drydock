@@ -62,7 +62,7 @@ describe("ciBabysitter auto-heal", () => {
       [{ name: "test", state: "FAILURE" }], // poll 1: failing → heal
       [{ name: "test", state: "SUCCESS" }], // poll 2: green → merged
     ]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     // head SHA moves after the agent pushes a fix.
     const headSha = vi.fn().mockResolvedValueOnce("sha-1").mockResolvedValue("sha-2");
     const final = await ciBabysitter(job, 5, {
@@ -94,6 +94,7 @@ describe("ciBabysitter auto-heal", () => {
     let captured = "";
     const resume = vi.fn(async (_j: unknown, _s: string, prompt: string) => {
       captured = prompt;
+      return { exitCode: 0 };
     });
     const headSha = vi.fn().mockResolvedValueOnce("sha-1").mockResolvedValue("sha-2");
     await ciBabysitter(job, 5, {
@@ -113,7 +114,7 @@ describe("ciBabysitter auto-heal", () => {
   it("never code-heals a blocked_external failure — hands to a human, no resume", async () => {
     const job = ciRunningJob(2);
     const { gh } = scriptedGh([[{ name: "AI Review", state: "FAILURE" }]]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     const final = await ciBabysitter(job, 5, {
       db,
       gh,
@@ -133,7 +134,7 @@ describe("ciBabysitter auto-heal", () => {
       [{ name: "test", state: "FAILURE" }], // poll 1: heal attempt
       [{ name: "test", state: "FAILURE" }], // poll 2: still failing, head unchanged
     ]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     const final = await ciBabysitter(job, 5, {
       db,
       gh,
@@ -151,7 +152,7 @@ describe("ciBabysitter auto-heal", () => {
   it("escalates to needs_human when checks stay pending past the wait budget", async () => {
     const job = ciRunningJob(5);
     const { gh } = scriptedGh(Array(12).fill([{ name: "test", state: "PENDING" }]));
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     let t = 0;
     const now = () => (t += 60_000);
     const final = await ciBabysitter(job, 5, {
@@ -174,7 +175,7 @@ describe("ciBabysitter auto-heal", () => {
       [{ name: "e2e", state: "TIMED_OUT" }], // poll 1: flaky → forge re-run
       [{ name: "e2e", state: "SUCCESS" }], // poll 2: green → merged
     ]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     // A re-run pushes no commit, so the head SHA never moves.
     const headSha = vi.fn().mockResolvedValue("sha-1");
     const final = await ciBabysitter(job, 5, {
@@ -199,7 +200,7 @@ describe("ciBabysitter auto-heal", () => {
       [{ name: "e2e", state: "TIMED_OUT" }], // poll 1: flaky → forge re-run
       [{ name: "e2e", state: "TIMED_OUT" }], // poll 2: still failing → escalate
     ]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     const final = await ciBabysitter(job, 5, {
       db,
       gh,
@@ -221,7 +222,7 @@ describe("ciBabysitter auto-heal", () => {
     const { gh, runner } = scriptedGh([[{ name: "e2e", state: "TIMED_OUT" }]]);
     // Simulate a forge without re-run support (e.g. GitLab).
     (gh as { reRunFailedChecks?: unknown }).reRunFailedChecks = undefined;
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     const final = await ciBabysitter(job, 5, {
       db,
       gh,
@@ -245,7 +246,7 @@ describe("ciBabysitter auto-heal", () => {
     const final = await ciBabysitter(job, 5, {
       db,
       gh,
-      resumeSession: vi.fn(async () => {}),
+      resumeSession: vi.fn(async () => ({ exitCode: 0 })),
       ...fast,
       autoHeal: { headSha: vi.fn().mockResolvedValue("sha-1"), provider: "github" },
     });
@@ -264,7 +265,7 @@ describe("ciBabysitter auto-heal", () => {
       [{ name: "lint", state: "FAILURE" }], // poll 2: progressed → repair "lint"
       [{ name: "lint", state: "SUCCESS" }], // poll 3: green → merged
     ]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     const headSha = vi
       .fn()
       .mockResolvedValueOnce("sha-1")
@@ -301,7 +302,7 @@ describe("ciBabysitter auto-heal", () => {
       [{ name: "test", state: "FAILURE" }],
       [{ name: "test", state: "SUCCESS" }],
     ]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     const headSha = vi.fn().mockResolvedValueOnce("sha-1").mockResolvedValue("sha-2");
     const final = await ciBabysitter(job, 5, {
       db,
@@ -322,7 +323,7 @@ describe("ciBabysitter auto-heal", () => {
     // Always failing; head moves each heal so attempts aren't rejected as empty,
     // but the failing count never drops → no improvement, bounded by budget.
     const { gh } = scriptedGh(Array(12).fill([{ name: "test", state: "FAILURE" }]));
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     let n = 0;
     const headSha = vi.fn(async () => `sha-${n++}`);
     const final = await ciBabysitter(job, 5, {
@@ -346,7 +347,7 @@ describe("ciBabysitter auto-heal", () => {
       [{ name: "test", state: "FAILURE" }], // poll 1: failing → heal
       [{ name: "test", state: "SUCCESS" }], // poll 2+: green, gated
     ]);
-    const resume = vi.fn(async () => {});
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
     const headSha = vi.fn().mockResolvedValueOnce("sha-1").mockResolvedValue("sha-2");
     let t = 0;
     const sleep = vi.fn(async () => {

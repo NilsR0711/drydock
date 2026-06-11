@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { killProcessTree, SPAWN_DETACHED } from "./runner";
 
 export interface StreamHandle {
   /** Resolves with the process exit code once it closes. */
@@ -30,7 +31,11 @@ export type StreamRunner = (
 ) => StreamHandle;
 
 export const spawnStreamRunner: StreamRunner = (cmd, args, cwd, cb) => {
-  const child: ChildProcess = spawn(cmd, args, { cwd, env: process.env });
+  // Detached: the agent CLI leads its own process group, so abort() can signal
+  // the whole tree. A SIGKILLed CLI would otherwise orphan its grandchildren
+  // (test runners, dev servers started via the agent's tools), which keep
+  // running, hold files in the worktree, and outlive Drydock on shutdown.
+  const child: ChildProcess = spawn(cmd, args, { cwd, env: process.env, detached: SPAWN_DETACHED });
   child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");
   child.stdout?.on("data", (d: string) => cb.onStdout(d));
@@ -42,9 +47,12 @@ export const spawnStreamRunner: StreamRunner = (cmd, args, cwd, cb) => {
 
   const handle: StreamHandle = {
     done: new Promise<number>((resolve) => {
-      child.on("close", (code) => {
+      child.on("close", (code, signal) => {
         if (killTimer) clearTimeout(killTimer);
-        resolve(code ?? 0);
+        // A signal death (user abort, emergency stop, graceful shutdown)
+        // reports code=null; map it to a non-zero exit so callers never treat
+        // a killed session as success — and push/PR its partial work.
+        resolve(code ?? (signal ? 1 : 0));
       });
       child.on("error", (err) => {
         // Spawn failure (e.g. ENOENT): surface the error on the handle so
@@ -54,8 +62,8 @@ export const spawnStreamRunner: StreamRunner = (cmd, args, cwd, cb) => {
       });
     }),
     abort: (graceMs = 5000) => {
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => child.kill("SIGKILL"), graceMs);
+      killProcessTree(child, "SIGTERM");
+      killTimer = setTimeout(() => killProcessTree(child, "SIGKILL"), graceMs);
       // Don't let the SIGKILL timer keep the event loop alive on shutdown.
       killTimer.unref?.();
     },
