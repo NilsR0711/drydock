@@ -356,6 +356,13 @@ pnpm mcp            # start the local stdio MCP server (see "MCP server")
   GitLab token validity per configured base URL, free disk space at the data dir,
   `PRAGMA integrity_check`, instance lock) and exits non-zero on any failed probe, so it
   drops straight into cron/CI scripts.
+- **Health endpoint** — `GET /api/health` returns a machine-readable liveness snapshot for
+  Uptime-Kuma/Prometheus probes and scripts: `status` (`ok`/`degraded`) with `reasons`,
+  `version`, `uptimeSeconds`, `driver` (instance lock, paused/draining flags, last tick
+  timestamp), `queue` (job counts per state), and `budget` (today's spend vs the daily
+  limit). HTTP 200 while the driver loop ticks; 503 when the loop is stalled (no tick
+  within 3 poll intervals), not running, or the DB is unreachable. Read-only and
+  secret-free, served from a single cheap query set with no forge calls.
 - **Run at login** — `drydock service install` generates and loads a launchd agent (macOS)
   or systemd user unit (Linux) that runs `drydock serve` at login and restarts it on
   crashes; `drydock service uninstall` removes it again.

@@ -59,6 +59,36 @@ function writeLock(path: string): void {
   }
 }
 
+export interface InstanceLockInfo {
+  /** True when a live process holds the lock. */
+  held: boolean;
+  /** Pid recorded in the lock file, if readable. */
+  pid: number | null;
+  /** True when this process is the holder. */
+  self: boolean;
+}
+
+/**
+ * Read-only view of the instance lock for diagnostics (health endpoint,
+ * issue #183). Never creates, rewrites, or steals the lock — a stale or
+ * corrupt lock file is simply reported as not held.
+ */
+export function readInstanceLock(): InstanceLockInfo {
+  let pid: number | null = null;
+  try {
+    const parsed = JSON.parse(readFileSync(lockPath(), "utf8")) as { pid?: unknown };
+    // Only positive integers are valid per the lock-file contract. pid 0 would
+    // make pidAlive() signal our own process group and misreport a corrupt
+    // lock as held; negative pids address process groups as well.
+    const raw = parsed.pid;
+    if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) pid = raw;
+  } catch {
+    // missing or corrupt lock file — no provable live holder
+  }
+  const held = pid !== null && pidAlive(pid);
+  return { held, pid, self: held && pid === process.pid };
+}
+
 /**
  * Best-effort single-instance guard. Returns true if this process now holds the
  * lock. A lock held by a dead pid is considered stale and taken over.
