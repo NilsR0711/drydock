@@ -50,12 +50,15 @@ new tag — see below.
 
 The single source of truth for publishing `@nilsr0711/drydock`. Triggered two
 ways: `workflow_dispatch` (manual publish of the version on the chosen ref —
-used for the first release and ad-hoc publishes) and `workflow_call` (reused by
-`release-please.yml` after it cuts a release). It runs
-`npm publish --provenance --access public`; `npm publish` first runs the
+used for the first release and ad-hoc/recovery publishes) and `workflow_call`
+(reused by `release-please.yml` after it cuts a release). It upgrades npm to
+`>= 11.5.1` and runs `npm publish --access public`; `npm publish` first runs the
 `prepublishOnly` gate (`pnpm test && pnpm build`), so a broken build never ships.
-Authentication uses an `NPM_TOKEN` repo secret; provenance uses GitHub OIDC
-(`id-token: write`) to attest the tarball to the workflow run. See
+Authentication is tokenless via **npm trusted publishing** (OIDC,
+`id-token: write`) — no `NPM_TOKEN` secret — and provenance is attached
+automatically. For reusable workflows npm validates the *calling* workflow, so
+both `release-please.yml` and `npm-publish.yml` are registered as trusted
+publishers for the package on npmjs. See
 [ADR 026](adr/026-npm-package-and-cli-launcher.md).
 
 ## `doc-review.yml` — Documentation reminder
