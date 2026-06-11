@@ -197,7 +197,12 @@ describe("driveTick", () => {
       started.push(jobId);
       return getJob(jobId, db) as Job;
     });
-    await driveTick({ db, fetchIssues: vi.fn(async () => []), runJob } as never);
+    await driveTick({
+      db,
+      fetchIssues: vi.fn(async () => []),
+      runJob,
+      credentialProbe: async () => {},
+    } as never);
     expect(started).toContain(queued.id);
   });
 
@@ -345,6 +350,7 @@ describe("driveTick model/agent override (issue #101)", () => {
         db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, id)).run();
         return db.select().from(jobs).where(eq(jobs.id, id)).get() as Job;
       }),
+      credentialProbe: async () => {},
     } as never);
 
     const enqueued = db
@@ -376,6 +382,7 @@ describe("driveTick model/agent override (issue #101)", () => {
         db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, id)).run();
         return db.select().from(jobs).where(eq(jobs.id, id)).get() as Job;
       }),
+      credentialProbe: async () => {},
     } as never);
 
     const enqueued = db
@@ -408,6 +415,7 @@ describe("driveTick model/agent override (issue #101)", () => {
         db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, id)).run();
         return db.select().from(jobs).where(eq(jobs.id, id)).get() as Job;
       }),
+      credentialProbe: async () => {},
     } as never);
 
     const enqueued = db
