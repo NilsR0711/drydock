@@ -17,8 +17,10 @@ import {
 import {
   activeReleaseRun,
   createReleaseRun,
+  getReleaseRun,
   type ReleaseRunSummary,
   recentReleaseRuns,
+  transitionReleaseRun,
 } from "@/lib/release/release-service";
 import { repoAutomation } from "@/lib/repos/automation";
 import { getSettings } from "@/lib/settings/service";
@@ -75,16 +77,33 @@ export async function publishReleaseAction(repoId: number): Promise<ReleaseRunSu
   // Manual runs are never deduped by trigger SHA, so guard here: a second
   // concurrent run (double submit, second tab, or a race with the auto sweep)
   // would cut a duplicate or empty release for the same PR window.
-  const active = activeReleaseRun(repo.id, db);
-  if (active) {
-    throw new Error(
-      `A release run is already in progress for this repo (run ${active.id}, ${active.status}).`,
+  // Guard and insert in one transaction so two concurrent submits cannot both
+  // pass the check and both create a run (better-sqlite3 transactions are
+  // synchronous, so no second statement can interleave).
+  const run = db.transaction(() => {
+    const active = activeReleaseRun(repo.id, db);
+    if (active) {
+      throw new Error(
+        `A release run is already in progress for this repo (run ${active.id}, ${active.status}).`,
+      );
+    }
+    return createReleaseRun({ repoId: repo.id, mode: "manual" }, db);
+  });
+  try {
+    await withReleaseEvaluator({ provider, command, model }, (generate) =>
+      publishRelease(run.id, { repo, forge, db, generate }),
     );
+  } catch (err) {
+    // A failure before the pipeline ever ran would leave the run in
+    // `detected` — which activeReleaseRun treats as in flight, permanently
+    // blocking manual publishes for this repo. Park it as a retryable error.
+    const current = getReleaseRun(run.id, db);
+    if (current?.status === "detected") {
+      const message = err instanceof Error ? err.message : String(err);
+      transitionReleaseRun(run.id, "error", { errorMessage: message.slice(0, 500) }, db);
+    }
+    throw err;
   }
-  const run = createReleaseRun({ repoId: repo.id, mode: "manual" }, db);
-  await withReleaseEvaluator({ provider, command, model }, (generate) =>
-    publishRelease(run.id, { repo, forge, db, generate }),
-  );
   revalidatePath(`/repos/${repoId}`);
   return recentReleaseRuns(repo.id, db);
 }

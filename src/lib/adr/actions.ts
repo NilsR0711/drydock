@@ -41,11 +41,12 @@ export async function rejectAdrAction(id: number, comment: string) {
   // store it inline so the reviewer keeps context. Strip any prior suffix
   // first (e.g. approved → rejected again) so suffixes never accumulate and
   // the original title stays recoverable.
-  if (comment.trim()) {
+  const trimmed = comment.trim();
+  if (trimmed) {
     const at = row.title.indexOf(REJECTED_SUFFIX);
     const baseTitle = at === -1 ? row.title : row.title.slice(0, at);
     db.update(adrs)
-      .set({ title: `${baseTitle}${REJECTED_SUFFIX}${comment.slice(0, 200)}` })
+      .set({ title: `${baseTitle}${REJECTED_SUFFIX}${trimmed.slice(0, 200)}` })
       .where(eq(adrs.id, id))
       .run();
   }

@@ -61,7 +61,13 @@ export function abortJob(jobId: number, graceMs = DEFAULT_ABORT_GRACE_MS): boole
 export function reconcileExternalAborts(db: DB = getDb()): number[] {
   const killed: number[] = [];
   for (const jobId of [...abortHandles.keys()]) {
-    if (getJob(jobId, db)?.status === "aborted" && abortJob(jobId)) killed.push(jobId);
+    // Isolate per-handle failures: one throwing abort callback must not stop
+    // the reconciliation of the remaining externally-aborted jobs.
+    try {
+      if (getJob(jobId, db)?.status === "aborted" && abortJob(jobId)) killed.push(jobId);
+    } catch (err) {
+      logError(`[orchestrator] external-abort kill failed for job ${jobId}`, err);
+    }
   }
   return killed;
 }

@@ -209,6 +209,10 @@ export async function bulkQueueIssues(
   for (const number of issueNumbers) {
     await gh.addLabels(number, [repo.queueLabel]);
     setQueueLabelLocal(repoId, number, repo.queueLabel, true, db);
+    // Bulk queueing uses the repo defaults: clear any stale per-issue override
+    // left by an earlier single-issue queue, mirroring queueIssue's contract
+    // that overrides always reflect the latest queue operation.
+    setIssueOverrides(repoId, number, {}, db);
   }
   return listIssues(repoId, db);
 }

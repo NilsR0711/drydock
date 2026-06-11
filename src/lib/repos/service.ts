@@ -111,16 +111,21 @@ export function updateRepo(id: number, input: Partial<RepoInput>, db: DB = getDb
  * finish the repo's jobs first, then remove it.
  */
 export function removeRepo(id: number, db: DB = getDb()): void {
-  const live = db
-    .select({ id: jobs.id })
-    .from(jobs)
-    .where(and(eq(jobs.repoId, id), notInArray(jobs.status, [...TERMINAL_STATES])))
-    .all();
-  if (live.length > 0) {
-    throw new Error(
-      `Cannot remove this repository: ${live.length} job(s) are still active. ` +
-        "Abort or finish them first.",
-    );
-  }
-  db.delete(repos).where(eq(repos.id, id)).run();
+  // Guard and delete in one transaction: better-sqlite3 transactions are
+  // synchronous, so a job enqueued between the check and the delete cannot
+  // interleave and be cascade-deleted with the repo.
+  db.transaction(() => {
+    const live = db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(and(eq(jobs.repoId, id), notInArray(jobs.status, [...TERMINAL_STATES])))
+      .all();
+    if (live.length > 0) {
+      throw new Error(
+        `Cannot remove this repository: ${live.length} job(s) are still active. ` +
+          "Abort or finish them first.",
+      );
+    }
+    db.delete(repos).where(eq(repos.id, id)).run();
+  });
 }
