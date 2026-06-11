@@ -123,8 +123,12 @@ export function RepoWebhookPanel({ repo }: { repo: Repo }) {
         Opt-in. Polling stays on as the default and continues unchanged whether or not webhooks are
         configured — the two paths share the same idempotent sync, so a change is never
         double-processed. Point a {isGitlab ? "GitLab" : "GitHub"} webhook for{" "}
-        <em>{isGitlab ? "issues and comments" : "Issues and Issue comments"}</em> at the payload URL
-        above with{" "}
+        <em>
+          {isGitlab
+            ? "issues, comments and pipelines"
+            : "Issues, Issue comments, Check suites, Check runs, Pull request reviews and Pull request review comments"}
+        </em>{" "}
+        at the payload URL above with{" "}
         {isGitlab ? (
           <>
             this secret as the <code className="font-mono">Secret token</code>
@@ -134,8 +138,11 @@ export function RepoWebhookPanel({ repo }: { repo: Repo }) {
             this secret and content type <code className="font-mono">application/json</code>
           </>
         )}
-        . Drydock binds <code className="font-mono">127.0.0.1</code>, so expose the URL through a
-        tunnel or forwarder (e.g. <code className="font-mono">cloudflared</code>,{" "}
+        . Issue events drive the sync. Finished check{isGitlab ? " (pipeline)" : ""} events wake the
+        CI babysitter, and review events trigger the review-feedback sweep, so merges and feedback
+        land within seconds instead of at the next poll. Drydock binds{" "}
+        <code className="font-mono">127.0.0.1</code>, so expose the URL through a tunnel or
+        forwarder (e.g. <code className="font-mono">cloudflared</code>,{" "}
         <code className="font-mono">ngrok</code>) to receive deliveries. Each delivery is{" "}
         {isGitlab ? "token-verified" : "HMAC-SHA256 signature-verified"}; invalid or unsigned
         payloads are rejected.

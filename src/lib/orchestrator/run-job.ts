@@ -28,6 +28,7 @@ import { ciBabysitter, type ResumeOutcome, resumeFailureReason } from "./ci-baby
 import { getJob, recordEvent, transitionJob } from "./jobs";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
 import { runPrAuditPass } from "./pr-audit-driver";
+import { nudgeAwareSleep } from "./pr-nudge";
 import { clearProviderLimit, latchProviderLimit, limitAutoWaitEnabled } from "./provider-limit";
 import { InvalidTransitionError } from "./state-machine";
 import {
@@ -322,6 +323,16 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         // Review settle gate (issue #159): hold the merge after CI goes green
         // so late bot/human reviews can land first. 0 merges immediately.
         mergeGateMs: repo.mergeGateMinutes * 60_000,
+        // Webhook nudge (issue #180): a verified check_suite/check_run (or
+        // pipeline) delivery wakes this sleep so the next poll — and with it
+        // the merge gate — advances within seconds instead of at the poll
+        // interval. Without a webhook the timeout is just a normal poll.
+        sleep: nudgeAwareSleep({
+          repoId: repo.id,
+          prNumber,
+          onNudge: (reason) =>
+            recordEvent(job.id, "status", { reason: `woken by webhook: ${reason}`, prNumber }, db),
+        }),
         // CI fixes run in the job's worktree and are committed + pushed there;
         // resuming in repo.path edited the operator's checkout and could never
         // move the PR head.

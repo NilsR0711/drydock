@@ -1,7 +1,13 @@
 import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/db/queries";
-import { classifyWebhookEvent, verifyWebhookSignature } from "@/lib/forge/webhook";
+import {
+  classifyWebhookEvent,
+  extractWebhookNudge,
+  verifyWebhookSignature,
+} from "@/lib/forge/webhook";
 import { triggerWebhookSync } from "@/lib/forge/webhook-sync";
+import { nudgePrWaiters } from "@/lib/orchestrator/pr-nudge";
+import { triggerReviewFeedbackSweep } from "@/lib/orchestrator/review-feedback-driver";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +19,9 @@ export const dynamic = "force-dynamic";
  * (404, so the endpoint reveals nothing about unconfigured repos) → verify the
  * delivery against the repo's platform (GitHub HMAC signature / GitLab token)
  * → acknowledge the setup ping → schedule a debounced, targeted sync for issue
- * events. Verification reads the raw body, so the signature covers exactly what
- * was sent.
+ * events, wake the CI babysitter for finished check events, and trigger the
+ * review-feedback sweep for new reviews (issue #180). Verification reads the
+ * raw body, so the signature covers exactly what was sent.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ repoId: string }> }) {
   const { repoId } = await ctx.params;
@@ -47,6 +54,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ repoId: st
 
   if (kind === "ping") return new Response("pong", { status: 200 });
   if (kind === "issue") triggerWebhookSync(id);
+
+  // Poll-waiter nudges (issue #180): a finished check suite/run (or pipeline)
+  // wakes the CI babysitter so the next poll — and the merge settle gate —
+  // advances within seconds; a new review or review comment triggers the
+  // debounced review-feedback sweep instead of waiting for the next driver
+  // tick. Both are latency-only: polling stays the untouched fallback. A
+  // GitLab MR note classifies as "issue" *and* nudges the review sweep.
+  const nudge = extractWebhookNudge(platform, eventHeader, rawBody);
+  if (nudge?.kind === "checks") nudgePrWaiters(id, nudge.prNumbers, `${eventHeader} finished`);
+  if (nudge?.kind === "review") triggerReviewFeedbackSweep(id);
 
   // 202: accepted for processing. Unrelated events fall through as a no-op.
   return new Response(null, { status: 202 });

@@ -1,10 +1,18 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import type { Job, Repo } from "@/lib/db/schema";
 import type { ForgeClient, ReviewThread } from "@/lib/forge/types";
 import { createJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { latchProviderLimit } from "@/lib/orchestrator/provider-limit";
-import { buildAgentApply, driveReviewFeedback } from "@/lib/orchestrator/review-feedback-driver";
+import {
+  __pendingReviewSweepCount,
+  __setReviewSweepRunner,
+  buildAgentApply,
+  driveReviewFeedback,
+  REVIEW_SWEEP_DEBOUNCE_MS,
+  runReviewFeedbackSweep,
+  triggerReviewFeedbackSweep,
+} from "@/lib/orchestrator/review-feedback-driver";
 import { addRepo } from "@/lib/repos/service";
 
 let db: DB;
@@ -101,6 +109,91 @@ describe("driveReviewFeedback — selection", () => {
       driveReviewFeedback({ db, forgeFor: () => forgeStub(true), processJob }),
     ).resolves.toBeUndefined();
     expect(processJob).toHaveBeenCalledTimes(2);
+  });
+
+  it("limits the sweep to one repo when repoId is given (issue #180)", async () => {
+    const r1 = addRepo({ path: "/r1", name: "r1", autoReviewFeedback: true }, db);
+    const r2 = addRepo({ path: "/r2", name: "r2", autoReviewFeedback: true }, db);
+    jobWithPr(r1, 1, 5);
+    jobWithPr(r2, 2, 6);
+    const processJob = vi.fn<(repo: Repo, job: Job, forge: ForgeClient) => Promise<void>>(
+      async () => undefined,
+    );
+    await driveReviewFeedback({ db, repoId: r2.id, forgeFor: () => forgeStub(true), processJob });
+    expect(processJob).toHaveBeenCalledOnce();
+    expect(processJob.mock.calls[0]?.[0]).toMatchObject({ id: r2.id });
+  });
+});
+
+describe("runReviewFeedbackSweep — serialization (issue #180)", () => {
+  it("never overlaps two sweeps", async () => {
+    const repo = addRepo({ path: "/r", name: "r", autoReviewFeedback: true }, db);
+    jobWithPr(repo, 1, 5);
+    let active = 0;
+    let maxActive = 0;
+    const processJob = vi.fn(async () => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((r) => setTimeout(r, 10));
+      active--;
+    });
+    const deps = { db, forgeFor: () => forgeStub(true), processJob };
+    await Promise.all([runReviewFeedbackSweep(deps), runReviewFeedbackSweep(deps)]);
+    expect(processJob).toHaveBeenCalledTimes(2);
+    expect(maxActive).toBe(1);
+  });
+
+  it("keeps the chain alive after a sweep rejects", async () => {
+    // A broken DB makes the sweep itself reject (listRepos throws); the
+    // rejection must reach this caller without poisoning the shared chain.
+    await expect(runReviewFeedbackSweep({ db: {} as DB })).rejects.toThrow();
+    const repo = addRepo({ path: "/r", name: "r", autoReviewFeedback: true }, db);
+    jobWithPr(repo, 1, 5);
+    const processJob = vi.fn(async () => undefined);
+    await runReviewFeedbackSweep({ db, forgeFor: () => forgeStub(true), processJob });
+    expect(processJob).toHaveBeenCalledOnce();
+  });
+});
+
+describe("triggerReviewFeedbackSweep (issue #180)", () => {
+  let runner: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    runner = vi.fn(async () => {});
+    __setReviewSweepRunner(runner);
+  });
+  afterEach(() => {
+    __setReviewSweepRunner(null);
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
+  it("coalesces a burst of triggers for one repo into a single sweep", async () => {
+    triggerReviewFeedbackSweep(1);
+    triggerReviewFeedbackSweep(1);
+    triggerReviewFeedbackSweep(1);
+    expect(__pendingReviewSweepCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(REVIEW_SWEEP_DEBOUNCE_MS);
+    expect(runner).toHaveBeenCalledOnce();
+    expect(runner).toHaveBeenCalledWith(1);
+    expect(__pendingReviewSweepCount()).toBe(0);
+  });
+
+  it("keeps distinct repos independent", async () => {
+    triggerReviewFeedbackSweep(1);
+    triggerReviewFeedbackSweep(2);
+    expect(__pendingReviewSweepCount()).toBe(2);
+    await vi.advanceTimersByTimeAsync(REVIEW_SWEEP_DEBOUNCE_MS);
+    expect(runner).toHaveBeenCalledTimes(2);
+    expect(runner).toHaveBeenCalledWith(1);
+    expect(runner).toHaveBeenCalledWith(2);
+  });
+
+  it("isolates and logs a failing sweep instead of throwing", async () => {
+    runner.mockRejectedValueOnce(new Error("boom"));
+    triggerReviewFeedbackSweep(1);
+    await vi.advanceTimersByTimeAsync(REVIEW_SWEEP_DEBOUNCE_MS);
+    expect(runner).toHaveBeenCalledOnce();
   });
 });
 
