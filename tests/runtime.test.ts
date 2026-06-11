@@ -112,6 +112,15 @@ describe("readInstanceLock", () => {
     expect(readInstanceLock()).toEqual({ held: false, pid: null, self: false });
   });
 
+  it("treats a non-positive or fractional pid as malformed, never probing it", () => {
+    // pid 0 would signal our own process group in process.kill(pid, 0) and
+    // misreport a corrupt lock file as held; negative pids address groups too.
+    for (const pid of [0, -1, 3.14]) {
+      writeFileSync(join(home, "instance.lock"), JSON.stringify({ pid, ts: 1 }));
+      expect(readInstanceLock()).toEqual({ held: false, pid: null, self: false });
+    }
+  });
+
   it("never modifies the lock file, even a stale or corrupt one", () => {
     const path = join(home, "instance.lock");
     writeFileSync(path, JSON.stringify({ pid: 999999999, ts: 1 }));

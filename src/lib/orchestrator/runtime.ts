@@ -77,7 +77,11 @@ export function readInstanceLock(): InstanceLockInfo {
   let pid: number | null = null;
   try {
     const parsed = JSON.parse(readFileSync(lockPath(), "utf8")) as { pid?: unknown };
-    if (typeof parsed.pid === "number") pid = parsed.pid;
+    // Only positive integers are valid per the lock-file contract. pid 0 would
+    // make pidAlive() signal our own process group and misreport a corrupt
+    // lock as held; negative pids address process groups as well.
+    const raw = parsed.pid;
+    if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) pid = raw;
   } catch {
     // missing or corrupt lock file — no provable live holder
   }
