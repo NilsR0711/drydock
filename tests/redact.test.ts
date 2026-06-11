@@ -91,6 +91,12 @@ describe("redactSecrets", () => {
     expect(redactSecrets("sk-short and sk-ant-short stay")).toBe("sk-short and sk-ant-short stay");
   });
 
+  it("redacts OpenRouter API keys (issue #169)", () => {
+    const key = `sk-or-v1-${"0123456789abcdef".repeat(4)}`;
+    expect(redactSecrets(`OPENROUTER_API_KEY=${key}`)).toBe("OPENROUTER_API_KEY=[REDACTED]");
+    expect(redactSecrets(`Bearer ${key}`)).toBe("Bearer [REDACTED]");
+  });
+
   it("redacts Telegram bot tokens, including inside a Bot API URL", () => {
     const token = `123456789:AAH${"x".repeat(32)}`;
     expect(redactSecrets(`https://api.telegram.org/bot${token}/sendMessage`)).toBe(
