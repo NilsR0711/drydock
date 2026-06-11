@@ -17,9 +17,6 @@ on:
         description: "Git ref (tag) to publish"
         type: string
         required: true
-    secrets:
-      NPM_TOKEN:
-        required: true
 
 concurrency:
   group: npm-publish
@@ -37,8 +34,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Mint an OIDC token so `npm publish --provenance` can attest the build to
-      # this workflow run.
+      # Mint the OIDC token that npm trusted publishing exchanges for a
+      # short-lived registry credential (and that also signs provenance). A
+      # reusable-workflow caller must grant this too — see release-please.yml.
       id-token: write
     steps:
       - name: Checkout
@@ -56,12 +54,16 @@ jobs:
           cache: pnpm
           registry-url: "https://registry.npmjs.org"
 
+      # Trusted publishing (OIDC, tokenless) requires npm >= 11.5.1; the npm that
+      # ships with Node 22 is 10.x, so upgrade before publishing.
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       # `npm publish` runs the `prepublishOnly` gate (tests + standalone build)
-      # before uploading, so a broken build never ships.
+      # before uploading, so a broken build never ships. Auth is via OIDC trusted
+      # publishing — no token — and provenance is attached automatically.
       - name: Publish
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public

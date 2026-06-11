@@ -36,19 +36,21 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   # When a release is cut, reuse the single publish definition (npm-publish.yml)
-  # to push the tag to npm with provenance. Manual/first publishes call the same
-  # workflow via workflow_dispatch.
+  # to push the tag to npm. Auth is via OIDC trusted publishing (tokenless), so
+  # no secrets are forwarded. Manual/first publishes call the same workflow via
+  # workflow_dispatch. npm validates the *calling* workflow for reusable
+  # workflows, so both release-please.yml and npm-publish.yml are registered as
+  # trusted publishers for the package on npmjs.
   publish:
     name: Publish to npm
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
-    # The called workflow needs id-token: write for provenance; a reusable-
-    # workflow caller must grant it here (capped by this workflow's token),
-    # otherwise the run fails at startup validation.
+    # The called workflow needs id-token: write to mint the OIDC token; a
+    # reusable-workflow caller must grant it here too (capped by this workflow's
+    # token), otherwise the run fails at startup validation.
     permissions:
       contents: read
       id-token: write
     uses: ./.github/workflows/npm-publish.yml
     with:
       ref: ${{ needs.release-please.outputs.tag_name }}
-    secrets: inherit
