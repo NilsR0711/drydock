@@ -10,6 +10,7 @@ import {
   type IssueCommentRef,
   type IssueDetail,
   type PrCheck,
+  type PrMergeState,
 } from "./types";
 import { assertSafeForgeUrl, privateForgeAllowedFromEnv } from "./url-guard";
 
@@ -439,6 +440,45 @@ export class GitlabForge implements ForgeClient {
       },
     });
     return z.object({ iid: z.number() }).parse(safeJson(res.body, {})).iid;
+  }
+
+  /**
+   * Delete a remote branch (issue #181). Idempotent: a branch that is already
+   * gone (404) counts as success, so the janitor can safely retry after lost
+   * bookkeeping or a manual deletion.
+   */
+  async deleteBranch(branch: string): Promise<void> {
+    const res = await this.request("DELETE", `/repository/branches/${encodeURIComponent(branch)}`);
+    if (!res.ok && res.status !== 404) {
+      throw new ForgeError(errorMessage(res) || "GitLab branch delete failed");
+    }
+  }
+
+  /**
+   * The MR's merge readiness relative to its target branch (issue #181).
+   * Conflicts win over everything; `need_rebase` is conflict-free by
+   * definition (a conflicting MR reports `conflict`), so it is safe to rebase.
+   * Unsettled statuses (`checking`, `unchecked`, …) map to `unknown` and the
+   * caller re-probes on a later sweep.
+   */
+  async prMergeState(prNumber: number): Promise<PrMergeState> {
+    const res = await this.mutate("GET", `/merge_requests/${prNumber}`);
+    const parsed = z
+      .object({
+        has_conflicts: z.boolean().default(false),
+        detailed_merge_status: z.string().nullish(),
+      })
+      .parse(safeJson(res.body, {}));
+    if (parsed.has_conflicts || parsed.detailed_merge_status === "conflict") return "conflicted";
+    if (parsed.detailed_merge_status === "need_rebase") return "behind";
+    if (parsed.detailed_merge_status === "mergeable") return "clean";
+    return "unknown";
+  }
+
+  /** Rebase the MR onto its target branch (issue #181). Async on GitLab's side:
+   * the 202 only enqueues the rebase; a later sweep observes the result. */
+  async updatePrBranch(prNumber: number): Promise<void> {
+    await this.mutate("PUT", `/merge_requests/${prNumber}/rebase`);
   }
 
   /** Latest pipeline id for an MR via `head_pipeline`, or null when none exists yet. */
