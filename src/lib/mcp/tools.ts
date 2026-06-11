@@ -209,7 +209,8 @@ export const tools: ToolDef[] = [
   },
   {
     name: "requeue_job",
-    description: "Put a needs_human or interrupted job back in the queue for another attempt.",
+    description:
+      "Put a needs_human, interrupted, or waiting_limit job back in the queue for another attempt.",
     inputSchema: jobIdShape,
     handler: (args, { db }) => {
       const { jobId } = parseArgs(jobIdShape, args);

@@ -30,3 +30,4 @@
 - [027](adr/027-post-pr-verification.md) — Opt-in post-PR verification pass (read-only diff-vs-issue check)
 - [028](adr/028-release-management.md) — Opt-in release management (evaluate → version → publish, gated & idempotent)
 - [029](adr/029-webhook-issue-sync.md) — Opt-in webhook-driven issue sync (per-repo secret, signature-verified, debounced, polling fallback)
+- [030](adr/030-provider-limit-auto-wait.md) — Provider usage-limit auto-wait (`waiting_limit` job state, persistent latch, session-continuity resume)

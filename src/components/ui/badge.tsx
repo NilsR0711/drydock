@@ -18,6 +18,7 @@ export const STATUS_TONE: Record<string, Tone> = {
   ci_running: "warning",
   ci_failed: "destructive",
   retrying: "warning",
+  waiting_limit: "warning",
   merged: "success",
   needs_human: "destructive",
   aborted: "neutral",
