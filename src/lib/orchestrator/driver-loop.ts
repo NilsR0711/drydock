@@ -17,6 +17,7 @@ import { logError } from "@/lib/log/logger";
 import {
   type EdgeState,
   notifyCostLimitEdge,
+  notifyCredentialEdge,
   notifyProviderLimitEdge,
 } from "@/lib/notify/lifecycle";
 import { shouldSyncCatalog, syncOpenRouterCatalog } from "@/lib/openrouter/catalog";
@@ -24,6 +25,8 @@ import { resolveOpenRouterApiKey } from "@/lib/openrouter/config";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
+import { getCredentialFailures } from "./credential-status";
+import { runCredentialProbeSweep, shouldRunCredentialProbe } from "./credential-watchdog";
 import { driveDeploymentHealing } from "./deployment-healing-driver";
 import { listJobsByStatus, recordEvent, transitionJob } from "./jobs";
 import { agentLimitBlocked } from "./provider-limit";
@@ -47,6 +50,8 @@ import { buildSubtaskGenerator, decomposeRepo } from "./subtask-driver";
 
 /** Latch so the daily cost-limit notification fires once per breach, not per tick. */
 const costLimitState: EdgeState = { active: false };
+/** Latch so the credential-watchdog notification fires once per outage (issue #177). */
+const credentialEdgeState: EdgeState = { active: false };
 /** Latches so the per-agent limit enter/exit notifications fire once per edge (issues #166/#167). */
 const providerLimitStates: Record<AgentId, EdgeState> = {
   claude: { active: false },
@@ -72,6 +77,8 @@ export interface DriveTickDeps {
   releaseManagement?: (db: DB) => Promise<void>;
   /** OpenRouter catalog sync entry point (issue #169, injectable for tests). */
   openrouterCatalogSync?: (db: DB) => Promise<unknown>;
+  /** Credential watchdog probe round (issue #177, injectable for tests). */
+  credentialProbe?: (db: DB) => Promise<unknown>;
 }
 
 /**
@@ -342,6 +349,23 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   // Edge-triggered cost-limit notification (issue #22): fire once when the
   // daily budget gate first closes, not on every poll tick.
   void notifyCostLimitEdge(jobsAllowed(db).reason === "cost_limit", costLimitState, db);
+
+  // Credential watchdog (issue #177): notify on the failed↔healthy edge and
+  // kick a probe round when one is due (on startup, then every interval).
+  // Fire-and-forget with an in-flight guard inside the sweep — a slow `gh`
+  // or GitLab probe must never block this tick's job claims.
+  void notifyCredentialEdge(getCredentialFailures(db), credentialEdgeState, db);
+  try {
+    if (shouldRunCredentialProbe()) {
+      const credentialProbe =
+        deps.credentialProbe ?? ((d: DB) => runCredentialProbeSweep({ db: d }));
+      void Promise.resolve(credentialProbe(db)).catch((err) =>
+        logError("[driver] credential probe round failed", err),
+      );
+    }
+  } catch (err) {
+    logError("[driver] credential watchdog sweep failed", err);
+  }
 
   // Reclaim leases that lapsed while the process was alive (e.g. a worker
   // whose heartbeat stopped without crashing the process). Startup recovery

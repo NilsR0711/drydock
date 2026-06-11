@@ -29,6 +29,8 @@ function deps(started: number[], over: Record<string, unknown> = {}) {
       db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, jobId)).run();
       return db.select().from(jobs).where(eq(jobs.id, jobId)).get() as Job;
     }),
+    // Keep the credential watchdog (issue #177) from spawning real probes.
+    credentialProbe: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -124,7 +126,7 @@ describe("driveTick", () => {
       started.push(jobId);
       return getJob(jobId, db) as Job;
     });
-    await driveTick({ db, fetchIssues, runJob } as never);
+    await driveTick({ db, fetchIssues, runJob, credentialProbe: async () => {} } as never);
     const seqStarted = started.filter((id) => getJob(id, db)?.repoId === seqRepo);
     expect(seqStarted).toHaveLength(1);
   });
@@ -145,7 +147,7 @@ describe("driveTick", () => {
       started.push(jobId);
       return getJob(jobId, db) as Job;
     });
-    await driveTick({ db, fetchIssues, runJob } as never);
+    await driveTick({ db, fetchIssues, runJob, credentialProbe: async () => {} } as never);
     const parStarted = started.filter((id) => getJob(id, db)?.repoId === parRepo);
     expect(parStarted.length).toBeGreaterThanOrEqual(2);
   });

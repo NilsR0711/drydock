@@ -48,7 +48,7 @@ describe("driveTick rate-limit priority", () => {
       }),
     });
     expect(currentPriority()).toBe("high"); // default outside the sweep
-    await driveTick({ db, forgeFor: () => forge });
+    await driveTick({ db, forgeFor: () => forge, credentialProbe: async () => {} });
     expect(seen).toBe("low");
   });
 
@@ -63,7 +63,7 @@ describe("driveTick rate-limit priority", () => {
         return [];
       }),
     });
-    await driveTick({ db, forgeFor: () => forge });
+    await driveTick({ db, forgeFor: () => forge, credentialProbe: async () => {} });
     expect(calls).toEqual(["refresh", "list"]);
   });
 
@@ -73,6 +73,8 @@ describe("driveTick rate-limit priority", () => {
         throw new RateLimitError("reserve", "core", 30_000);
       }),
     });
-    await expect(driveTick({ db, forgeFor: () => forge })).resolves.toBeUndefined();
+    await expect(
+      driveTick({ db, forgeFor: () => forge, credentialProbe: async () => {} }),
+    ).resolves.toBeUndefined();
   });
 });

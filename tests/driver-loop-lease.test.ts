@@ -29,6 +29,7 @@ function baseDeps(over: Record<string, unknown> = {}) {
     fetchIssues: vi.fn(async () => []),
     reviewFeedback: vi.fn(async () => {}),
     deploymentHealing: vi.fn(async () => {}),
+    credentialProbe: vi.fn(async () => {}),
     ...over,
   };
 }
