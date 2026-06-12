@@ -47,12 +47,17 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
 
+      # No registry-url here on purpose: actions/setup-node would write an
+      # .npmrc with `_authToken=${NODE_AUTH_TOKEN}` and export a placeholder
+      # NODE_AUTH_TOKEN. npm treats that placeholder as a (bogus) credential and
+      # skips OIDC trusted publishing, failing the upload with E404. With no
+      # token set at all, npm >= 11.5.1 falls back to OIDC. The default registry
+      # is npmjs, and package.json pins publishConfig.access/provenance.
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: pnpm
-          registry-url: "https://registry.npmjs.org"
 
       # Trusted publishing (OIDC, tokenless) requires npm >= 11.5.1; the npm that
       # ships with Node 22 is 10.x, so upgrade before publishing.
