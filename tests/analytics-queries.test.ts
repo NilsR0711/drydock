@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { analyticsSummary } from "@/lib/db/analytics-queries";
+import { analyticsByDimension, analyticsSummary } from "@/lib/db/analytics-queries";
 import { createDb, type DB } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
 import { addRepo } from "@/lib/repos/service";
@@ -137,5 +137,134 @@ describe("analyticsSummary", () => {
     expect(empty.timeToMergeP90Sec).toBeNull();
     expect(empty.costPerMergedUsd).toBeNull();
     expect(empty.mergedPerDay).toBeNull();
+  });
+});
+
+describe("analyticsByDimension", () => {
+  let dimRepo: number;
+
+  beforeEach(() => {
+    dimRepo = addRepo({ path: "/tmp/d", name: "d" }, db).id;
+    db.insert(jobs)
+      .values([
+        // opus / claude / prompt v1: merged, ttm 100s, $0.10, 0 retries
+        {
+          repoId: dimRepo,
+          issueNumber: 1,
+          status: "merged",
+          model: "claude-opus-4-8",
+          agent: "claude",
+          implementPromptVersion: 1,
+          startedAt: D1,
+          finishedAt: D1 + 100,
+          costUsd: 0.1,
+          ciRetryCount: 0,
+          createdAt: D1,
+        },
+        // opus / claude / prompt v1: merged, ttm 300s, $0.20, 2 retries
+        {
+          repoId: dimRepo,
+          issueNumber: 2,
+          status: "merged",
+          model: "claude-opus-4-8",
+          agent: "claude",
+          implementPromptVersion: 1,
+          startedAt: D1,
+          finishedAt: D1 + 300,
+          costUsd: 0.2,
+          ciRetryCount: 2,
+          createdAt: D1,
+        },
+        // sonnet / codex / prompt v2: completed but not merged, $0.05, 1 retry
+        {
+          repoId: dimRepo,
+          issueNumber: 3,
+          status: "needs_human",
+          model: "claude-sonnet-4-6",
+          agent: "codex",
+          implementPromptVersion: 2,
+          startedAt: D2,
+          finishedAt: D2 + 50,
+          costUsd: 0.05,
+          ciRetryCount: 1,
+          createdAt: D2,
+        },
+        // model unset / claude / default prompt: queued, not finished
+        {
+          repoId: dimRepo,
+          issueNumber: 4,
+          status: "queued",
+          model: null,
+          agent: "claude",
+          implementPromptVersion: null,
+          startedAt: null,
+          finishedAt: null,
+          costUsd: 0,
+          ciRetryCount: 0,
+          createdAt: D2,
+        },
+      ])
+      .run();
+  });
+
+  it("slices the KPIs by model, busiest slice first", () => {
+    const slices = analyticsByDimension("model", { repoId: dimRepo }, db);
+    expect(slices.map((s) => s.key)).toEqual(["claude-opus-4-8", "claude-sonnet-4-6", "unknown"]);
+
+    const opus = slices[0];
+    expect(opus).toMatchObject({ totalJobs: 2, completedJobs: 2, mergedJobs: 2 });
+    expect(opus?.mergeRate).toBeCloseTo(1);
+    expect(opus?.timeToMergeP50Sec).toBe(100);
+    expect(opus?.timeToMergeP90Sec).toBe(300);
+    expect(opus?.avgCiRetries).toBeCloseTo(1);
+    expect(opus?.totalCostUsd).toBeCloseTo(0.3);
+    expect(opus?.costPerMergedUsd).toBeCloseTo(0.15);
+  });
+
+  it("labels an unset model as 'unknown' with null efficiency metrics", () => {
+    const unknown = analyticsByDimension("model", { repoId: dimRepo }, db).find(
+      (s) => s.key === "unknown",
+    );
+    expect(unknown).toMatchObject({ totalJobs: 1, completedJobs: 0, mergedJobs: 0 });
+    expect(unknown?.mergeRate).toBe(0);
+    expect(unknown?.timeToMergeP50Sec).toBeNull();
+    expect(unknown?.costPerMergedUsd).toBeNull();
+  });
+
+  it("slices the KPIs by agent", () => {
+    const slices = analyticsByDimension("agent", { repoId: dimRepo }, db);
+    expect(slices.map((s) => s.key)).toEqual(["claude", "codex"]);
+    expect(slices.find((s) => s.key === "claude")).toMatchObject({
+      totalJobs: 3,
+      mergedJobs: 2,
+    });
+    expect(slices.find((s) => s.key === "codex")).toMatchObject({
+      totalJobs: 1,
+      mergedJobs: 0,
+    });
+  });
+
+  it("slices the KPIs by prompt version, labelling the code default", () => {
+    const slices = analyticsByDimension("promptVersion", { repoId: dimRepo }, db);
+    const keys = slices.map((s) => s.key);
+    expect(keys).toContain("v1");
+    expect(keys).toContain("v2");
+    expect(keys).toContain("default");
+    expect(slices.find((s) => s.key === "v1")).toMatchObject({ totalJobs: 2, mergedJobs: 2 });
+    expect(slices.find((s) => s.key === "default")).toMatchObject({ totalJobs: 1, mergedJobs: 0 });
+  });
+
+  it("honours the repo and date-range filters", () => {
+    // Scoped to dimRepo, so the top-level fixtures in other repos never leak in.
+    const all = analyticsByDimension("agent", { repoId: dimRepo }, db);
+    expect(all.reduce((n, s) => n + s.totalJobs, 0)).toBe(4);
+
+    // Only the two day-2 jobs were created at/after D2.
+    const recent = analyticsByDimension("agent", { repoId: dimRepo, since: D2 }, db);
+    expect(recent.reduce((n, s) => n + s.totalJobs, 0)).toBe(2);
+  });
+
+  it("returns an empty array when no jobs match", () => {
+    expect(analyticsByDimension("model", { repoId: dimRepo, since: D2 + 100_000 }, db)).toEqual([]);
   });
 });
