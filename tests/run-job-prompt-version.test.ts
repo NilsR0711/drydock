@@ -60,4 +60,32 @@ describe("runJob — implement prompt version recording (issue #178)", () => {
 
     expect(getJob(job.id, db)?.implementPromptVersion).toBe(2);
   });
+
+  it("preserves the version across a limit resume without re-resolving the prompt", async () => {
+    const repoId = addRepo({ path: "/repo", name: "acme" }, db).id;
+    const job = createJob({ repoId, issueNumber: 1 }, db);
+    // Simulate a job whose first fresh run recorded version 2 and then parked
+    // on a provider limit: the resume path must not touch implementPromptVersion.
+    db.update(jobs)
+      .set({ implementPromptVersion: 2, sessionId: "sess-old", limitKind: "usage_limit" })
+      .where(eq(jobs.id, job.id))
+      .run();
+
+    const resumeLimitSession = vi.fn(async (j: Job) => {
+      db.update(jobs).set({ status: "working" }).where(eq(jobs.id, j.id)).run();
+      return { exitCode: 0, sessionId: "sess-old", costUsd: 0.1, inputTokens: 1, outputTokens: 1 };
+    });
+    const runSession = vi.fn(async () => {
+      throw new Error("a fresh session must not run on a limit resume");
+    });
+
+    await runJob(
+      job.id,
+      baseDeps({ resumeLimitSession, runSession, commentIssue: vi.fn() }) as never,
+    );
+
+    expect(resumeLimitSession).toHaveBeenCalledTimes(1);
+    expect(runSession).not.toHaveBeenCalled();
+    expect(getJob(job.id, db)?.implementPromptVersion).toBe(2);
+  });
 });
