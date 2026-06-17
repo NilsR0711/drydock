@@ -14,7 +14,7 @@ import { logError } from "@/lib/log/logger";
 import type { NotificationEvent } from "@/lib/notify/events";
 import { dispatch } from "@/lib/notify/notifier";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
-import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
+import { renderTemplate, resolveTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
 import { agentInstructionsPromptSection } from "@/lib/repos/agent-instructions";
 import { getSettings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
@@ -400,7 +400,15 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // so the limit-resume path below skips it entirely — the resumed session
     // already carries all of this context.
     const runFreshSession = async (worktree: Worktree): Promise<AgentSessionResult> => {
-      let prompt = renderTemplate(resolveTemplateContent(repo.id, TEMPLATE_NAMES.main, db), {
+      // Record which revision of the implement prompt this run resolved (issue
+      // #178) so analytics can slice outcomes by prompt version. Null marks a
+      // run on the code-level default template.
+      const mainTemplate = resolveTemplate(repo.id, TEMPLATE_NAMES.main, db);
+      db.update(jobs)
+        .set({ implementPromptVersion: mainTemplate.version })
+        .where(eq(jobs.id, job.id))
+        .run();
+      let prompt = renderTemplate(mainTemplate.content, {
         ISSUE_NUM: job.issueNumber,
         BRANCH: worktree.branch,
         REPO_NAME: repo.name,
