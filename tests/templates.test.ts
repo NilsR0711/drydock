@@ -7,6 +7,7 @@ import {
   listVersions,
   MAX_VERSIONS,
   renderTemplate,
+  resolveTemplate,
   resolveTemplateContent,
   saveTemplate,
 } from "@/lib/prompts/templates";
@@ -46,6 +47,28 @@ describe("resolveTemplateContent", () => {
   it("returns the stored repo template when present", () => {
     saveTemplate({ repoId, name: TEMPLATE_NAMES.main, content: "custom $ISSUE_NUM" }, db);
     expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.main, db)).toBe("custom $ISSUE_NUM");
+  });
+});
+
+describe("resolveTemplate", () => {
+  it("returns the code default with a null version when no row exists", () => {
+    const resolved = resolveTemplate(repoId, TEMPLATE_NAMES.main, db);
+    expect(resolved.content).toBe(DEFAULT_TEMPLATES.default);
+    expect(resolved.version).toBeNull();
+  });
+
+  it("returns the stored content and its version when present", () => {
+    saveTemplate({ repoId, name: TEMPLATE_NAMES.main, content: "first" }, db);
+    saveTemplate({ repoId, name: TEMPLATE_NAMES.main, content: "second" }, db);
+    const resolved = resolveTemplate(repoId, TEMPLATE_NAMES.main, db);
+    expect(resolved.content).toBe("second");
+    expect(resolved.version).toBe(2);
+  });
+
+  it("falls back to an empty string and null version for an unknown name", () => {
+    const resolved = resolveTemplate(repoId, "nonexistent", db);
+    expect(resolved.content).toBe("");
+    expect(resolved.version).toBeNull();
   });
 });
 

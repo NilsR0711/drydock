@@ -30,11 +30,28 @@ export function getActiveTemplate(
     .get();
 }
 
+/** A resolved template: its content, and the repo version it came from. */
+export interface ResolvedTemplate {
+  content: string;
+  /** Saved repo version used, or null when the code-level default was resolved. */
+  version: number | null;
+}
+
+/**
+ * Resolve a named template to the content that will run plus the version it
+ * came from. A saved repo template wins and carries its version; otherwise the
+ * code-level default is used and the version is null. Lets callers record the
+ * exact prompt revision a job ran with (issue #178).
+ */
+export function resolveTemplate(repoId: number, name: string, db: DB = getDb()): ResolvedTemplate {
+  const active = getActiveTemplate(repoId, name, db);
+  if (active) return { content: active.content, version: active.version };
+  return { content: DEFAULT_TEMPLATES[name as TemplateName] ?? "", version: null };
+}
+
 /** Active repo template content, or the code-level default for that name. */
 export function resolveTemplateContent(repoId: number, name: string, db: DB = getDb()): string {
-  return (
-    getActiveTemplate(repoId, name, db)?.content ?? DEFAULT_TEMPLATES[name as TemplateName] ?? ""
-  );
+  return resolveTemplate(repoId, name, db).content;
 }
 
 /**

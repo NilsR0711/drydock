@@ -152,6 +152,11 @@ export const jobs = sqliteTable(
     startedAt: integer("started_at"),
     finishedAt: integer("finished_at"),
     model: text("model"),
+    // Resolved version of the repo's "default" (implement) prompt template at
+    // spawn time (issue #178). Null when the run used the code-level default
+    // template (no saved repo version). Lets analytics slice outcomes by the
+    // exact prompt revision a job ran with, alongside model and agent.
+    implementPromptVersion: integer("implement_prompt_version"),
     maxTurns: integer("max_turns").notNull().default(40),
     totalInputTokens: integer("total_input_tokens").notNull().default(0),
     totalOutputTokens: integer("total_output_tokens").notNull().default(0),
