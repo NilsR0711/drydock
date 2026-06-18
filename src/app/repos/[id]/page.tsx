@@ -156,7 +156,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
 
       <div className="flex flex-col gap-4">
         <Section
-          icon={ListChecks}
+          icon={<ListChecks className="h-4 w-4" />}
           title="Issues"
           description="The work queue for this repository — drag to reorder, filter to focus."
           tone="primary"
@@ -173,7 +173,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
         </Section>
 
         <Section
-          icon={Cpu}
+          icon={<Cpu className="h-4 w-4" />}
           title="Automation"
           description="What Drydock is allowed to do here, grouped by stage. All opt-in."
           defaultOpen={false}
@@ -191,7 +191,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
         </Section>
 
         <Section
-          icon={FileText}
+          icon={<FileText className="h-4 w-4" />}
           title="Prompts"
           description="Instructions handed to the agent for this repo — use the global standard or override per stage."
           defaultOpen={false}
@@ -201,7 +201,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
         </Section>
 
         <Section
-          icon={ChartNoAxesColumn}
+          icon={<ChartNoAxesColumn className="h-4 w-4" />}
           title="Activity & costs"
           description="Live work, recent jobs, and spend against the daily limit."
         >
@@ -217,7 +217,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
         </Section>
 
         <Section
-          icon={Tag}
+          icon={<Tag className="h-4 w-4" />}
           title="Releases"
           description="Published releases, CI healing, deployments, and ADRs."
           defaultOpen={false}
