@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { PageHeader } from "@/components/page-header";
+import { ResumeWithInstructions } from "@/components/resume-with-instructions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -122,7 +123,7 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
                     {job.errorMessage ?? "No error message recorded."}
                   </p>
                 </div>
-                <div className="flex shrink-0 gap-2">
+                <div className="flex shrink-0 flex-wrap gap-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -147,6 +148,14 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
                     <Ban className="h-3.5 w-3.5" /> Abort
                   </Button>
                 </div>
+              </div>
+              {/* Guided resume (issue #257): a full-width row so the textarea has
+                  room. Continues the job on its branch with the typed guidance. */}
+              <div className="border-border/60 border-t px-4 py-3">
+                <ResumeWithInstructions
+                  jobId={job.id}
+                  label={`${job.repoName} #${job.issueNumber}`}
+                />
               </div>
             </Card>
           ))}

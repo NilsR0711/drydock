@@ -157,6 +157,37 @@ export class WorktreeManager {
   }
 
   /**
+   * Re-check out a parked job's preserved branch to resume its prior work (issue
+   * #257). Unlike `prepare` (fresh branch off the default) this restores the
+   * branch the job pushed when it parked (issue #249) so the resumed run builds
+   * on the agent's existing commits.
+   *
+   * The parked attempt may have left its worktree behind (issue #249 skips the
+   * finally cleanup) with the branch still checked out, so the stale worktree +
+   * local branch ref are cleared first — otherwise `worktree add` dies on
+   * "branch already checked out"/"already exists". The branch is then fetched
+   * and force-created from `origin/<branch>` at the canonical job path, making
+   * the restore robust whether or not the local worktree survived.
+   */
+  async prepareResume(repo: Repo, jobId: number, branch: string): Promise<Worktree> {
+    const path = join(repoWorktreesDir(repo.name), `job-${jobId}`);
+    const base = await this.withRepoLock(repo.path, async () => {
+      await this.git(["-C", repo.path, "worktree", "remove", "--force", path]).catch(
+        () => undefined,
+      );
+      rmSync(path, { recursive: true, force: true });
+      await this.git(["-C", repo.path, "worktree", "prune"]).catch(() => undefined);
+      // Drop the local ref so `worktree add -B` re-creates it from origin; the
+      // worktree remove above freed it, so this no longer fails on a checkout.
+      await this.git(["-C", repo.path, "branch", "-D", branch]).catch(() => undefined);
+      await this.git(["-C", repo.path, "fetch", "origin", branch]);
+      await this.git(["-C", repo.path, "worktree", "add", "-B", branch, path, `origin/${branch}`]);
+      return this.resolveBase(repo.path, branch);
+    });
+    return { path, branch, base };
+  }
+
+  /**
    * Add a worktree on a *new* branch cut from the repo's default branch (issue
    * #20). Used to open a follow-up fix PR for a failed post-merge deployment,
    * which must start from the merged mainline rather than a job branch.

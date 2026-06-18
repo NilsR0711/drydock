@@ -72,6 +72,7 @@ describe("MCP tool registry", () => {
         "list_repos",
         "remove_from_queue",
         "requeue_job",
+        "resume_job_with_instruction",
         "run_pr_audit",
         "set_drain_mode",
         "set_issue_labels",
@@ -247,6 +248,34 @@ describe("MCP tool registry", () => {
     };
     expect(result.status).toBe("queued");
     expect(result.model).toBe("claude-sonnet-4-5");
+  });
+
+  it("resume_job_with_instruction requeues a needs_human job carrying the instruction", async () => {
+    const repoId = seedRepo(db);
+    const job = db
+      .insert(jobs)
+      .values({ repoId, issueNumber: 9, status: "needs_human", agent: "claude", sessionId: "s1" })
+      .returning()
+      .get();
+    const result = (await run(
+      "resume_job_with_instruction",
+      { jobId: job.id, instruction: "use the existing helper" },
+      db,
+    )) as { status: string; humanInstruction: string };
+    expect(result.status).toBe("queued");
+    expect(result.humanInstruction).toBe("use the existing helper");
+  });
+
+  it("resume_job_with_instruction rejects an empty instruction at the schema", async () => {
+    const repoId = seedRepo(db);
+    const job = db
+      .insert(jobs)
+      .values({ repoId, issueNumber: 10, status: "needs_human", agent: "claude" })
+      .returning()
+      .get();
+    await expect(
+      run("resume_job_with_instruction", { jobId: job.id, instruction: "" }, db),
+    ).rejects.toThrow();
   });
 
   it("abort_job transitions a queued job to aborted", async () => {

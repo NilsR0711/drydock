@@ -189,7 +189,11 @@ stateDiagram-v2
 ```
 
 `aborted` (manual) and `interrupted` (crash recovery) can be reached from any in-flight state;
-`needs_human` and `interrupted` jobs can be re-queued. Terminal states are `merged` and `aborted`.
+`needs_human` and `interrupted` jobs can be re-queued. A `needs_human` job can also be **resumed
+with instructions**: from the needs-human screen or the job page, type how the agent should
+proceed and it re-queues with that guidance — resuming its stored session on its existing branch
+(falling back to a fresh run with the instruction in the prompt when no session can be resumed),
+with the instruction recorded on the job's timeline. Terminal states are `merged` and `aborted`.
 `waiting_limit` parks a job whose agent session hit the provider's usage/rate limit — Claude
 (Anthropic usage windows, API 429/529) and Codex (ChatGPT-plan limits, OpenAI 429/5xx) alike
 ([ADR&nbsp;030](docs/adr/030-provider-limit-auto-wait.md)): Drydock latches that provider, stops
@@ -440,10 +444,10 @@ Without a global install, use `"command": "npx"` with `"args": ["-y", "@nilsr071
 | ------ | --------------------------------------------------------------------- |
 | Repos  | `list_repos`, `add_repo`, `sync_repo_issues`                          |
 | Issues | `list_issues`, `add_to_queue`, `remove_from_queue`, `set_issue_labels`|
-| Jobs   | `list_jobs`, `get_job`, `requeue_job`, `abort_job`                    |
+| Jobs   | `list_jobs`, `get_job`, `requeue_job`, `resume_job_with_instruction`, `abort_job` |
 | System | `get_settings`, `update_settings`, `set_drain_mode`, `get_logs`       |
 
-**Safety** — work-initiating tools (`add_to_queue`, `requeue_job`) honor the same gates as the
+**Safety** — work-initiating tools (`add_to_queue`, `requeue_job`, `resume_job_with_instruction`) honor the same gates as the
 UI: they refuse while draining, globally paused, or over the daily/per-repo cost limit.
 `get_settings` redacts credential fields and `update_settings` cannot set them. See
 [ADR 025](docs/adr/025-mcp-server.md).

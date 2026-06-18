@@ -6,8 +6,10 @@ import { LogViewer } from "@/components/log-viewer";
 import { PageHeader } from "@/components/page-header";
 import { PrAuditButton } from "@/components/pr-audit-button";
 import { PrQuestionPanel } from "@/components/pr-question-panel";
+import { ResumeWithInstructions } from "@/components/resume-with-instructions";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import { jobEvents } from "@/lib/db/schema";
@@ -63,9 +65,25 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       />
 
       {isError && (
-        <Alert tone="destructive" title="Paused for a human">
-          {job.errorMessage ?? "A guardrail stopped the run before anything risky was written."}
-        </Alert>
+        <>
+          <Alert tone="destructive" title="Paused for a human">
+            {job.errorMessage ?? "A guardrail stopped the run before anything risky was written."}
+          </Alert>
+          {/* Guided resume (issue #257): read the log below, then tell the agent
+              how to proceed — it resumes on its existing branch with the guidance. */}
+          <Card>
+            <h2 className="font-medium text-sm">Resume with instructions</h2>
+            <p className="mt-1 mb-3 text-muted-foreground text-sm text-pretty">
+              Read the log below, then tell the agent how to get unblocked. It resumes on its
+              existing branch taking your guidance into account.
+            </p>
+            <ResumeWithInstructions
+              jobId={job.id}
+              label={`${repoName} #${job.issueNumber}`}
+              defaultOpen
+            />
+          </Card>
+        </>
       )}
 
       {isLimitParked && (

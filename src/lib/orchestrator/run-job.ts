@@ -56,6 +56,8 @@ import { runVerificationPass } from "./verify-driver";
 
 interface WorktreeApi {
   prepare(repo: Repo, jobId: number, issueNumber?: number): Promise<Worktree>;
+  /** Restore a parked job's preserved branch to resume its prior work (issue #257). */
+  prepareResume(repo: Repo, jobId: number, branch: string): Promise<Worktree>;
   commitAndPush(wt: Worktree, message: string): Promise<void>;
   /**
    * Commit + push a parked job's work for a human to resume from (issue #249).
@@ -100,6 +102,12 @@ export interface RunJobDeps {
    * for tests. Defaults to resumeAgentSession on the job's own model.
    */
   resumeLimitSession?: (job: Job, prompt: string, cwd: string) => Promise<AgentSessionResult>;
+  /**
+   * Resume the stored session of a needs_human job the operator unblocked with a
+   * typed instruction (issue #257); injectable for tests. Defaults to
+   * resumeAgentSession on the job's own model, like resumeLimitSession.
+   */
+  resumeInstructionSession?: (job: Job, prompt: string, cwd: string) => Promise<AgentSessionResult>;
   /**
    * Read and consume the agent-authored `.drydock/PR.md` from the worktree
    * (issue #212), returning the commit subject / PR title + body and removing
@@ -170,6 +178,29 @@ export function planPromptSection(plan: string): string {
     "",
     "## Implementation plan",
     "Follow this plan unless the code contradicts it:",
+    "",
+    capped,
+  ].join("\n");
+}
+
+/** Upper bound on the human instruction injected into a fresh-run prompt (issue #257). */
+const HUMAN_INSTRUCTION_MAX_CHARS = 4000;
+
+/**
+ * Render the operator's human-guided-resume instruction as a dedicated,
+ * length-capped prompt section (issue #257). Used on the fresh-run fallback,
+ * when the job had no resumable session to feed the instruction into directly.
+ */
+export function humanInstructionPromptSection(instruction: string): string {
+  const trimmed = instruction.trim();
+  if (!trimmed) return "";
+  const capped = capPromptText(trimmed, HUMAN_INSTRUCTION_MAX_CHARS);
+  return [
+    "",
+    "",
+    "## Human guidance",
+    "A human reviewed where this job got stuck and gave the following instruction.",
+    "Follow it to get unblocked:",
     "",
     capped,
   ].join("\n");
@@ -425,28 +456,28 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   const consumeFollowups = deps.consumeFollowups ?? defaultConsumeFollowups;
   const markNeedsHuman =
     deps.markNeedsHuman ?? ((issueNumber: number) => markIssueNeedsHuman(repo.id, issueNumber, db));
-  // Limit-resume runner (issue #166): continues a limit-parked job's stored
-  // session on the job's own model and turn budget — this is the main work
-  // resuming, not a cheap CI fix.
-  const resumeLimitSession =
-    deps.resumeLimitSession ??
-    ((j: Job, prompt: string, cwd: string) => {
-      // The limit-resume branch only fires with a recorded session id; guard
-      // anyway so a concurrently cleared row fails loudly instead of passing
-      // null into the CLI's --resume flag.
-      if (!j.sessionId) throw new Error(`job ${j.id} has no session id to resume after a limit`);
-      return resumeAgentSession(j, j.sessionId, "", cwd, {
-        db,
-        provider,
-        command: sessionEnv.command,
-        runner: sessionEnv.runner,
-        timeoutMs,
-        costCapUsd: maxJobCostUsd,
-        resumePrompt: prompt,
-        resumeModel: j.model ?? repo.defaultModel,
-        resumeMaxTurns: j.maxTurns,
-      });
+  // Resume a job's stored session on its own model and turn budget — the main
+  // work resuming with a continuation prompt, not a cheap CI fix. Shared by the
+  // limit-resume (issue #166) and human-guided resume (issue #257) paths.
+  const resumeStoredSession = (j: Job, prompt: string, cwd: string) => {
+    // Both resume paths only fire with a recorded session id; guard anyway so a
+    // concurrently cleared row fails loudly instead of passing null into the
+    // CLI's --resume flag.
+    if (!j.sessionId) throw new Error(`job ${j.id} has no session id to resume`);
+    return resumeAgentSession(j, j.sessionId, "", cwd, {
+      db,
+      provider,
+      command: sessionEnv.command,
+      runner: sessionEnv.runner,
+      timeoutMs,
+      costCapUsd: maxJobCostUsd,
+      resumePrompt: prompt,
+      resumeModel: j.model ?? repo.defaultModel,
+      resumeMaxTurns: j.maxTurns,
     });
+  };
+  const resumeLimitSession = deps.resumeLimitSession ?? resumeStoredSession;
+  const resumeInstructionSession = deps.resumeInstructionSession ?? resumeStoredSession;
 
   /**
    * Park the job on a transient provider limit (issue #166): latch the
@@ -608,7 +639,23 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       runPrAuditPass({ job: j, prNumber, repo, forge, db }).then(() => undefined));
 
   try {
-    wt = await worktrees.prepare(repo, job.id, job.issueNumber);
+    // Human-guided resume (issue #257): a needs_human job the operator unblocked
+    // by typing an instruction. Detected before the worktree is prepared so a
+    // job whose branch was preserved (pushed at park time) is checked out on
+    // that same branch — the agent continues its prior commits rather than
+    // starting a fresh branch. Read the marker now; it is cleared below so a
+    // crash-recovery retry of this run does not re-trigger the resume.
+    const humanInstruction = job.humanInstruction;
+    const instructionResume = !!humanInstruction && !!job.sessionId && provider.supportsResume;
+    // Continue on the job's preserved branch whenever the operator gave guidance
+    // and a branch was pushed at park time — even when the session itself can't
+    // be resumed (the fresh-run fallback), so the agent builds on its prior
+    // commits rather than a blank branch.
+    const resumeOnExistingBranch = !!humanInstruction && !!job.branch;
+
+    wt = resumeOnExistingBranch
+      ? await worktrees.prepareResume(repo, job.id, job.branch as string)
+      : await worktrees.prepare(repo, job.id, job.issueNumber);
     recordEvent(job.id, "worktree", { path: wt.path, branch: wt.branch }, db);
 
     // Sandboxed execution preflight (issue #182, ADR 033): detect a usable
@@ -640,6 +687,12 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // hits the limit again the park branch re-sets it; any other outcome must
     // not look limit-parked.
     const limitResume = !!job.limitKind && !!job.sessionId && provider.supportsResume;
+    // Clear the human-instruction marker up front (issue #257), same as the
+    // limit marker: this run consumes the guidance, and a crash-recovery retry
+    // must not resume against a stale instruction.
+    if (job.humanInstruction) {
+      db.update(jobs).set({ humanInstruction: null }).where(eq(jobs.id, job.id)).run();
+    }
     if (job.limitKind) {
       db.update(jobs).set({ limitKind: null }).where(eq(jobs.id, job.id)).run();
     }
@@ -700,6 +753,12 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       // Empty/unset leaves the prompt untouched.
       prompt += agentInstructionsPromptSection(repo.agentInstructions);
 
+      // Human-guided resume fallback (issue #257): the operator typed guidance
+      // but the job had no resumable session (no stored id, or an agent without
+      // --resume), so it runs fresh. Surface the instruction prominently so the
+      // restarted run still acts on it rather than ignoring it.
+      if (humanInstruction) prompt += humanInstructionPromptSection(humanInstruction);
+
       // Opt-in plan-first stage (issue #160): a read-only one-shot pass produces
       // an implementation plan that is posted on the issue (audit trail) and
       // embedded in the implementation prompt. Best-effort by construction: a
@@ -753,7 +812,29 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     };
 
     let session: AgentSessionResult;
-    if (limitResume) {
+    if (instructionResume) {
+      recordEvent(
+        job.id,
+        "status",
+        { reason: "resuming session with human instruction", sessionId: job.sessionId },
+        db,
+      );
+      if (repo.autoDecompose) markSubtasksWorking(repo.id, job.issueNumber, db);
+      const resumePrompt = renderTemplate(
+        resolveTemplateContent(repo.id, TEMPLATE_NAMES.humanResume, db),
+        {
+          ISSUE_NUM: job.issueNumber,
+          BRANCH: wt.branch,
+          REPO_NAME: repo.name,
+          // Cap as the fresh-run fallback does: a pathologically long instruction
+          // must not bloat the resume prompt and fail the run.
+          INSTRUCTION: capPromptText(humanInstruction as string, HUMAN_INSTRUCTION_MAX_CHARS),
+          // Keep the resumed run's PR body in the repo's shape too (issue #252).
+          PR_FORMAT: resolveTemplateContent(repo.id, TEMPLATE_NAMES.prFormat, db),
+        },
+      );
+      session = await resumeInstructionSession(getJob(job.id, db) as Job, resumePrompt, wt.path);
+    } else if (limitResume) {
       recordEvent(
         job.id,
         "status",

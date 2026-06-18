@@ -13,6 +13,7 @@ import { isKnownModelId } from "@/lib/models";
 import { requeueJobWithEscalation } from "@/lib/orchestrator/escalation";
 import { getJob, listJobs, transitionJob } from "@/lib/orchestrator/jobs";
 import { startPrAudit } from "@/lib/orchestrator/pr-audit-driver";
+import { resumeJobWithInstruction } from "@/lib/orchestrator/resume-instruction";
 import { isGitRepoPath } from "@/lib/repos/path";
 import { addRepo } from "@/lib/repos/service";
 import { getSettings, jobsAllowed, repoJobsAllowed, saveSettings } from "@/lib/settings/service";
@@ -78,6 +79,10 @@ const issueRefShape = {
   issueNumber: z.number().int().positive(),
 } satisfies ZodRawShape;
 const jobIdShape = { jobId: z.number().int().positive() } satisfies ZodRawShape;
+const resumeWithInstructionShape = {
+  jobId: z.number().int().positive(),
+  instruction: z.string().min(1),
+} satisfies ZodRawShape;
 
 const addRepoShape = {
   // A remote MCP host could otherwise register an arbitrary directory; require a
@@ -229,6 +234,21 @@ export const tools: ToolDef[] = [
       assertWorkAllowed(job.repoId, db);
       // Escalates the model one rung when the repo opted in (issue #179).
       return requeueJobWithEscalation(jobId, db);
+    },
+  },
+  {
+    name: "resume_job_with_instruction",
+    description:
+      "Unblock a needs_human job with guidance: store an instruction on the job and requeue it. " +
+      "The next run resumes the stored session with the instruction as the prompt, on the job's " +
+      "preserved branch, so the agent continues its prior work taking the guidance into account.",
+    inputSchema: resumeWithInstructionShape,
+    handler: (args, { db }) => {
+      const { jobId, instruction } = parseArgs(resumeWithInstructionShape, args);
+      const job = getJob(jobId, db);
+      if (!job) throw new Error(`job ${jobId} not found`);
+      assertWorkAllowed(job.repoId, db);
+      return resumeJobWithInstruction(jobId, instruction, db);
     },
   },
   {

@@ -143,6 +143,24 @@ describe("WorktreeManager", () => {
     ]);
   });
 
+  it("prepareResume clears the stale worktree and restores the branch from origin (issue #257)", async () => {
+    const { calls, run } = recordingRunner();
+    const wt = await new WorktreeManager(run).prepareResume(repo, 3, "drydock/issue-9-job-3");
+    expect(wt.branch).toBe("drydock/issue-9-job-3");
+    // Resumes on the canonical job path, not a feedback-scoped one.
+    expect(wt.path).toContain("job-3");
+    // The parked attempt's leftovers are cleared before re-adding.
+    expect(calls.map((c) => c.args.slice(2).join(" "))).toEqual([
+      `worktree remove --force ${wt.path}`,
+      "worktree prune",
+      "branch -D drydock/issue-9-job-3",
+      "fetch origin drydock/issue-9-job-3",
+      `worktree add -B drydock/issue-9-job-3 ${wt.path} origin/drydock/issue-9-job-3`,
+      // resolveBase records the restored branch tip.
+      "rev-parse drydock/issue-9-job-3",
+    ]);
+  });
+
   it("commitAndPush stages, commits and pushes the branch", async () => {
     const calls: { cmd: string; args: string[]; cwd?: string }[] = [];
     const run: CommandRunner = async (cmd, args, cwd) => {
