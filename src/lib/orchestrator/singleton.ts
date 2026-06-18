@@ -7,7 +7,13 @@ import { notifyDraining } from "@/lib/notify/lifecycle";
 import { recoverOnStartup } from "./driver";
 import { startDriverLoop, stopDriverLoop } from "./driver-loop";
 import { getJob, transitionJob } from "./jobs";
-import { acquireInstanceLock, setDrainMode, waitForIdle } from "./runtime";
+import {
+  acquireInstanceLock,
+  releaseInstanceLock,
+  setDrainMode,
+  startInstanceLockHeartbeat,
+  waitForIdle,
+} from "./runtime";
 import { reapOrphanedWorktrees } from "./worktree-reaper";
 
 /**
@@ -123,6 +129,10 @@ export async function gracefulShutdown(): Promise<void> {
   } catch (err) {
     logError("[orchestrator] shutdown DB update failed", err);
   }
+
+  // Drop the instance lock last so a restart re-acquires immediately instead of
+  // waiting out the heartbeat TTL (issue #211). Safe if we never held it.
+  releaseInstanceLock();
 }
 
 const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -156,6 +166,11 @@ export function startOrchestrator(): void {
   // leaving a polling timer running.
   if (!process.env.VITEST) {
     if (acquireInstanceLock()) {
+      // Keep the lock's heartbeat fresh for as long as this instance runs, so a
+      // peer started after a crash + pid reuse can tell our live pid apart from
+      // a stale one and does not wedge waiting on it (issue #211).
+      startInstanceLockHeartbeat();
+
       // Crash recovery runs only in the lock-holding instance, mirroring the
       // worktree-reaper guard (issue #53): a second process sharing the DB
       // would otherwise requeue the live instance's actively-running working

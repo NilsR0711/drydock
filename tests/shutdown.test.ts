@@ -1,12 +1,20 @@
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { jobEvents } from "@/lib/db/schema";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
-import { registerActiveJob, unregisterActiveJob } from "@/lib/orchestrator/runtime";
+import {
+  acquireInstanceLock,
+  registerActiveJob,
+  unregisterActiveJob,
+} from "@/lib/orchestrator/runtime";
 import { addRepo } from "@/lib/repos/service";
 
 // gracefulShutdown reads the default getDb() singleton, so point it at memory.
 beforeEach(() => {
   process.env.DRYDOCK_DB = ":memory:";
+  process.env.DRYDOCK_HOME = mkdtempSync(join(tmpdir(), "ac-shutdown-"));
   vi.resetModules();
 });
 
@@ -88,9 +96,21 @@ describe("gracefulShutdown", () => {
 
     vi.doUnmock("@/lib/orchestrator/runtime");
   });
+
+  it("releases the instance lock so a restart re-acquires immediately", async () => {
+    const lockFile = join(process.env.DRYDOCK_HOME as string, "instance.lock");
+    expect(acquireInstanceLock()).toBe(true);
+    expect(existsSync(lockFile)).toBe(true);
+
+    const { gracefulShutdown } = await import("@/lib/orchestrator/singleton");
+    await gracefulShutdown();
+
+    expect(existsSync(lockFile)).toBe(false);
+  });
 });
 
 afterEach(() => {
   delete process.env.DRYDOCK_DB;
+  delete process.env.DRYDOCK_HOME;
   vi.resetModules();
 });
