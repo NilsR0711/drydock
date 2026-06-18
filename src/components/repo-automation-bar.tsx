@@ -111,8 +111,10 @@ function TagField({
 
 /**
  * Opt-in automation controls for a repo, grouped into labelled stages. Every
- * stage is off by default and consumes paid agent usage; Drydock never
- * auto-merges. List fields persist on blur; toggles/selects persist immediately.
+ * stage is off by default and consumes paid agent usage; Drydock auto-merges a
+ * PR only once its configured gates pass, and merging a PR with no automated
+ * checks at all is a separate, explicit opt-in. List fields persist on blur;
+ * toggles/selects persist immediately.
  */
 export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoTriage, setAutoTriage] = useState(repo.autoTriageEnabled);
@@ -177,8 +179,9 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   return (
     <div className="flex flex-col gap-4">
       <Alert tone="info" icon={ShieldCheck} title="Opt-in & bounded">
-        Every stage is off by default and consumes paid agent usage. Drydock never auto-merges — a
-        human always reviews the PR.
+        Every stage is off by default and consumes paid agent usage. Drydock auto-merges a PR only
+        once its configured gates pass — and merging a PR with no automated checks at all requires
+        the explicit opt-in below.
       </Alert>
 
       <div className="grid gap-4 lg:grid-cols-2">
