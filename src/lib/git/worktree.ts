@@ -148,13 +148,27 @@ export class WorktreeManager {
     return Number.parseInt(count || "0", 10) > 0;
   }
 
-  async commitAndPush(wt: Worktree, message: string): Promise<void> {
+  /**
+   * Stage everything and ensure the branch carries work to push: commit any
+   * uncommitted edits under `message`, and report whether there is anything to
+   * push at all. Returns false only for a genuine no-op (clean tree AND no
+   * commits beyond the base). Shared by commitAndPush and commitAndPushForHuman.
+   */
+  private async stageForPush(wt: Worktree, message: string): Promise<boolean> {
     await this.git(["add", "-A"], wt.path);
     const dirty = (await this.git(["status", "--porcelain"], wt.path)).trim() !== "";
     if (dirty) {
-      // Uncommitted edits: commit them ourselves under the job's message.
+      // Uncommitted edits: commit them ourselves under the given message.
       await this.git(["commit", "-m", message], wt.path);
-    } else if (!(await this.hasNewCommits(wt))) {
+      return true;
+    }
+    // Clean tree: push only if the agent committed its own work on top of the
+    // base. No such commits means a genuine no-op run.
+    return this.hasNewCommits(wt);
+  }
+
+  async commitAndPush(wt: Worktree, message: string): Promise<void> {
+    if (!(await this.stageForPush(wt, message))) {
       // Clean tree AND no commits beyond the base: a genuine no-op run.
       // Committing would exit non-zero with a confusing git error; signal it
       // distinctly (issue #50) so callers report a clear "no changes" outcome.
@@ -165,6 +179,19 @@ export class WorktreeManager {
     // own finished work; discarding it as "no changes" lost correct results
     // (issue #206).
     await this.git(["push", "-u", "origin", wt.branch], wt.path);
+  }
+
+  /**
+   * Commit and push a parked job's work so a human (or a later resume) can pick
+   * up from real commits instead of starting over (issue #249). Returns whether
+   * anything was preserved: false for a genuine no-op, so the caller can still
+   * clean the worktree up. Unlike commitAndPush this never throws
+   * EmptyCommitError — parking a no-op run is an expected, non-exceptional path.
+   */
+  async commitAndPushForHuman(wt: Worktree, message: string): Promise<boolean> {
+    if (!(await this.stageForPush(wt, message))) return false;
+    await this.git(["push", "-u", "origin", wt.branch], wt.path);
+    return true;
   }
 
   async remove(wt: Worktree, repoPath: string): Promise<void> {
