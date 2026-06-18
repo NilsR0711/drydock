@@ -61,6 +61,13 @@ export function parseArgs(argv) {
     return { mode: "update" };
   }
 
+  // `drydock mcp` launches the bundled stdio MCP server for an MCP host
+  // (issue #230). It takes no flags of its own; the host owns the transport.
+  if (argv[0] === "mcp") {
+    if (argv.length > 1) throw new Error(`unexpected argument: ${argv[1]}`);
+    return { mode: "mcp" };
+  }
+
   if (argv[0] === "backup") {
     if (argv.length > 2) throw new Error(`unexpected argument: ${argv[2]}`);
     return { mode: "backup", path: argv[1] };
@@ -195,6 +202,7 @@ Usage:
   drydock stop           Gracefully stop the background daemon (drains in-flight jobs)
   drydock status         Report whether the daemon is running (pid, url, uptime)
   drydock restart        Stop the daemon if running, then start a fresh one
+  drydock mcp            Start the local stdio MCP server for an MCP host
   drydock update         Update to the latest published version
   drydock backup [path]  Snapshot the database (WAL-safe, works while running);
                          default target: <data dir>/backups/drydock-<timestamp>.db
@@ -369,6 +377,53 @@ async function waitForServer(url, { attempts = 100, intervalMs = 100 } = {}) {
   return false;
 }
 
+/**
+ * Resolve the bundled stdio MCP server entry shipped beside the standalone
+ * runtime (issue #230). The MCP modules are not part of the Next.js app graph,
+ * so they ship as a standalone esbuild bundle rather than inside `server.js`.
+ * Exported so the path contract is unit-testable without spawning a process.
+ *
+ * @param {string} packageRoot Absolute path to the installed package directory.
+ */
+export function resolveMcpEntry(packageRoot) {
+  return join(packageRoot, ".next", "standalone", "mcp-server.cjs");
+}
+
+/**
+ * Launch the bundled stdio MCP server (issue #230). It runs as its own process —
+ * pointed at the same data dir and migrations as `serve` — with stdio inherited
+ * so the MCP host owns the child's stdin/stdout/stderr. stdout therefore stays
+ * clean for the protocol; the launcher prints nothing to it.
+ */
+async function runMcp() {
+  const entry = resolveMcpEntry(PACKAGE_ROOT);
+  if (!existsSync(entry)) {
+    throw new Error(
+      "MCP server bundle not found. Run `pnpm build` first (the published package ships it prebuilt).",
+    );
+  }
+
+  const dataDir = resolveDataDir();
+  mkdirSync(dataDir, { recursive: true });
+
+  const env = {
+    ...process.env,
+    NODE_ENV: "production",
+    DRYDOCK_DB: resolveDbPath(),
+    DRYDOCK_MIGRATIONS: join(PACKAGE_ROOT, "drizzle"),
+  };
+
+  const child = spawn(process.execPath, [entry, "mcp"], {
+    cwd: dirname(entry),
+    env,
+    stdio: "inherit",
+  });
+
+  child.on("exit", (code) => process.exit(code ?? 0));
+  process.on("SIGINT", () => child.kill("SIGINT"));
+  process.on("SIGTERM", () => child.kill("SIGTERM"));
+}
+
 async function serve({ host, port, open }) {
   assertSafeHost(host);
 
@@ -434,6 +489,9 @@ async function main(argv) {
       return;
     case "update":
       await runUpdate();
+      return;
+    case "mcp":
+      await runMcp();
       return;
     case "backup": {
       const { runBackupCommand } = await import("./ops.mjs");

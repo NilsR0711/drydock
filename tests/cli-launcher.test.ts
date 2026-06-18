@@ -14,6 +14,7 @@ import {
   resolveDataDir,
   resolveDbPath,
   resolveLatestVersion,
+  resolveMcpEntry,
   updateCommand,
 } from "../bin/drydock.mjs";
 
@@ -69,7 +70,19 @@ describe("parseArgs", () => {
   });
 
   it("rejects an unexpected positional argument", () => {
-    expect(() => parseArgs(["mcp"])).toThrow(/mcp/);
+    expect(() => parseArgs(["bogus"])).toThrow(/bogus/);
+  });
+
+  it("recognises the `mcp` subcommand", () => {
+    expect(parseArgs(["mcp"])).toEqual({ mode: "mcp" });
+  });
+
+  it("rejects extra arguments after `mcp`", () => {
+    expect(() => parseArgs(["mcp", "extra"])).toThrow(/extra/);
+  });
+
+  it("lets --help take precedence over `mcp`", () => {
+    expect(parseArgs(["mcp", "--help"])).toEqual({ mode: "help" });
   });
 
   it("recognises the `update` subcommand", () => {
@@ -343,6 +356,14 @@ describe("resolveDbPath", () => {
   it("honours an explicit DRYDOCK_DB override regardless of the data dir", () => {
     expect(resolveDbPath({ env: { DRYDOCK_DB: "/tmp/custom.db" }, home: "/home/jane" })).toBe(
       "/tmp/custom.db",
+    );
+  });
+});
+
+describe("resolveMcpEntry", () => {
+  it("points at the bundled MCP server beside the standalone runtime", () => {
+    expect(resolveMcpEntry("/opt/drydock")).toBe(
+      join("/opt/drydock", ".next", "standalone", "mcp-server.cjs"),
     );
   });
 });

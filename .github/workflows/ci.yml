@@ -85,3 +85,11 @@ jobs:
       - name: Smoke-test standalone server
         if: matrix.os == 'ubuntu-latest'
         run: pnpm smoke
+
+      # `next build` + package-mcp can emit an MCP bundle that crashes on boot or
+      # fails to resolve an externalized runtime module (issue #230). Boot the
+      # real bundle and require a full stdio handshake so a non-launching MCP
+      # server is caught here, never after publish.
+      - name: Smoke-test MCP server
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm smoke:mcp
