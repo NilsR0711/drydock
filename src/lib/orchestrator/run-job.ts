@@ -9,7 +9,7 @@ import { jobs } from "@/lib/db/schema";
 import type { StreamRunner } from "@/lib/exec/stream-runner";
 import { getForge } from "@/lib/forge/registry";
 import { EmptyCommitError, type Worktree, WorktreeManager } from "@/lib/git/worktree";
-import { listIssues } from "@/lib/issues/service";
+import { listIssues, markIssueNeedsHuman } from "@/lib/issues/service";
 import { listSubtasks } from "@/lib/issues/subtasks";
 import { logError } from "@/lib/log/logger";
 import type { NotificationEvent } from "@/lib/notify/events";
@@ -38,6 +38,7 @@ import { runPrAuditPass } from "./pr-audit-driver";
 import { consumePrMetadata as defaultConsumePrMetadata, type PrMetadata } from "./pr-metadata";
 import { nudgeAwareSleep } from "./pr-nudge";
 import { clearProviderLimit, latchProviderLimit, limitAutoWaitEnabled } from "./provider-limit";
+import { consumeQuestions as defaultConsumeQuestions } from "./questions-metadata";
 import { InvalidTransitionError } from "./state-machine";
 import {
   markSubtasksDone,
@@ -90,6 +91,19 @@ export interface RunJobDeps {
    * the filesystem-backed reader.
    */
   consumePrMetadata?: (worktreePath: string) => PrMetadata | null;
+  /**
+   * Read and consume the agent-authored `.drydock/QUESTIONS.md` from the
+   * worktree (issue #251), returning the open-questions block and removing the
+   * file so it stays out of the preserved branch. Injectable for tests;
+   * defaults to the filesystem-backed reader.
+   */
+  consumeQuestions?: (worktreePath: string) => string | null;
+  /**
+   * Mark the job's issue as needing a human (issue #251): apply the needs-human
+   * label and drop the queue label. Injectable for tests; defaults to the
+   * forge-backed `markIssueNeedsHuman`.
+   */
+  markNeedsHuman?: (issueNumber: number) => Promise<void>;
   /**
    * Prepare the sandboxed-execution environment for a repo that opted into
    * `sandbox: docker` (issue #182, ADR 033); injectable for tests. Defaults to
@@ -308,6 +322,11 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   // Agent-authored PR metadata (issue #212): read+remove `.drydock/PR.md` so the
   // commit and PR carry a meaningful subject/body instead of "Fix #N".
   const consumePrMetadata = deps.consumePrMetadata ?? defaultConsumePrMetadata;
+  // Agent-authored open questions (issue #251): read+remove `.drydock/QUESTIONS.md`
+  // and apply the needs-human label when the agent parks a blocking decision.
+  const consumeQuestions = deps.consumeQuestions ?? defaultConsumeQuestions;
+  const markNeedsHuman =
+    deps.markNeedsHuman ?? ((issueNumber: number) => markIssueNeedsHuman(repo.id, issueNumber, db));
   // Limit-resume runner (issue #166): continues a limit-parked job's stored
   // session on the job's own model and turn budget — this is the main work
   // resuming, not a cheap CI fix.
@@ -705,6 +724,49 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // A successful session ends the provider-limit streak (issues #166/#167):
     // the next limit detection starts a fresh backoff instead of compounding.
     clearProviderLimit(provider.id, db);
+
+    // Agent-authored open questions (issue #251): if the agent wrote
+    // `.drydock/QUESTIONS.md`, it hit a decision only a human can make. Hand it
+    // off autonomously instead of opening a PR: preserve whatever partial, safe
+    // work it committed by pushing the branch, post the questions as an issue
+    // comment, apply the needs-human label, and park the job in needs_human.
+    // Consuming the file removes it so the scratch never lands in the branch.
+    const questions = consumeQuestions(wt.path);
+    if (questions) {
+      if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
+      // Preserve the branch + commits. A questions-only run with no other
+      // change leaves nothing to push (EmptyCommitError) — that is fine; there
+      // is simply no partial work to keep, so park on the questions alone.
+      try {
+        await worktrees.commitAndPush(
+          wt,
+          `Partial work for #${job.issueNumber} (parked for review)`,
+        );
+      } catch (err) {
+        if (!(err instanceof EmptyCommitError)) throw err;
+      }
+      // Best-effort handoff breadcrumbs: a forge hiccup must not strand the job
+      // in a non-terminal state, so a failed comment/label is logged, not fatal.
+      try {
+        await commentIssue(
+          job.issueNumber,
+          `🙋 Drydock needs a human decision before continuing on #${job.issueNumber}:\n\n${questions}`,
+        );
+      } catch (err) {
+        logError(`[run-job] questions comment failed for job ${job.id}`, err);
+      }
+      try {
+        await markNeedsHuman(job.issueNumber);
+      } catch (err) {
+        logError(`[run-job] needs-human label failed for job ${job.id}`, err);
+      }
+      return transitionJob(
+        job.id,
+        "needs_human",
+        { errorMessage: "agent has open questions", branch: wt.branch },
+        db,
+      );
+    }
 
     // Per-repo ADR gate: hold the merge while ADRs await review (SPEC opt-in).
     if (repo.adrGating) {

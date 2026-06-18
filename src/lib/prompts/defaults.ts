@@ -37,6 +37,13 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, string> = {
     "",
     "Drydock reads this file, appends `Closes #$ISSUE_NUM` to the body, and removes",
     "the file — do not commit it.",
+    "",
+    "If — and only if — you hit a decision that a human must make and you genuinely",
+    "cannot proceed, write your open questions to `.drydock/QUESTIONS.md` instead of",
+    "guessing. Commit any partial, safe work first; do not commit that file. Drydock",
+    "then preserves your branch, hands the questions to a human, and parks the job",
+    "instead of opening a PR. Use this only for true blockers — not for routine",
+    "choices you can reasonably make yourself.",
   ].join("\n"),
   "ci-fix": "CI failed. Fix the failure and keep changes minimal.\n\nFailed CI log:\n$CI_LOG",
   plan: [
