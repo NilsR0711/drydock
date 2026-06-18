@@ -24,6 +24,12 @@ export interface RepoAutomation {
   ignoredBots: string[];
   minAuthorAssociation: "approved" | "any";
   maxAttempts: number;
+  // Sandboxed agent execution (issue #182, ADR 033).
+  sandbox: "none" | "docker";
+  sandboxImage: string | null;
+  sandboxAllowNetwork: boolean;
+  sandboxCpus: string | null;
+  sandboxMemory: string | null;
 }
 
 /** GitHub author associations that count as "approved" (owner/member/collaborator). */
@@ -63,6 +69,11 @@ export function repoAutomation(repo: Repo): RepoAutomation {
     ignoredBots: parseStringArray(repo.ignoredBots),
     minAuthorAssociation: repo.minAuthorAssociation === "any" ? "any" : "approved",
     maxAttempts: repo.maxAttempts,
+    sandbox: repo.sandbox === "docker" ? "docker" : "none",
+    sandboxImage: repo.sandboxImage,
+    sandboxAllowNetwork: repo.sandboxAllowNetwork,
+    sandboxCpus: repo.sandboxCpus,
+    sandboxMemory: repo.sandboxMemory,
   };
 }
 

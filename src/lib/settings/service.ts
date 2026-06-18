@@ -92,6 +92,13 @@ export const settingsSchema = z.object({
   // Auto-wait on OpenRouter 429/limit responses (same park-and-resume
   // treatment as the Claude/Codex CLIs, ADR 030).
   openrouterLimitAutoWait: z.boolean().default(true),
+  // Opt-in sandboxed agent execution (issue #182, ADR 033). The default image
+  // used for a sandboxed repo when neither a per-repo override nor the repo's
+  // devcontainer.json names one. The image MUST carry the agent CLI plus the
+  // repo's toolchain. `containerRuntime` pins which runtime to shell out to;
+  // "auto" probes docker then podman.
+  sandboxDefaultImage: z.string().default("node:20-bookworm"),
+  containerRuntime: z.enum(["auto", "docker", "podman"]).default("auto"),
   // Lifecycle events that trigger a notification on every configured channel.
   notifyEvents: z.array(z.enum(NOTIFICATION_EVENTS)).default([...NOTIFICATION_EVENTS]),
   // Finished jobs older than this many days have their verbose job_events
