@@ -30,7 +30,90 @@ export interface LogLine {
   ts?: number;
 }
 
+/**
+ * Row types shown in the viewer (filter chips + per-row styling). These are the
+ * *kinds* a user sees: chunk kinds (`text`/`tool_use`/`tool_result`) unpacked
+ * from agent messages, plus the orchestrator/terminal event types. They are NOT
+ * the SSE event names — see SSE_EVENT_TYPES.
+ */
 const EVENT_TYPES = ["status", "text", "tool_use", "tool_result", "result", "claude_exit", "error"];
+
+/**
+ * SSE event names to subscribe to — the *types the server actually emits*
+ * (`src/lib/orchestrator/agent-session.ts`, `broker.publish`). Agent messages
+ * stream under their raw SDK type (`assistant`/`user`/`system`) with the
+ * descriptive kind buried in `payload.chunks[]`; the orchestrator adds
+ * `status`/`result`/`claude_exit`/`error`. A named SSE event is delivered only
+ * to a matching `addEventListener`, so subscribing to chunk kinds instead of
+ * these names silently drops every running event (issue #241).
+ */
+export const SSE_EVENT_TYPES = [
+  "system",
+  "assistant",
+  "user",
+  "status",
+  "result",
+  "claude_exit",
+  "error",
+];
+
+/** SSE event names whose payload is a `{ chunks }` envelope to be unpacked. */
+const MESSAGE_EVENT_TYPES = new Set(["assistant", "user", "system"]);
+
+/** One agent-message content chunk, as serialized into `payload.chunks[]`. */
+interface RawChunk {
+  kind?: string;
+  text?: string;
+  name?: string;
+  input?: unknown;
+  isError?: boolean;
+}
+
+/** Map a single content chunk to a renderable row, or null if not displayable. */
+function chunkToLine(id: number, chunk: RawChunk, ts?: number): LogLine | null {
+  switch (chunk.kind) {
+    case "text":
+      return { id, type: "text", payload: { text: chunk.text ?? "" }, ts };
+    case "tool_use":
+      return { id, type: "tool_use", payload: { name: chunk.name, input: chunk.input }, ts };
+    case "tool_result":
+      // The wire chunk carries `isError`; PayloadView renders from `ok`.
+      return { id, type: "tool_result", payload: { ok: !chunk.isError }, ts };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Turn one SSE event into the log rows it represents. Agent message events
+ * (`assistant`/`user`/`system`) carry a `chunks` array that fans out into one
+ * row per renderable chunk, keyed by chunk *kind* so the existing per-type
+ * rendering applies. A message with no renderable chunks (e.g. a `system` init
+ * event) yields no rows — previously these rendered as raw `{"chunks":[]}` JSON
+ * (issue #241). Every other event passes through as a single row.
+ */
+export function expandStreamEvent(
+  id: number,
+  type: string,
+  payload: unknown,
+  ts?: number,
+): LogLine[] {
+  if (!MESSAGE_EVENT_TYPES.has(type)) {
+    return [{ id, type, payload, ts }];
+  }
+  const chunks =
+    payload &&
+    typeof payload === "object" &&
+    Array.isArray((payload as { chunks?: unknown }).chunks)
+      ? (payload as { chunks: RawChunk[] }).chunks
+      : [];
+  const lines: LogLine[] = [];
+  for (const chunk of chunks) {
+    const line = chunkToLine(id, chunk, ts);
+    if (line) lines.push(line);
+  }
+  return lines;
+}
 
 type EventCfg = { icon: LucideIcon; color: string; chip: string; label: string };
 
@@ -328,7 +411,11 @@ export function LogViewer({
    *  parked/terminal state — see isTerminalLogEvent). */
   active?: boolean;
 }) {
-  const [lines, setLines] = useState<LogLine[]>(initial);
+  // `initial` is the raw replayed events (one per job_events row); message
+  // events fan out into per-chunk rows for display (issue #241).
+  const [lines, setLines] = useState<LogLine[]>(() =>
+    initial.flatMap((e) => expandStreamEvent(e.id, e.type, e.payload, e.ts)),
+  );
   // Finished when the server says the job is no longer active, or when the
   // initial replay already carries a terminal event. Seeding this prevents a
   // done job from being stuck on the "live" badge + streaming spinner.
@@ -338,6 +425,8 @@ export function LogViewer({
   const [autoscroll, setAutoscroll] = useState(true);
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const [showFilter, setShowFilter] = useState(false);
+  // Dedup is keyed by job_events row id, the unit of an SSE frame — a single
+  // event may expand into several rows that share that id.
   const seen = useRef(new Set<number>(initial.map((l) => l.id)));
   const virtuoso = useRef<VirtuosoHandle>(null);
   const hydrated = useHydrated();
@@ -350,7 +439,12 @@ export function LogViewer({
     // auto-reconnecting) until unmount.
     if (!active || complete) return;
     const es = new EventSource(`/api/sse/jobs/${jobId}`);
-    const handler = (type: string) => (ev: MessageEvent) => {
+    const handler = (type: string) => (ev: Event) => {
+      // `addEventListener("error", …)` also fires for EventSource's native
+      // connection-error/reconnect events — plain `Event`s with no
+      // `lastEventId`/`data`. Ignore those so a transient disconnect doesn't
+      // inject a blank error row.
+      if (!(ev instanceof MessageEvent)) return;
       const id = ev.lastEventId ? Number(ev.lastEventId) : Date.now();
       if (seen.current.has(id)) return;
       seen.current.add(id);
@@ -361,11 +455,13 @@ export function LogViewer({
         // keep raw string
       }
       // Live events stream in real time, so stamp them now (the SSE frame
-      // carries only id + payload, not the row's ts).
-      setLines((prev) => [...prev, { id, type, payload, ts: Math.floor(Date.now() / 1000) }]);
+      // carries only id + payload, not the row's ts). Message events fan out
+      // into per-chunk rows; terminal detection runs on the raw event.
+      const incoming = expandStreamEvent(id, type, payload, Math.floor(Date.now() / 1000));
+      if (incoming.length > 0) setLines((prev) => [...prev, ...incoming]);
       if (isTerminalLogEvent(type, payload)) setComplete(true);
     };
-    for (const t of EVENT_TYPES) es.addEventListener(t, handler(t));
+    for (const t of SSE_EVENT_TYPES) es.addEventListener(t, handler(t));
     return () => es.close();
   }, [jobId, active, complete]);
 
