@@ -410,7 +410,12 @@ export function LogViewer({
     // auto-reconnecting) until unmount.
     if (!active || complete) return;
     const es = new EventSource(`/api/sse/jobs/${jobId}`);
-    const handler = (type: string) => (ev: MessageEvent) => {
+    const handler = (type: string) => (ev: Event) => {
+      // `addEventListener("error", …)` also fires for EventSource's native
+      // connection-error/reconnect events — plain `Event`s with no
+      // `lastEventId`/`data`. Ignore those so a transient disconnect doesn't
+      // inject a blank error row.
+      if (!(ev instanceof MessageEvent)) return;
       const id = ev.lastEventId ? Number(ev.lastEventId) : Date.now();
       if (seen.current.has(id)) return;
       seen.current.add(id);
