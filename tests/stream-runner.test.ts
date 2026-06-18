@@ -62,6 +62,28 @@ describe("spawnStreamRunner", () => {
     expect(exitCode).not.toBe(0);
   });
 
+  it("gives the child /dev/null on stdin so a non-interactive CLI never waits for input", async () => {
+    // The agent CLI (e.g. `claude`) reads no stdin — the prompt is an argv flag.
+    // Left on the default inherited pipe, stdin stays open and the CLI emits a
+    // benign "no stdin data received in 3s" warning to stderr, which Drydock
+    // then surfaces as a red ERROR log line (issue #233). Wiring stdin to
+    // /dev/null makes reads return EOF immediately, so the warning never fires.
+    const script = [
+      "let ended = false;",
+      'process.stdin.on("end", () => { ended = true; console.log("stdin-eof"); process.exit(0); });',
+      "process.stdin.resume();",
+      'setTimeout(() => { if (!ended) { console.log("stdin-open"); process.exit(0); } }, 1000);',
+    ].join("\n");
+    let out = "";
+    const handle = spawnStreamRunner("node", ["-e", script], process.cwd(), {
+      onStdout: (chunk) => {
+        out += chunk;
+      },
+    });
+    await handle.done;
+    expect(out.trim()).toBe("stdin-eof");
+  });
+
   it("kills the whole process group on abort so grandchildren do not survive", async () => {
     // The child spawns a long-lived grandchild and prints its pid. abort()
     // must signal the process group, or the grandchild would be orphaned to
