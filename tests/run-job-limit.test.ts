@@ -47,6 +47,7 @@ function baseDeps(over: Record<string, unknown> = {}) {
     worktrees: {
       prepare: vi.fn(async () => wt),
       commitAndPush: vi.fn(async () => {}),
+      commitAndPushForHuman: vi.fn(async () => false),
       remove: vi.fn(async () => {}),
     },
     runSession: vi.fn(async (job: Job) => {

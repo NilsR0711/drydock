@@ -18,6 +18,7 @@ beforeEach(() => {
 interface FakeWorktreeApi {
   prepare: ReturnType<typeof vi.fn>;
   commitAndPush: ReturnType<typeof vi.fn>;
+  commitAndPushForHuman: ReturnType<typeof vi.fn>;
   remove: ReturnType<typeof vi.fn>;
 }
 
@@ -26,6 +27,7 @@ function fakeWorktrees(overrides: Partial<FakeWorktreeApi> = {}): FakeWorktreeAp
   return {
     prepare: vi.fn(async () => wt),
     commitAndPush: vi.fn(async () => {}),
+    commitAndPushForHuman: vi.fn(async () => false),
     remove: vi.fn(async () => {}),
     ...overrides,
   };
@@ -189,6 +191,7 @@ describe("runJob with decomposed subtasks", () => {
         commitAndPush: vi.fn(async () => {
           throw new EmptyCommitError();
         }),
+        commitAndPushForHuman: vi.fn(async () => false),
         remove: vi.fn(async () => {}),
       },
     });

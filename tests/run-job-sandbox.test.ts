@@ -17,6 +17,7 @@ function fakeWorktrees() {
   return {
     prepare: vi.fn(async () => wt),
     commitAndPush: vi.fn(async () => {}),
+    commitAndPushForHuman: vi.fn(async () => false),
     remove: vi.fn(async () => {}),
   };
 }

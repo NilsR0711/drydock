@@ -51,6 +51,11 @@ import { runVerificationPass } from "./verify-driver";
 interface WorktreeApi {
   prepare(repo: Repo, jobId: number, issueNumber?: number): Promise<Worktree>;
   commitAndPush(wt: Worktree, message: string): Promise<void>;
+  /**
+   * Commit + push a parked job's work for a human to resume from (issue #249).
+   * Resolves to whether anything was preserved (false for a genuine no-op).
+   */
+  commitAndPushForHuman(wt: Worktree, message: string): Promise<boolean>;
   remove(wt: Worktree, repoPath: string): Promise<void>;
 }
 
@@ -373,6 +378,50 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   // Declared before the babysitter deps so the CI-fix resume closure can read
   // the worktree created below; it stays alive for the whole babysitter call.
   let wt: Worktree | undefined;
+  // When a job parks for a human with real work to resume from (issue #249),
+  // the finally cleanup is skipped so the agent's commits/branch survive. Set
+  // by preserveWorktreeForHuman; a genuine no-op run leaves it false and is
+  // cleaned up as before.
+  let preserveWorktree = false;
+  /**
+   * Preserve a parked job's worktree (issue #249): commit any uncommitted
+   * edits, push the branch, and return its name so the transition records it on
+   * the job row. A genuine no-op preserves nothing (and the worktree is cleaned
+   * up). A push failure still keeps the local worktree so committed work is not
+   * discarded, but cannot report a pushed branch.
+   */
+  const preserveWorktreeForHuman = async (): Promise<string | undefined> => {
+    if (!wt) return undefined;
+    try {
+      const preserved = await worktrees.commitAndPushForHuman(
+        wt,
+        `wip: park #${job.issueNumber} for human review`,
+      );
+      if (!preserved) return undefined;
+      preserveWorktree = true;
+      return wt.branch;
+    } catch (err) {
+      logError(`[run-job] failed to push preserved worktree for job ${job.id}`, err);
+      // Keep the local worktree even when the push failed: the agent's
+      // committed work must not be thrown away just because it could not reach
+      // the forge. No pushed branch to record, though.
+      preserveWorktree = true;
+      return undefined;
+    }
+  };
+  /**
+   * Park the job for a human (issue #249): mark any subtasks parked, preserve
+   * the worktree/branch when there is work, and transition to needs_human
+   * recording the preserved branch (when one was pushed). Folds together the
+   * bookkeeping every pre-PR escalation shares.
+   */
+  const parkForHuman = async (errorMessage: string): Promise<Job> => {
+    if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
+    const branch = await preserveWorktreeForHuman();
+    const patch: Partial<Job> = { errorMessage: errorMessage.slice(0, 500) };
+    if (branch) patch.branch = branch;
+    return transitionJob(job.id, "needs_human", patch, db);
+  };
   const runBabysitter =
     deps.runBabysitter ??
     ((j, prNumber) =>
@@ -466,13 +515,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         preferredRuntime: settings.containerRuntime,
       });
       if (!prepared.ok) {
-        if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
-        return transitionJob(
-          job.id,
-          "needs_human",
-          { errorMessage: `Sandbox preflight failed: ${prepared.reason}`.slice(0, 500) },
-          db,
-        );
+        return await parkForHuman(`Sandbox preflight failed: ${prepared.reason}`);
       }
       sessionEnv.runner = prepared.session.runner;
       sessionEnv.command = prepared.session.command;
@@ -624,38 +667,20 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       return afterSession;
     }
     if (session.timedOut) {
-      if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
-      return transitionJob(
-        job.id,
-        "needs_human",
-        { errorMessage: `${provider.label} timed out after ${maxJobMinutes} minutes` },
-        db,
-      );
+      return await parkForHuman(`${provider.label} timed out after ${maxJobMinutes} minutes`);
     }
     // Per-job cost ceiling reached (issue #57): the session was aborted
     // mid-stream. Its partial cost is already persisted (and counts toward the
     // day's spend); escalate to a human with a clear reason. Checked before the
     // exit-code branch since the abort yields a non-zero sentinel exit.
     if (session.costExceeded) {
-      if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
-      return transitionJob(
-        job.id,
-        "needs_human",
-        { errorMessage: `per-job cost limit of $${maxJobCostUsd} reached` },
-        db,
-      );
+      return await parkForHuman(`per-job cost limit of $${maxJobCostUsd} reached`);
     }
     // Spawn error (ENOENT etc.): the CLI binary was not found or not executable.
     // Surface a clear diagnostic so operators know to install/configure the CLI,
     // rather than seeing a generic "exited non-zero" message.
     if (session.spawnError) {
-      if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
-      return transitionJob(
-        job.id,
-        "needs_human",
-        { errorMessage: `failed to start ${command}: ${session.spawnError.message}` },
-        db,
-      );
+      return await parkForHuman(`failed to start ${command}: ${session.spawnError.message}`);
     }
     // Provider limit/auth conditions (issue #166), checked before the generic
     // exit-code branch so they never degrade into "exited non-zero". Transient
@@ -663,38 +688,20 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     if (session.limit) {
       const limit = session.limit;
       if (limit.kind === "auth" || limit.kind === "billing") {
-        if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
         const label = limit.kind === "auth" ? "authentication" : "billing";
-        return transitionJob(
-          job.id,
-          "needs_human",
-          {
-            errorMessage: `${provider.label} ${label} error: ${limit.rawSnippet}`.slice(0, 500),
-          },
-          db,
-        );
+        return await parkForHuman(`${provider.label} ${label} error: ${limit.rawSnippet}`);
       }
       // Re-read the toggle: the session may have run for many minutes, and an
       // operator flipping auto-wait mid-session must take effect immediately.
       if (!limitAutoWaitEnabled(provider.id, db)) {
-        if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
-        return transitionJob(
-          job.id,
-          "needs_human",
-          { errorMessage: `${limitParkMessage(limit.kind, limit.agent)} (auto-wait is disabled)` },
-          db,
+        return await parkForHuman(
+          `${limitParkMessage(limit.kind, limit.agent)} (auto-wait is disabled)`,
         );
       }
       return await parkOnLimit(limit);
     }
     if (session.exitCode !== 0) {
-      if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
-      return transitionJob(
-        job.id,
-        "needs_human",
-        { errorMessage: `${provider.label} exited non-zero` },
-        db,
-      );
+      return await parkForHuman(`${provider.label} exited non-zero`);
     }
 
     // A successful session ends the provider-limit streak (issues #166/#167):
@@ -705,13 +712,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     if (repo.adrGating) {
       const pending = listAdrs("pending_review", db, repo.id);
       if (pending.length > 0) {
-        if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
-        return transitionJob(
-          job.id,
-          "needs_human",
-          { errorMessage: `Blocked by ${pending.length} pending ADR review(s).` },
-          db,
-        );
+        return await parkForHuman(`Blocked by ${pending.length} pending ADR review(s).`);
       }
     }
 
@@ -728,13 +729,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       // empty commit. Report it as a clear outcome rather than a raw git error
       // (issue #50). Any other failure (e.g. a rejected push) still propagates.
       if (err instanceof EmptyCommitError) {
-        if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
-        return transitionJob(
-          job.id,
-          "needs_human",
-          { errorMessage: "Agent produced no changes" },
-          db,
-        );
+        // A genuine no-op: parkForHuman preserves nothing and the worktree is
+        // cleaned up as before.
+        return await parkForHuman("Agent produced no changes");
       }
       throw err;
     }
@@ -799,8 +796,14 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // needs_human (issue #166).
     if (["working", "ci_running", "ci_failed", "retrying"].includes(current.status)) {
       if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
+      // Preserve the agent's work before parking (issue #249): a throw here can
+      // strand real commits in the worktree (a failed push, a createPr error
+      // after the branch was already pushed). Best-effort and never re-throws.
+      const branch = await preserveWorktreeForHuman();
       try {
-        return transitionJob(job.id, "needs_human", { errorMessage: message.slice(0, 500) }, db);
+        const patch: Partial<Job> = { errorMessage: message.slice(0, 500) };
+        if (branch) patch.branch = branch;
+        return transitionJob(job.id, "needs_human", patch, db);
       } catch (transitionErr) {
         if (!(transitionErr instanceof InvalidTransitionError)) throw transitionErr;
         // A concurrent abort flipped the job terminal between the status read
@@ -814,7 +817,13 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     }
     return current;
   } finally {
-    if (wt) {
+    // Keep the worktree when a job parked for a human with real work to resume
+    // from (issue #249); otherwise remove it. Merged/aborted and genuine no-op
+    // runs leave preserveWorktree false and clean up as before. A preserved
+    // needs_human job is non-terminal, so the worktree reaper leaves it alone
+    // too — it is reclaimed on resume (prepare re-creates it) or once the job
+    // reaches a terminal state.
+    if (wt && !preserveWorktree) {
       try {
         await worktrees.remove(wt, repo.path);
       } catch (cleanupErr) {
