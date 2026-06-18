@@ -280,8 +280,39 @@ function awaitBounded(
   });
 }
 
-function serializeEvent(event: { type: string; chunks: unknown; costUsd?: number }): unknown {
-  return { chunks: event.chunks, costUsd: event.costUsd };
+/** A job's persisted cumulative usage, used to keep streamed metrics cumulative. */
+interface JobUsage {
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+const ZERO_USAGE: JobUsage = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+
+/** Read the job's already-persisted usage so additive sessions stream cumulative totals. */
+function readJobUsage(db: DB, jobId: number): JobUsage {
+  const row = db.select().from(jobs).where(eq(jobs.id, jobId)).get();
+  return {
+    costUsd: row?.costUsd ?? 0,
+    inputTokens: row?.totalInputTokens ?? 0,
+    outputTokens: row?.totalOutputTokens ?? 0,
+  };
+}
+
+/**
+ * Shape an event for the broker. Carries a running usage snapshot (live cost +
+ * accumulated token totals) alongside the chunks so the job detail's metric
+ * cards can refresh mid-run instead of only at the terminal `result` event
+ * (issue #242). Callers pass cumulative totals so additive sessions never
+ * regress the figure the UI already shows.
+ */
+function serializeEvent(event: { chunks: unknown }, usage: JobUsage): unknown {
+  return {
+    chunks: event.chunks,
+    costUsd: usage.costUsd,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+  };
 }
 
 /**
@@ -352,6 +383,16 @@ export async function spawnAgentSession(
         );
   const guard =
     deps.costCapUsd && deps.costCapUsd > 0 ? makeCostGuard(deps.costCapUsd, liveCost) : undefined;
+  // Running usage published with every event so the UI metric cards tick live
+  // (issue #242). A side session persists additively, so its snapshot must
+  // include the job's prior spend or the cards would visibly regress to this
+  // invocation's totals; a main session replaces the totals, so it starts at 0.
+  const priorUsage = deps.sideSession ? readJobUsage(db, job.id) : ZERO_USAGE;
+  const usageSnapshot = () => ({
+    costUsd: priorUsage.costUsd + liveCost(),
+    inputTokens: priorUsage.inputTokens + parser.totalInputTokens,
+    outputTokens: priorUsage.outputTokens + parser.totalOutputTokens,
+  });
 
   const args = provider.buildStartArgs({ prompt, model, maxTurns: job.maxTurns });
   // Tail of stderr, retained for provider-limit classification (issue #166).
@@ -359,7 +400,10 @@ export async function spawnAgentSession(
   const handle = runner(command, args, cwd, {
     onStdout: (chunk) => {
       for (const event of parser.push(chunk)) {
-        broker.publish(job.id, { type: event.type, payload: serializeEvent(event) });
+        broker.publish(job.id, {
+          type: event.type,
+          payload: serializeEvent(event, usageSnapshot()),
+        });
       }
       guard?.observe();
     },
@@ -392,7 +436,7 @@ export async function spawnAgentSession(
     });
   }
   for (const event of parser.flush()) {
-    broker.publish(job.id, { type: event.type, payload: serializeEvent(event) });
+    broker.publish(job.id, { type: event.type, payload: serializeEvent(event, usageSnapshot()) });
   }
 
   const costUsd =
@@ -510,10 +554,9 @@ export async function resumeAgentSession(
   // already spent in prior sessions so the cap applies to the cumulative job
   // spend, not just this invocation. Without this each CI-fix resume gets a
   // fresh full budget and the effective cap becomes (1 + MAX_CI_RETRIES) × cap.
-  const priorCostUsd =
-    deps.costCapUsd && deps.costCapUsd > 0
-      ? (db.select().from(jobs).where(eq(jobs.id, job.id)).get()?.costUsd ?? 0)
-      : 0;
+  // A resume always persists additively, so the same prior usage keeps the
+  // streamed metric snapshot cumulative (issue #242).
+  const priorUsage = readJobUsage(db, job.id);
   const liveCost = () => {
     const thisInvocation =
       parser.costUsd > 0
@@ -525,10 +568,16 @@ export async function resumeAgentSession(
             parser.totalCacheCreationInputTokens,
             parser.totalCacheReadInputTokens,
           );
-    return priorCostUsd + thisInvocation;
+    return priorUsage.costUsd + thisInvocation;
   };
   const guard =
     deps.costCapUsd && deps.costCapUsd > 0 ? makeCostGuard(deps.costCapUsd, liveCost) : undefined;
+  // Running usage published with every event so the UI metric cards tick live.
+  const usageSnapshot = () => ({
+    costUsd: liveCost(),
+    inputTokens: priorUsage.inputTokens + parser.totalInputTokens,
+    outputTokens: priorUsage.outputTokens + parser.totalOutputTokens,
+  });
 
   const resumeArgs = provider.supportsResume
     ? provider.buildResumeArgs({
@@ -552,7 +601,10 @@ export async function resumeAgentSession(
   const handle = runner(command, args, cwd, {
     onStdout: (chunk) => {
       for (const event of parser.push(chunk)) {
-        broker.publish(job.id, { type: event.type, payload: { chunks: event.chunks } });
+        broker.publish(job.id, {
+          type: event.type,
+          payload: serializeEvent(event, usageSnapshot()),
+        });
       }
       guard?.observe();
     },
@@ -582,7 +634,7 @@ export async function resumeAgentSession(
     });
   }
   for (const event of parser.flush()) {
-    broker.publish(job.id, { type: event.type, payload: { chunks: event.chunks } });
+    broker.publish(job.id, { type: event.type, payload: serializeEvent(event, usageSnapshot()) });
   }
 
   const costUsd =

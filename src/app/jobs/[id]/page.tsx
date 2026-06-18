@@ -31,8 +31,9 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const isLimitParked = job.status === "waiting_limit";
 
   const repoName = repo?.name ?? `repo #${job.repoId}`;
-  const end = job.finishedAt ?? Math.floor(Date.now() / 1000);
-  const durationSec = job.startedAt != null ? Math.max(0, end - job.startedAt) : null;
+  // The Duration card ticks client-side from startedAt; nowSec seeds it so the
+  // SSR markup and the first client render agree (issue #242).
+  const nowSec = Math.floor(Date.now() / 1000);
 
   return (
     <div className="dd-fade-up space-y-5">
@@ -94,7 +95,9 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         initialCostUsd={job.costUsd}
         inputTokens={job.totalInputTokens}
         outputTokens={job.totalOutputTokens}
-        durationSec={durationSec}
+        startedAt={job.startedAt}
+        finishedAt={job.finishedAt}
+        nowSec={nowSec}
         attempts={job.attempts}
       />
 

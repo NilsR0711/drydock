@@ -5,20 +5,27 @@ import { useEffect, useState } from "react";
 import { StatCard } from "@/components/ui/stat-card";
 import { formatDuration, formatUsd } from "@/lib/utils";
 
+/** SSE event types whose payload carries running usage (cost + token totals). */
+const METRIC_EVENTS = ["assistant", "result"] as const;
+
 /**
- * Live job metrics, rendered as a StatCard strip. Subscribes to the same SSE
- * stream as the log viewer and updates the cost figure when the orchestrator
- * emits a `result` event (payload carries `costUsd`). Token totals are not
- * streamed per-event, so they stay at their persisted values.
+ * Live job metrics, rendered as a StatCard strip. While the job is running two
+ * things update without a reload (issue #242): the Duration card ticks up once
+ * per second from `startedAt`, and cost/token totals refresh as the
+ * orchestrator streams running usage on the same `assistant`/`result` SSE
+ * events the log viewer consumes. A finished job renders static values from its
+ * persisted props and opens no stream.
  */
 export function JobMetrics({
   jobId,
   issueNumber,
   model,
   initialCostUsd,
-  inputTokens,
-  outputTokens,
-  durationSec,
+  inputTokens: initialInputTokens,
+  outputTokens: initialOutputTokens,
+  startedAt,
+  finishedAt,
+  nowSec,
   attempts,
   active = true,
 }: {
@@ -28,30 +35,60 @@ export function JobMetrics({
   initialCostUsd: number;
   inputTokens: number;
   outputTokens: number;
-  durationSec?: number | null;
+  /** Unix-seconds start time; null until the job begins working. */
+  startedAt?: number | null;
+  /** Unix-seconds finish time; null while the job is still running. */
+  finishedAt?: number | null;
+  /**
+   * Server render time (unix seconds). Seeds the duration ticker so the SSR
+   * markup and the first client render agree — reading `Date.now()` directly at
+   * render would diverge between server and client and warn on hydration.
+   */
+  nowSec: number;
   attempts?: number;
   /** Whether the job is still running (from the server's job status). */
   active?: boolean;
 }) {
   const [costUsd, setCostUsd] = useState(initialCostUsd);
+  const [tokens, setTokens] = useState({ input: initialInputTokens, output: initialOutputTokens });
+  const [now, setNow] = useState(nowSec);
 
   useEffect(() => {
-    // A finished job's cost is already persisted — don't open a stream.
+    // A finished job's cost and tokens are already persisted — don't open a stream.
     if (!active) return;
     const es = new EventSource(`/api/sse/jobs/${jobId}`);
-    const onResult = (ev: MessageEvent) => {
+    const onMetric = (ev: MessageEvent) => {
       try {
-        const payload = JSON.parse(ev.data) as { costUsd?: number };
-        if (typeof payload.costUsd === "number") setCostUsd(payload.costUsd);
+        const p = JSON.parse(ev.data) as {
+          costUsd?: number;
+          inputTokens?: number;
+          outputTokens?: number;
+        };
+        if (typeof p.costUsd === "number") setCostUsd(p.costUsd);
+        if (typeof p.inputTokens === "number" || typeof p.outputTokens === "number") {
+          setTokens((prev) => ({
+            input: typeof p.inputTokens === "number" ? p.inputTokens : prev.input,
+            output: typeof p.outputTokens === "number" ? p.outputTokens : prev.output,
+          }));
+        }
       } catch {
         // ignore malformed payloads
       }
     };
-    es.addEventListener("result", onResult);
+    for (const type of METRIC_EVENTS) es.addEventListener(type, onMetric);
     return () => es.close();
   }, [jobId, active]);
 
-  const tokenSub = `${(inputTokens / 1000).toFixed(0)}k in · ${(outputTokens / 1000).toFixed(1)}k out · #${issueNumber}`;
+  useEffect(() => {
+    // Tick the duration once per second while the job is live. A job that has
+    // finished (finishedAt set) or is no longer active keeps its static end time.
+    if (!active || finishedAt != null) return;
+    const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [active, finishedAt]);
+
+  const durationSec = startedAt != null ? Math.max(0, (finishedAt ?? now) - startedAt) : null;
+  const tokenSub = `${(tokens.input / 1000).toFixed(0)}k in · ${(tokens.output / 1000).toFixed(1)}k out · #${issueNumber}`;
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
