@@ -46,6 +46,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:daemon": "vitest run tests/control-shutdown.test.ts tests/cli-daemon.test.ts tests/daemon-lifecycle.integration.test.ts",
     "smoke": "node scripts/smoke-standalone.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/db/migrate.ts",

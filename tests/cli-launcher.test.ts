@@ -132,6 +132,42 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["service", "bogus"])).toThrow(/bogus/);
     expect(() => parseArgs(["service", "install", "extra"])).toThrow(/extra/);
   });
+
+  it("recognises `start` with default and explicit host/port", () => {
+    expect(parseArgs(["start"])).toEqual({ mode: "start", host: "127.0.0.1", port: 3737 });
+    expect(parseArgs(["start", "--port", "8080"])).toEqual({
+      mode: "start",
+      host: "127.0.0.1",
+      port: 8080,
+    });
+    expect(parseArgs(["start", "--host", "127.0.0.2", "--port=9000"])).toEqual({
+      mode: "start",
+      host: "127.0.0.2",
+      port: 9000,
+    });
+  });
+
+  it("rejects unknown options and stray arguments for `start`", () => {
+    expect(() => parseArgs(["start", "--open"])).toThrow(/open/);
+    expect(() => parseArgs(["start", "extra"])).toThrow(/extra/);
+    expect(() => parseArgs(["start", "--port", "bad"])).toThrow(/invalid port/i);
+  });
+
+  it("recognises `restart` like `start`", () => {
+    expect(parseArgs(["restart"])).toEqual({ mode: "restart", host: "127.0.0.1", port: 3737 });
+    expect(parseArgs(["restart", "--port", "8080"])).toEqual({
+      mode: "restart",
+      host: "127.0.0.1",
+      port: 8080,
+    });
+  });
+
+  it("recognises `stop` and `status` and rejects extra arguments", () => {
+    expect(parseArgs(["stop"])).toEqual({ mode: "stop" });
+    expect(parseArgs(["status"])).toEqual({ mode: "status" });
+    expect(() => parseArgs(["stop", "now"])).toThrow(/now/);
+    expect(() => parseArgs(["status", "now"])).toThrow(/now/);
+  });
 });
 
 describe("isMainModule", () => {
