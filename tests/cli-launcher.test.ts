@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   assertSafeHost,
+  childExitCode,
   compareVersions,
   detectInstallKind,
   isLoopbackHost,
@@ -365,6 +366,23 @@ describe("resolveMcpEntry", () => {
     expect(resolveMcpEntry("/opt/drydock")).toBe(
       join("/opt/drydock", ".next", "standalone", "mcp-server.cjs"),
     );
+  });
+});
+
+describe("childExitCode", () => {
+  it("forwards a normal exit code unchanged", () => {
+    expect(childExitCode(0, null)).toBe(0);
+    expect(childExitCode(2, null)).toBe(2);
+  });
+
+  it("maps signal termination to the POSIX 128 + signo convention", () => {
+    expect(childExitCode(null, "SIGINT")).toBe(130);
+    expect(childExitCode(null, "SIGTERM")).toBe(143);
+  });
+
+  it("falls back to 1 for an unmapped or missing signal", () => {
+    expect(childExitCode(null, "SIGKILL")).toBe(1);
+    expect(childExitCode(null, null)).toBe(1);
   });
 });
 

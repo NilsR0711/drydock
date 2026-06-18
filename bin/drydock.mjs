@@ -378,6 +378,22 @@ async function waitForServer(url, { attempts = 100, intervalMs = 100 } = {}) {
 }
 
 /**
+ * Translate a spawned child's `exit` event into this launcher's own exit code.
+ * A normal exit forwards the child's code; a signal kill (`code === null`) maps
+ * to the POSIX `128 + signo` convention so supervisors (launchd/systemd) and MCP
+ * hosts observe the abnormal termination instead of a masked success.
+ *
+ * @param {number | null} code
+ * @param {NodeJS.Signals | null} [signal]
+ */
+export function childExitCode(code, signal) {
+  if (code !== null) return code;
+  if (signal === "SIGINT") return 130;
+  if (signal === "SIGTERM") return 143;
+  return 1;
+}
+
+/**
  * Resolve the bundled stdio MCP server entry shipped beside the standalone
  * runtime (issue #230). The MCP modules are not part of the Next.js app graph,
  * so they ship as a standalone esbuild bundle rather than inside `server.js`.
@@ -419,7 +435,7 @@ async function runMcp() {
     stdio: "inherit",
   });
 
-  child.on("exit", (code) => process.exit(code ?? 0));
+  child.on("exit", (code, signal) => process.exit(childExitCode(code, signal)));
   process.on("SIGINT", () => child.kill("SIGINT"));
   process.on("SIGTERM", () => child.kill("SIGTERM"));
 }
@@ -459,7 +475,7 @@ async function serve({ host, port, open }) {
     stdio: "inherit",
   });
 
-  server.on("exit", (code) => process.exit(code ?? 0));
+  server.on("exit", (code, signal) => process.exit(childExitCode(code, signal)));
   process.on("SIGINT", () => server.kill("SIGINT"));
   process.on("SIGTERM", () => server.kill("SIGTERM"));
 
