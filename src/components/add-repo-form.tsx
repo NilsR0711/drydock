@@ -11,7 +11,7 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import type { ForgeId } from "@/lib/forge/types";
 import { DEFAULT_MODEL } from "@/lib/models";
-import { addRepoAction } from "@/lib/repos/actions";
+import { addRepoAction, detectDefaultBranchAction } from "@/lib/repos/actions";
 
 /** Basename without importing the server-only fs helper into the client bundle. */
 function basename(path: string): string {
@@ -26,7 +26,20 @@ export function AddRepoForm({ onDone }: { onDone: () => void }) {
   const [platform, setPlatform] = useState<ForgeId>("github");
   const [apiBaseUrl, setApiBaseUrl] = useState("");
   const [apiToken, setApiToken] = useState("");
+  const [defaultBranch, setDefaultBranch] = useState("");
+  // Once the user edits the branch we stop auto-filling it so detection can
+  // never clobber a deliberate choice (issue #210).
+  const [branchTouched, setBranchTouched] = useState(false);
   const [picking, setPicking] = useState(false);
+
+  /** Pre-fill the default branch from the clone unless the user set it by hand. */
+  function autoDetectBranch(repoPath: string) {
+    if (branchTouched || !repoPath.trim()) return;
+    start(async () => {
+      const detected = await detectDefaultBranchAction(repoPath);
+      if (!branchTouched) setDefaultBranch(detected);
+    });
+  }
 
   return (
     <Card className="dd-fade-up p-5">
@@ -39,6 +52,7 @@ export function AddRepoForm({ onDone }: { onDone: () => void }) {
               name,
               defaultModel: model,
               platform,
+              defaultBranch: defaultBranch.trim() || undefined,
               apiBaseUrl: platform === "gitlab" ? apiBaseUrl.trim() || null : null,
               apiToken: platform === "gitlab" ? apiToken.trim() || null : null,
             });
@@ -68,6 +82,7 @@ export function AddRepoForm({ onDone }: { onDone: () => void }) {
                 id="repo-path"
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
+                onBlur={(e) => autoDetectBranch(e.target.value)}
                 placeholder="/abs/path/to/repo"
                 required
                 className="pl-9 font-mono"
@@ -85,6 +100,23 @@ export function AddRepoForm({ onDone }: { onDone: () => void }) {
 
         <Field label="Forge" htmlFor="repo-platform">
           <ForgeSelect id="repo-platform" value={platform} onChange={setPlatform} />
+        </Field>
+
+        <Field
+          label="Default branch"
+          htmlFor="repo-default-branch"
+          hint="Auto-detected from the clone; the base for worktrees and PRs."
+        >
+          <Input
+            id="repo-default-branch"
+            value={defaultBranch}
+            onChange={(e) => {
+              setBranchTouched(true);
+              setDefaultBranch(e.target.value);
+            }}
+            placeholder="main"
+            className="font-mono"
+          />
         </Field>
 
         {platform === "gitlab" && (
@@ -130,6 +162,7 @@ export function AddRepoForm({ onDone }: { onDone: () => void }) {
           onSelect={(p) => {
             setPath(p);
             if (!name.trim()) setName(basename(p));
+            autoDetectBranch(p);
             setPicking(false);
           }}
         />
