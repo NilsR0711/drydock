@@ -35,7 +35,19 @@ export const spawnStreamRunner: StreamRunner = (cmd, args, cwd, cb) => {
   // the whole tree. A SIGKILLed CLI would otherwise orphan its grandchildren
   // (test runners, dev servers started via the agent's tools), which keep
   // running, hold files in the worktree, and outlive Drydock on shutdown.
-  const child: ChildProcess = spawn(cmd, args, { cwd, env: process.env, detached: SPAWN_DETACHED });
+  //
+  // stdin is wired to /dev/null ("ignore"): the agent CLI takes its prompt as an
+  // argv flag and reads no input, but on the default inherited pipe its stdin
+  // stays open and the `claude` CLI emits a benign "no stdin data received in 3s,
+  // proceeding without it" warning to stderr — which Drydock then surfaces as a
+  // red ERROR log line (issue #233). A /dev/null stdin returns EOF immediately,
+  // so the warning never fires; stdout/stderr stay piped for streaming.
+  const child: ChildProcess = spawn(cmd, args, {
+    cwd,
+    env: process.env,
+    detached: SPAWN_DETACHED,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");
   child.stdout?.on("data", (d: string) => cb.onStdout(d));
