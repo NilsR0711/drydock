@@ -37,8 +37,9 @@ const nextConfig: NextConfig = {
   // external like better-sqlite3 by a hashed module id (`better-sqlite3-<hash>`)
   // that is unresolvable in the published standalone bundle, while webpack emits
   // a plain `require("better-sqlite3")` that resolves from the traced
-  // node_modules. Dev (`next dev`) still uses Turbopack, which loads the module
-  // from the project's own node_modules and is unaffected (issue #12).
+  // node_modules. Dev runs on webpack too — via `scripts/dev.mjs`, which also
+  // caps the heap — because Turbopack's dev server grew its memory without
+  // bound and could crash the host (issue #204).
   serverExternalPackages: ["better-sqlite3", "chokidar"],
 };
 
