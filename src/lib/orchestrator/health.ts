@@ -20,6 +20,11 @@ export interface HealthBody {
   version: string;
   uptimeSeconds: number;
   driver: {
+    /**
+     * True only when *this* instance holds the driver lock. A secondary
+     * instance that did not acquire it reports false even while a peer holds
+     * the lock, so the field tracks per-process liveness (issue #231).
+     */
     lockHeld: boolean;
     draining: boolean;
     paused: boolean;
@@ -108,7 +113,7 @@ export function getHealth(deps: HealthDeps = {}): HealthResult {
       version: deps.version?.() ?? getCurrentVersion(),
       uptimeSeconds: deps.uptimeSeconds?.() ?? Math.floor(process.uptime()),
       driver: {
-        lockHeld: lock.held,
+        lockHeld: lock.self,
         draining: dbDraining || (deps.memDraining?.() ?? isDraining()),
         paused,
         lastTickAt: loop.lastTickAt === null ? null : new Date(loop.lastTickAt).toISOString(),

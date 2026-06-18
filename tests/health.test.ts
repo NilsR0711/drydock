@@ -114,6 +114,18 @@ describe("getHealth", () => {
     expect(body.driver.lockHeld).toBe(false);
   });
 
+  it("reports lockHeld:false on a secondary instance whose peer holds the lock (issue #231)", () => {
+    // The lock exists and is live, but a different process owns it: this
+    // instance did not acquire it (self:false), so lockHeld must be false.
+    const { body } = getHealth({
+      ...baseDeps,
+      loop: () => ({ running: false, lastTickAt: null, intervalMs: null }),
+      lock: () => ({ held: true, pid: 999, self: false }),
+    });
+    expect(body.driver.lockHeld).toBe(false);
+    expect(body.reasons).toContain("loop_not_running");
+  });
+
   it("degrades to 503 when the last tick is older than three intervals", () => {
     const { httpStatus, body } = getHealth({
       ...baseDeps,
