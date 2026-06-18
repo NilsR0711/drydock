@@ -1,4 +1,5 @@
 import type { ParsedEvent, ParseError, RawRateLimitInfo } from "@/lib/stream/parser";
+import type { CodexUsageReading } from "./codex-usage";
 
 /**
  * Coding agents Drydock can drive. claude/codex map to local CLIs; openrouter
@@ -150,6 +151,14 @@ export interface AgentProvider {
    * Optional: agents without limit detection simply fail generically.
    */
   classifyFailure?(input: ClassifyFailureInput): ProviderLimitInfo | undefined;
+  /**
+   * Pull the agent's proactively-reported quota snapshot from a finished
+   * session's parser (issue #189), or undefined when the stream carried none.
+   * Codex implements this from its structured `rate_limits` windows; Claude
+   * instead exposes a qualitative reading via `parser.rateLimit` (issue #188).
+   * Optional: agents that report no usage windows omit it.
+   */
+  captureUsage?(parser: StreamParser): CodexUsageReading | undefined;
   /**
    * Estimate cost in USD from token counts (used when the stream omits it).
    * Cache token counts are optional; providers without cache pricing (codex)

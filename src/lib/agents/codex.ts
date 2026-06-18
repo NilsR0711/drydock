@@ -7,6 +7,7 @@ import {
   type ParseError,
 } from "@/lib/stream/parser";
 import { classifyCodexFailure } from "./codex-limits";
+import type { CodexUsageReading, CodexUsageWindowReading } from "./codex-usage";
 import type { AgentProvider } from "./types";
 
 export const CODEX_DEFAULT_MODEL = "gpt-5-codex";
@@ -67,6 +68,26 @@ const usageSchema = z
   })
   .passthrough();
 
+// Codex reports its OAuth quota proactively on a `token_count` event (issue
+// #189): `rate_limits.{primary,secondary}` each carry `used_percent`,
+// `window_minutes`, and `resets_in_seconds`. Field names verified against the
+// Codex CLI JSONL schema (openai/codex #14728). In `exec` mode older builds
+// send `rate_limits: null` (no `x-codex-*` headers), so every level is nullish.
+const rateLimitWindowSchema = z
+  .object({
+    used_percent: z.number().optional(),
+    window_minutes: z.number().optional(),
+    resets_in_seconds: z.number().optional(),
+  })
+  .passthrough();
+
+const rateLimitsSchema = z
+  .object({
+    primary: rateLimitWindowSchema.nullish(),
+    secondary: rateLimitWindowSchema.nullish(),
+  })
+  .passthrough();
+
 const itemSchema = z
   .object({
     id: z.string().optional(),
@@ -84,6 +105,7 @@ const codexEvent = z
     type: z.string(),
     thread_id: z.string().optional(),
     usage: usageSchema.optional(),
+    rate_limits: rateLimitsSchema.nullish(),
     item: itemSchema.optional(),
     // turn.failed carries `{error:{message}}`; fatal stream `error` events
     // carry a top-level `message` (issue #167). Neither has structured codes.
@@ -124,6 +146,38 @@ function itemChunks(item: CodexItem): ContentChunk[] {
     default:
       return [];
   }
+}
+
+type CodexRateLimitWindow = z.infer<typeof rateLimitWindowSchema>;
+
+/** One window's numbers, or undefined when it carried no `used_percent`. */
+function windowReading(
+  window: CodexRateLimitWindow | null | undefined,
+): CodexUsageWindowReading | undefined {
+  if (!window || typeof window.used_percent !== "number") return undefined;
+  return {
+    usedPercent: window.used_percent,
+    windowMinutes: window.window_minutes,
+    resetsInSeconds: window.resets_in_seconds,
+  };
+}
+
+/**
+ * Pull a usable quota snapshot out of a parsed codex event (issue #189), or
+ * undefined when the event carried no rate-limit data — a null `rate_limits`
+ * (exec mode), the field absent (older CLI), or no window with a percent. The
+ * input is loosely typed so the same extractor serves the parser and tests.
+ */
+export function codexRateLimitReading(event: {
+  rate_limits?: unknown;
+  [key: string]: unknown;
+}): CodexUsageReading | undefined {
+  const limits = rateLimitsSchema.nullish().safeParse(event.rate_limits);
+  if (!limits.success || !limits.data) return undefined;
+  const primary = windowReading(limits.data.primary);
+  const secondary = windowReading(limits.data.secondary);
+  if (!primary && !secondary) return undefined;
+  return { primary, secondary };
 }
 
 /** Normalize one parsed codex event, or null for events we don't surface. */
@@ -201,6 +255,12 @@ export class CodexStreamParser {
   resultText?: string;
   /** Whether the stream ended in a failed turn / fatal error (issue #167). */
   resultIsError?: boolean;
+  /**
+   * Latest OAuth quota snapshot seen in the stream (issue #189), or undefined
+   * when the CLI reported none. A fresh non-empty reading replaces the prior
+   * one so the captured value reflects the most recent window state.
+   */
+  rateLimits?: CodexUsageReading;
   /** Invoked for every line that fails to parse; the line is then skipped. */
   onParseError?: (error: ParseError) => void;
 
@@ -236,6 +296,11 @@ export class CodexStreamParser {
       return null;
     }
     if (!event) return null;
+    // Proactive quota capture (issue #189): a `token_count` event carries the
+    // OAuth rate-limit windows; keep the latest usable reading regardless of
+    // which event surfaced it, so success and failure paths both report it.
+    const reading = codexRateLimitReading(event);
+    if (reading) this.rateLimits = reading;
     // Failure-text tracking for the limit classifier (issue #167): keep the
     // last error message seen; a completed turn wins over earlier transient
     // errors (the CLI's reconnect notices arrive as `error` events too).
@@ -320,6 +385,10 @@ export const codexProvider: AgentProvider = {
   createParser: () => new CodexStreamParser(),
 
   classifyFailure: classifyCodexFailure,
+
+  // Surface the quota snapshot captured during the run (issue #189). Only the
+  // codex parser tracks rate limits, so a foreign parser yields nothing.
+  captureUsage: (parser) => (parser instanceof CodexStreamParser ? parser.rateLimits : undefined),
 
   estimateCost: estimateCodexCost,
 };
