@@ -6,9 +6,15 @@ All automation lives in `.github/workflows/`. Workflows are scoped to the
 ## `ci.yml` — Verify
 
 Runs on every push to `master` and every PR. Installs with a frozen lockfile,
-then runs lint, typecheck, test, and build across a Node 20/22 matrix.
-Superseded runs on the same ref are cancelled (`concurrency` with
-`cancel-in-progress: true`).
+then runs lint, typecheck, test, build, and a standalone smoke test across a
+Node 20/22 matrix. Superseded runs on the same ref are cancelled (`concurrency`
+with `cancel-in-progress: true`).
+
+The smoke step (`pnpm smoke` → `scripts/smoke-standalone.mjs`) boots the built
+`.next/standalone/server.js` and requires it to serve the homepage. A clean
+`next build` can still emit a bundle that crashes on boot when the file tracer
+drops a runtime module it cannot follow — typecheck and the unit suite never
+exercise a real boot, so this is the only check that catches it (issue #209).
 
 ## `codeql.yml` — Security analysis
 
@@ -53,7 +59,8 @@ ways: `workflow_dispatch` (manual publish of the version on the chosen ref —
 used for the first release and ad-hoc/recovery publishes) and `workflow_call`
 (reused by `release-please.yml` after it cuts a release). It upgrades npm to
 `>= 11.5.1` and runs `npm publish --access public`; `npm publish` first runs the
-`prepublishOnly` gate (`pnpm test && pnpm build`), so a broken build never ships.
+`prepublishOnly` gate (`pnpm test && pnpm build && pnpm smoke`), so a build that
+fails to boot the standalone server never ships (issue #209).
 Authentication is tokenless via **npm trusted publishing** (OIDC,
 `id-token: write`) — no `NPM_TOKEN` secret — and provenance is attached
 automatically. For reusable workflows npm validates the *calling* workflow, so

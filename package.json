@@ -46,12 +46,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "smoke": "node scripts/smoke-standalone.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/db/migrate.ts",
     "backup": "tsx scripts/backup.ts",
     "db:prune": "tsx scripts/prune.ts",
     "mcp": "tsx scripts/drydock.ts mcp",
-    "prepublishOnly": "pnpm test && pnpm build"
+    "prepublishOnly": "pnpm test && pnpm build && pnpm smoke"
   },
   "bin": {
     "drydock": "bin/drydock.mjs"
