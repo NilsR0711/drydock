@@ -188,6 +188,8 @@ export interface EnqueueInput {
   model?: string;
   agent?: string;
   maxTurns?: number;
+  /** Job flow discriminator (issue #256); defaults to "issue". */
+  kind?: "issue" | "release";
   /** Dedupe key; defaults to `${repoId}:${issueNumber}`. */
   dedupeKey?: string;
 }
