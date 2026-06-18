@@ -96,6 +96,30 @@ describe("WorktreeManager", () => {
     expect(wt.base).toBe("deadbeefcafe");
   });
 
+  it("prepareForBranch records the base commit it was cut from (issue #206)", async () => {
+    const run: CommandRunner = async (_cmd, args) => ({
+      stdout: args.includes("rev-parse") ? "cafebabe\n" : "",
+      stderr: "",
+      exitCode: 0,
+    });
+    const wt = await new WorktreeManager(run).prepareForBranch(repo, "drydock/issue-9-job-3", "3");
+    expect(wt.base).toBe("cafebabe");
+  });
+
+  it("prepareForNewBranch records the base commit it was cut from (issue #206)", async () => {
+    const run: CommandRunner = async (_cmd, args) => ({
+      stdout: args.includes("rev-parse") ? "feedface\n" : "",
+      stderr: "",
+      exitCode: 0,
+    });
+    const wt = await new WorktreeManager(run).prepareForNewBranch(
+      repo,
+      "drydock/deploy-123",
+      "123",
+    );
+    expect(wt.base).toBe("feedface");
+  });
+
   it("prepareForBranch fetches and checks out an existing branch", async () => {
     const { calls, run } = recordingRunner();
     const wt = await new WorktreeManager(run).prepareForBranch(repo, "drydock/issue-9-job-3", "3");
