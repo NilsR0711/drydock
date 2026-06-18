@@ -171,4 +171,39 @@ describe("runJob needs_human worktree preservation (issue #249)", () => {
     expect(deps.worktrees.commitAndPushForHuman).not.toHaveBeenCalled();
     expect(removed.v).toBe(true);
   });
+
+  it("cleans up when a concurrent abort makes the needs_human transition throw mid-preserve", async () => {
+    // The catch path preserves the worktree, then the needs_human transition
+    // races a concurrent abort and throws InvalidTransitionError. The job is now
+    // terminal, so the preserve must be undone and the worktree cleaned up
+    // instead of leaking (CodeRabbit, issue #249).
+    const removed = { v: false };
+    const deps = baseDeps(removed, {
+      runSession: vi.fn(async (job: Job) => {
+        db.update(jobs)
+          .set({ status: "working", sessionId: "s1" })
+          .where(eq(jobs.id, job.id))
+          .run();
+        return { exitCode: 0, sessionId: "s1", costUsd: 0.1, inputTokens: 1, outputTokens: 1 };
+      }),
+      worktrees: fakeWorktrees(removed, {
+        // The PR-path commit fails, dropping into the catch with status working.
+        commitAndPush: vi.fn(async () => {
+          throw new Error("boom");
+        }),
+        // Preserve flips the flag true, but an abort lands first: the subsequent
+        // needs_human transition then throws InvalidTransitionError.
+        commitAndPushForHuman: vi.fn(async () => {
+          transitionJob(job.id, "aborted", {}, db);
+          return true;
+        }),
+      }),
+    });
+    const job = createJob({ repoId, issueNumber: 1 }, db);
+    const result = await runJob(job.id, deps as never);
+
+    expect(result.status).toBe("aborted");
+    expect(deps.worktrees.commitAndPushForHuman).toHaveBeenCalledTimes(1);
+    expect(removed.v).toBe(true);
+  });
 });

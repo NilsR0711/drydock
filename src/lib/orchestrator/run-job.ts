@@ -812,7 +812,12 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
           `[run-job] job ${job.id} settled concurrently during failure handling`,
           transitionErr,
         );
-        return getJob(job.id, db) as Job;
+        const settled = getJob(job.id, db) as Job;
+        // The needs_human park never landed, so there is nothing to preserve
+        // for: undo the flag the preserve set above so the worktree of a now
+        // settled (e.g. aborted) job is still cleaned up (issue #249).
+        if (settled.status !== "needs_human") preserveWorktree = false;
+        return settled;
       }
     }
     return current;
