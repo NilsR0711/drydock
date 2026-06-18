@@ -7,6 +7,7 @@ export const SUPPORTED_VARIABLES = [
   "$BRANCH",
   "$REPO_NAME",
   "$CI_LOG",
+  "$PR_FORMAT",
 ] as const;
 export type TemplateVar = (typeof SUPPORTED_VARIABLES)[number];
 
@@ -17,6 +18,7 @@ export interface TemplateVars {
   BRANCH?: string;
   REPO_NAME?: string;
   CI_LOG?: string;
+  PR_FORMAT?: string;
 }
 
 /**
@@ -31,6 +33,7 @@ export function renderTemplate(content: string, vars: TemplateVars): string {
     $BRANCH: vars.BRANCH ?? "$BRANCH",
     $REPO_NAME: vars.REPO_NAME ?? "$REPO_NAME",
     $CI_LOG: vars.CI_LOG ?? "$CI_LOG",
+    $PR_FORMAT: vars.PR_FORMAT ?? "$PR_FORMAT",
   };
   let out = content;
   for (const token of [...SUPPORTED_VARIABLES].sort((a, b) => b.length - a.length)) {

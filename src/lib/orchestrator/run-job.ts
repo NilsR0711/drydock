@@ -521,6 +521,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         REPO_NAME: repo.name,
         ISSUE_TITLE: issueTitle,
         ISSUE_BODY: issueBody,
+        // The PR body structure is its own per-repo template (issue #252),
+        // injected here so the agent writes `.drydock/PR.md` in the repo's shape.
+        PR_FORMAT: resolveTemplateContent(repo.id, TEMPLATE_NAMES.prFormat, db),
       });
 
       // Decomposed issues (issue #19, opt-in): surface the ordered subtasks in the
@@ -609,6 +612,8 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
           ISSUE_NUM: job.issueNumber,
           BRANCH: wt.branch,
           REPO_NAME: repo.name,
+          // Keep the resumed run's PR body in the repo's shape too (issue #252).
+          PR_FORMAT: resolveTemplateContent(repo.id, TEMPLATE_NAMES.prFormat, db),
         },
       );
       session = await resumeLimitSession(getJob(job.id, db) as Job, resumePrompt, wt.path);

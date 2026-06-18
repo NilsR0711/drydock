@@ -61,6 +61,59 @@ describe("SUPPORTED_VARIABLES", () => {
     expect(SUPPORTED_VARIABLES).toContain("$ISSUE_TITLE");
     expect(SUPPORTED_VARIABLES).toContain("$ISSUE_BODY");
   });
+
+  it("includes the PR-format token (issue #252)", () => {
+    expect(SUPPORTED_VARIABLES).toContain("$PR_FORMAT");
+  });
+});
+
+describe("renderTemplate — $PR_FORMAT (issue #252)", () => {
+  it("substitutes the injected PR-format body", () => {
+    const out = renderTemplate("write the body:\n$PR_FORMAT", {
+      PR_FORMAT: "TL;DR: one line.\n\n## Problem\n…",
+    });
+    expect(out).toBe("write the body:\nTL;DR: one line.\n\n## Problem\n…");
+  });
+
+  it("leaves $PR_FORMAT untouched when the var is missing", () => {
+    expect(renderTemplate("body:\n$PR_FORMAT", {})).toBe("body:\n$PR_FORMAT");
+  });
+});
+
+describe("pr-format template (issue #252)", () => {
+  it("exposes a dedicated pr-format template name", () => {
+    expect(TEMPLATE_NAMES.prFormat).toBe("pr-format");
+  });
+
+  it("the default pr-format leads with a TL;DR, then Problem/Solution/Tests/Risks", () => {
+    const tpl = DEFAULT_TEMPLATES[TEMPLATE_NAMES.prFormat];
+    expect(tpl).toMatch(/TL;DR/i);
+    // The TL;DR must come first, ahead of the structured sections.
+    expect(tpl.search(/TL;DR/i)).toBeLessThan(tpl.search(/Problem/i));
+    expect(tpl).toMatch(/Problem/i);
+    expect(tpl).toMatch(/Solution/i);
+    expect(tpl).toMatch(/Tests/i);
+    expect(tpl).toMatch(/Risks/i);
+  });
+
+  it("the main template injects the PR format via $PR_FORMAT", () => {
+    expect(DEFAULT_TEMPLATES.default).toContain("$PR_FORMAT");
+  });
+
+  it("the limit-resume template injects the PR format via $PR_FORMAT", () => {
+    expect(DEFAULT_TEMPLATES["limit-resume"]).toContain("$PR_FORMAT");
+  });
+
+  it("resolveTemplateContent falls back to the code default for pr-format", () => {
+    expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.prFormat, db)).toBe(
+      DEFAULT_TEMPLATES[TEMPLATE_NAMES.prFormat],
+    );
+  });
+
+  it("returns a stored per-repo pr-format override when present", () => {
+    saveTemplate({ repoId, name: TEMPLATE_NAMES.prFormat, content: "custom PR shape" }, db);
+    expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.prFormat, db)).toBe("custom PR shape");
+  });
 });
 
 describe("default templates embed the issue context (issue #205)", () => {

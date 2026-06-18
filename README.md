@@ -63,7 +63,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 🗂️ **Backlog & queue board** — drag issues from a synced backlog into a sortable, priority-ordered queue. One issue or many in flight, per repo.
 
-🤖 **Autonomous implementation** — spawns a coding agent (`claude` or the `codex` CLI), streams its work, and opens a pull request. The agent describes its own change in a `.drydock/PR.md` (a Conventional Commit subject plus a Problem/Solution/Tests/Risks body); Drydock uses it for the commit message and the PR title/body, appends `Closes #N`, and excludes the file from the commit — falling back to `Fix #N` / `Closes #N` when it's absent.
+🤖 **Autonomous implementation** — spawns a coding agent (`claude` or the `codex` CLI), streams its work, and opens a pull request. The agent describes its own change in a `.drydock/PR.md` (a Conventional Commit subject plus a body that, by default, leads with a TL;DR and then Problem/Solution/Tests/Risks — the body shape is its own per-repo editable `PR format` template); Drydock uses it for the commit message and the PR title/body, appends `Closes #N`, and excludes the file from the commit — falling back to `Fix #N` / `Closes #N` when it's absent.
 
 🔌 **Pluggable agents** — choose `claude` or `codex` per repo (with a global default in settings); a preflight check verifies the selected CLI is installed.
 
