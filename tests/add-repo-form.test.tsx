@@ -56,6 +56,52 @@ describe("AddRepoForm default branch (issue #210)", () => {
     expect(branch.value).toBe("trunk");
   });
 
+  it("does not clobber a branch the user edits while detection is in flight", async () => {
+    // Detection that resolves only when we say so, simulating a slow git call.
+    let resolveDetect: (v: string) => void = () => {};
+    actions.detectDefaultBranchAction.mockImplementation(
+      () =>
+        new Promise<string>((r) => {
+          resolveDetect = r;
+        }),
+    );
+    mounted = render(<AddRepoForm onDone={() => {}} />);
+    const path = input(mounted.container, "repo-path");
+    setInputValue(path, "/repos/orgl-app");
+    fire(path, new Event("focusout", { bubbles: true }));
+    await flush();
+    // User picks a branch by hand before detection comes back.
+    const branch = input(mounted.container, "repo-default-branch");
+    setInputValue(branch, "trunk");
+    // Now the in-flight detection resolves — it must not overwrite the edit.
+    resolveDetect("master");
+    await flush();
+    expect(branch.value).toBe("trunk");
+  });
+
+  it("uses the result of the latest detection when paths change quickly", async () => {
+    const resolvers: Array<(v: string) => void> = [];
+    actions.detectDefaultBranchAction.mockImplementation(
+      () =>
+        new Promise<string>((r) => {
+          resolvers.push(r);
+        }),
+    );
+    mounted = render(<AddRepoForm onDone={() => {}} />);
+    const path = input(mounted.container, "repo-path");
+    setInputValue(path, "/repos/first");
+    fire(path, new Event("focusout", { bubbles: true }));
+    await flush();
+    setInputValue(path, "/repos/second");
+    fire(path, new Event("focusout", { bubbles: true }));
+    await flush();
+    // Resolve out of order: the latest request wins regardless.
+    resolvers[1]?.("second-branch");
+    resolvers[0]?.("first-branch");
+    await flush();
+    expect(input(mounted.container, "repo-default-branch").value).toBe("second-branch");
+  });
+
   it("does not detect for an empty path", async () => {
     mounted = render(<AddRepoForm onDone={() => {}} />);
     const path = input(mounted.container, "repo-path");

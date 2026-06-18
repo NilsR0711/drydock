@@ -10,6 +10,8 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 // is on "master". Keeps the action test off the real `git` binary while still
 // proving the action wires detection through (issue #210).
 vi.mock("@/lib/git/default-branch", () => ({
+  DEFAULT_BRANCH_FALLBACK: "main",
+  detectDefaultBranch: vi.fn(async () => "master"),
   resolveDefaultBranch: vi.fn(
     async (input: { defaultBranch?: string | null }) => input.defaultBranch?.trim() || "master",
   ),

@@ -1,7 +1,7 @@
 "use client";
 
 import { FolderGit2, Plus } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { DirectoryPicker } from "@/components/directory-picker";
 import { ForgeSelect } from "@/components/forge-select";
 import { ModelSelect } from "@/components/model-select";
@@ -28,16 +28,26 @@ export function AddRepoForm({ onDone }: { onDone: () => void }) {
   const [apiToken, setApiToken] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("");
   // Once the user edits the branch we stop auto-filling it so detection can
-  // never clobber a deliberate choice (issue #210).
-  const [branchTouched, setBranchTouched] = useState(false);
+  // never clobber a deliberate choice (issue #210). A ref (not state) holds the
+  // flag: an in-flight async detection must read the live value, not the stale
+  // closure captured when it started, and nothing renders off it.
+  const branchTouchedRef = useRef(false);
+  // Monotonic id so an out-of-order detection result is discarded: only the
+  // most recently started request may write the field.
+  const detectRequestId = useRef(0);
   const [picking, setPicking] = useState(false);
 
   /** Pre-fill the default branch from the clone unless the user set it by hand. */
   function autoDetectBranch(repoPath: string) {
-    if (branchTouched || !repoPath.trim()) return;
+    const trimmed = repoPath.trim();
+    if (branchTouchedRef.current || !trimmed) return;
+    const requestId = ++detectRequestId.current;
     start(async () => {
-      const detected = await detectDefaultBranchAction(repoPath);
-      if (!branchTouched) setDefaultBranch(detected);
+      const detected = await detectDefaultBranchAction(trimmed);
+      // Drop the result if the user has since taken over the field or a newer
+      // detection superseded this one.
+      if (branchTouchedRef.current || requestId !== detectRequestId.current) return;
+      setDefaultBranch(detected);
     });
   }
 
@@ -111,7 +121,7 @@ export function AddRepoForm({ onDone }: { onDone: () => void }) {
             id="repo-default-branch"
             value={defaultBranch}
             onChange={(e) => {
-              setBranchTouched(true);
+              branchTouchedRef.current = true;
               setDefaultBranch(e.target.value);
             }}
             placeholder="main"
