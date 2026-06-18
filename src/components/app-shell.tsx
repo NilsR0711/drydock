@@ -15,11 +15,13 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ClaudeUsagePill } from "@/components/claude-usage";
 import { CredentialBanner } from "@/components/credential-banner";
 import { EmergencyStopButton } from "@/components/emergency-stop-button";
 import { PauseToggle } from "@/components/pause-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/update-banner";
+import type { ClaudeUsageView } from "@/lib/agents/claude-usage";
 import type { CredentialFailure } from "@/lib/orchestrator/credential-status";
 import { cn } from "@/lib/utils";
 import type { InstallKind } from "@/lib/version/current";
@@ -48,6 +50,7 @@ export function AppShell({
   updateStatus,
   installKind = "local",
   credentialFailures = [],
+  claudeUsage,
 }: {
   children: React.ReactNode;
   adrPending?: number;
@@ -56,6 +59,7 @@ export function AppShell({
   updateStatus?: UpdateStatus;
   installKind?: InstallKind;
   credentialFailures?: CredentialFailure[];
+  claudeUsage?: ClaudeUsageView;
 }) {
   const pathname = usePathname();
   return (
@@ -105,6 +109,7 @@ export function AppShell({
             })}
           </nav>
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            {claudeUsage && <ClaudeUsagePill view={claudeUsage} />}
             {updateStatus && <UpdateBanner status={updateStatus} installKind={installKind} />}
             <PauseToggle paused={paused} />
             <EmergencyStopButton />

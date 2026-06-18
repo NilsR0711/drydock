@@ -4,6 +4,7 @@ import { FolderGit2, Info, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AddRepoForm } from "@/components/add-repo-form";
+import { ClaudeUsageCard } from "@/components/claude-usage";
 import { DashboardStats } from "@/components/dashboard-stats";
 import { PageHeader } from "@/components/page-header";
 import { RepoStatusCard } from "@/components/repo-status-card";
@@ -151,6 +152,8 @@ export function DashboardLive({
               <Sparkline data={spendSeries} width={300} height={44} tone="chart-1" average />
             </div>
           </Card>
+
+          <ClaudeUsageCard view={snapshot.claudeUsage} />
 
           {summary.needsHuman > 0 ? (
             <Alert

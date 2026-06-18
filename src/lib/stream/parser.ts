@@ -34,6 +34,30 @@ const userEvent = z.object({
   }),
 });
 
+/**
+ * Per-run subscription rate-limit snapshot the CLI emits as a `rate_limit_event`
+ * (issue #188). On the OAuth subscription path this carries the live window
+ * state — `status` ("allowed" → "allowed_warning" → "rejected"), the window's
+ * `resetsAt` epoch, and which window (`rateLimitType`, e.g. "five_hour" /
+ * "weekly"). Passthrough keeps any extra fields newer CLIs add. Captured
+ * opportunistically from runs Drydock already performs — no extra API call.
+ */
+const rateLimitInfoSchema = z
+  .object({
+    status: z.string().optional(),
+    resetsAt: z.number().optional(),
+    rateLimitType: z.string().optional(),
+  })
+  .passthrough();
+
+export type RawRateLimitInfo = z.infer<typeof rateLimitInfoSchema>;
+
+const rateLimitEvent = z.object({
+  type: z.literal("rate_limit_event"),
+  rate_limit_info: rateLimitInfoSchema.optional(),
+  session_id: z.string().optional(),
+});
+
 const resultEvent = z.object({
   type: z.literal("result"),
   subtype: z.string().optional(),
@@ -50,6 +74,7 @@ const streamEvent = z.discriminatedUnion("type", [
   systemEvent,
   assistantEvent,
   userEvent,
+  rateLimitEvent,
   resultEvent,
 ]);
 
@@ -85,6 +110,8 @@ export interface ParsedEvent {
   isError: boolean;
   /** Final result text, present on `result` events that carry one (issue #166). */
   resultText?: string;
+  /** Subscription rate-limit snapshot, present on `rate_limit_event`s (issue #188). */
+  rateLimitInfo?: RawRateLimitInfo;
   /** The original event as emitted by the agent CLI (shape varies per agent). */
   raw: unknown;
 }
@@ -139,6 +166,9 @@ function toParsed(event: StreamEvent): ParsedEvent {
     base.cacheReadInputTokens = event.message.usage?.cache_read_input_tokens ?? 0;
   } else if (event.type === "user") {
     base.chunks = extractContent(event.message.content);
+  } else if (event.type === "rate_limit_event") {
+    base.sessionId = event.session_id;
+    base.rateLimitInfo = event.rate_limit_info;
   } else {
     base.sessionId = event.session_id;
     base.resultText = event.result;
@@ -189,6 +219,8 @@ export class StreamJsonParser {
   resultText?: string;
   /** Whether the stream's result event was flagged as an error (issue #166). */
   resultIsError = false;
+  /** Latest subscription rate-limit snapshot seen in the stream (issue #188). */
+  rateLimit?: RawRateLimitInfo;
   /** Invoked for every line that fails to parse; the line is then skipped. */
   onParseError?: (error: ParseError) => void;
 
@@ -228,6 +260,7 @@ export class StreamJsonParser {
     if (!parsed) return null;
     if (parsed.sessionId) this.sessionId = parsed.sessionId;
     if (parsed.model) this.model = parsed.model;
+    if (parsed.rateLimitInfo) this.rateLimit = parsed.rateLimitInfo;
     if (parsed.type === "result") {
       // The result event's `usage` is the authoritative session total, not a
       // per-turn delta — assign it rather than add, otherwise it double-counts

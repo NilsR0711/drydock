@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import { readingFromRateLimit } from "@/lib/agents/claude-usage";
 import { getAgentProvider } from "@/lib/agents/registry";
 import type { AgentProvider, ProviderLimitInfo, StreamParser } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
@@ -10,6 +11,7 @@ import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates"
 import { getBroker, type LogBroker } from "@/lib/stream/broker";
 import { transitionJob } from "./jobs";
 import { agentLimitBlocked } from "./provider-limit";
+import { saveProviderUsage } from "./provider-usage";
 import { clearAbort, registerAbort } from "./singleton";
 
 export interface AgentSessionDeps {
@@ -167,6 +169,18 @@ function classifySessionFailure(
     resultText: parser.resultText,
     resultIsError: parser.resultIsError,
   });
+}
+
+/**
+ * Opportunistic forward-looking usage capture (issue #188): persist the live
+ * subscription-window snapshot the CLI streamed (claude's `rate_limit_event`),
+ * so the dashboard can warn before a quota is exhausted. Captured from the run
+ * Drydock already performs — no extra API call. Agents whose CLI emits no such
+ * event leave `parser.rateLimit` undefined and record nothing.
+ */
+function captureProviderUsage(provider: AgentProvider, parser: StreamParser, db: DB): void {
+  const reading = readingFromRateLimit(parser.rateLimit, Math.floor(Date.now() / 1000));
+  if (reading) saveProviderUsage(provider.id, reading, db);
 }
 
 interface CostGuard {
@@ -414,6 +428,8 @@ export async function spawnAgentSession(
       .run();
   }
 
+  captureProviderUsage(provider, parser, db);
+
   return {
     exitCode,
     sessionId: parser.sessionId,
@@ -588,6 +604,8 @@ export async function resumeAgentSession(
     })
     .where(eq(jobs.id, job.id))
     .run();
+
+  captureProviderUsage(provider, parser, db);
 
   return {
     exitCode,

@@ -1,4 +1,4 @@
-import type { ParsedEvent, ParseError } from "@/lib/stream/parser";
+import type { ParsedEvent, ParseError, RawRateLimitInfo } from "@/lib/stream/parser";
 
 /**
  * Coding agents Drydock can drive. claude/codex map to local CLIs; openrouter
@@ -30,6 +30,11 @@ export interface StreamParser {
   readonly resultText?: string;
   /** Whether the stream's final result was flagged as an error (issue #166). */
   readonly resultIsError?: boolean;
+  /**
+   * Latest subscription rate-limit snapshot from the stream (issue #188), for
+   * agents whose CLI emits one (claude). Absent for agents without it.
+   */
+  readonly rateLimit?: RawRateLimitInfo;
   /**
    * Invoked for every stdout line the parser could not decode. The line is
    * skipped, never thrown, so a malformed line can't crash the orchestrator
