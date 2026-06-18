@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { issues, type Job, jobEvents, jobs } from "@/lib/db/schema";
+import { getSettings } from "@/lib/settings/service";
 import { emitDashboardChange } from "@/lib/stream/dashboard-bus";
 import { assertTransition, type JobStatus } from "./state-machine";
 
@@ -27,7 +28,10 @@ export function createJob(
       status: "queued",
       model: input.model,
       agent: input.agent ?? "claude",
-      maxTurns: input.maxTurns ?? 40,
+      // The global maxTurns setting is the source of truth for a new job's turn
+      // budget (issue #254); an explicit per-call override still wins. 0 here
+      // means unlimited and is honored downstream by the runner.
+      maxTurns: input.maxTurns ?? getSettings(db).maxTurns,
       dedupeKey: input.dedupeKey ?? null,
     })
     .returning()

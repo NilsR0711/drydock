@@ -17,9 +17,21 @@ describe("settings", () => {
   it("returns defaults when unset", () => {
     const s = getSettings(db);
     expect(s.paused).toBe(false);
-    expect(s.dailyCostLimitUsd).toBe(10);
+    // Fully-autonomous out of the box (issue #254): no daily cost ceiling and a
+    // generous turn/time budget so a normal task finishes without manual tuning.
+    expect(s.dailyCostLimitUsd).toBe(0);
+    expect(s.maxTurns).toBe(200);
+    expect(s.maxJobMinutes).toBe(120);
     expect(s.maxParallelJobs).toBe(3);
     expect(s.retentionDays).toBe(30);
+  });
+
+  it("treats maxTurns = 0 as an allowed (unlimited) budget and rejects negatives (issue #254)", () => {
+    saveSettings({ maxTurns: 0 }, db);
+    expect(getSettings(db).maxTurns).toBe(0);
+    saveSettings({ maxTurns: 500 }, db);
+    expect(getSettings(db).maxTurns).toBe(500);
+    expect(() => saveSettings({ maxTurns: -1 }, db)).toThrow();
   });
 
   it("persists a custom retention window", () => {

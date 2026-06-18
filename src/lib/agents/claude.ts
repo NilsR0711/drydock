@@ -8,6 +8,16 @@ export const CLAUDE_RESUME_MODEL = "claude-haiku-4-5";
 export const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8";
 
 /**
+ * The `--max-turns` flag, or nothing when the budget is 0 (unlimited, issue
+ * #254). A positive budget caps the session; 0 means "no cap", which the CLI
+ * expresses by the flag's absence — passing `--max-turns 0` would instead be a
+ * zero-turn budget that aborts immediately.
+ */
+function turnBudgetArgs(maxTurns: number): string[] {
+  return maxTurns > 0 ? ["--max-turns", String(maxTurns)] : [];
+}
+
+/**
  * The Claude Code CLI as an AgentProvider. This is the behavior-preserving move
  * of the original hardcoded claude logic behind the abstraction: the args here
  * match the SPEC §6.2 / §6.3 invocations exactly.
@@ -24,8 +34,9 @@ export const claudeProvider: AgentProvider = {
   buildStartArgs: ({ prompt, model, maxTurns, bypassPermissions }) => [
     "-p",
     prompt,
-    "--max-turns",
-    String(maxTurns),
+    // 0 = unlimited (issue #254): drop the flag entirely so the CLI applies no
+    // turn cap, rather than passing `--max-turns 0` (a zero-turn budget).
+    ...turnBudgetArgs(maxTurns),
     // An agent-driven release (issue #256) must run the repo's release commands
     // itself, so it bypasses permissions entirely; every other run stays
     // edits-only (acceptEdits), where bash/gh/git would block headlessly.
@@ -44,8 +55,7 @@ export const claudeProvider: AgentProvider = {
     prompt,
     "--resume",
     sessionId,
-    "--max-turns",
-    String(maxTurns),
+    ...turnBudgetArgs(maxTurns),
     // Symmetric with buildStartArgs (issue #256): a resumed release session keeps
     // its full shell access. Off for the CI-fix/limit resumes that never set it.
     ...(bypassPermissions ? ["--dangerously-skip-permissions"] : []),

@@ -210,7 +210,9 @@ export async function runOpenRouterJobSession(
         broker.publish(job.id, { type: "error", payload: { stderr: "session aborted" } });
         break;
       }
-      if (turn >= maxTurns) {
+      // A budget of 0 is unlimited (issue #254): skip the turn check entirely so
+      // the loop runs until the model finishes, the deadline, or an abort.
+      if (maxTurns > 0 && turn >= maxTurns) {
         exitCode = 1;
         broker.publish(job.id, {
           type: "error",
