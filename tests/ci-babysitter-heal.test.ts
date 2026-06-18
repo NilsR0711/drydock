@@ -375,3 +375,64 @@ describe("ciBabysitter auto-heal", () => {
     );
   });
 });
+
+describe("ciBabysitter auto-heal — merge without CI checks (issue #207)", () => {
+  it("escalates a no-checks PR to a human when the policy is off (no heal attempt)", async () => {
+    // With the policy off, zero checks must not be mistaken for a failure to
+    // heal: no session opens, nothing is resumed, and the job parks for a human.
+    const job = ciRunningJob(40);
+    const { gh, runner } = scriptedGh([[]]);
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
+    let t = 0;
+    const now = () => (t += 60_000);
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      sleep: vi.fn(),
+      now,
+      ciWaitMs: 2 * 60_000,
+      maxPolls: 1000,
+      autoHeal: { headSha: vi.fn().mockResolvedValue("sha-1"), provider: "github" },
+    });
+    expect(final.status).toBe("needs_human");
+    expect(final.errorMessage).toContain("CI did not complete in time");
+    expect(resume).not.toHaveBeenCalled();
+    expect(db.select().from(healingAttempts).all()).toHaveLength(0);
+    expect(db.select().from(healingSessions).all()).toHaveLength(0);
+    expect(runner).not.toHaveBeenCalledWith(
+      "gh",
+      expect.arrayContaining(["pr", "merge", "5"]),
+      "/tmp/r",
+    );
+  });
+
+  it("merges a no-checks PR after the settle window when the policy is on", async () => {
+    const job = ciRunningJob(41);
+    const { gh, runner } = scriptedGh([[]]);
+    let t = 0;
+    const sleep = vi.fn(async () => {
+      t += 2 * 60_000;
+    });
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: vi.fn(),
+      sleep,
+      now: () => t,
+      mergeWithoutChecks: true,
+      mergeGateMs: 5 * 60_000,
+      ciWaitMs: 60 * 60_000,
+      maxPolls: 1000,
+      autoHeal: { headSha: vi.fn().mockResolvedValue("sha-1"), provider: "github" },
+    });
+    expect(final.status).toBe("merged");
+    expect(sleep).toHaveBeenCalledTimes(3);
+    expect(db.select().from(healingAttempts).all()).toHaveLength(0);
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      expect.arrayContaining(["pr", "merge", "5"]),
+      "/tmp/r",
+    );
+  });
+});

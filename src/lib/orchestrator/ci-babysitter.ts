@@ -29,14 +29,21 @@ import {
   limitAutoWaitEnabled,
 } from "./provider-limit";
 
-export type CiOutcome = "pending" | "passed" | "failed";
+/**
+ * `none` is distinct from `pending` (issue #207): zero checks means CI has not
+ * registered *anything* — either it has not started yet, or this repo has no
+ * automated CI at all (e.g. `workflow_dispatch`-only or review-bot-only). The
+ * babysitter handles it separately so a repo without automated checks can still
+ * be merged under an explicit opt-in instead of waiting out the budget forever.
+ */
+export type CiOutcome = "none" | "pending" | "passed" | "failed";
 
 const FAIL_STATES = new Set(["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"]);
 const PENDING_STATES = new Set(["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"]);
 
 /** Reduce a set of PR checks to one outcome (SPEC §6.3). */
 export function classifyChecks(checks: PrCheck[]): CiOutcome {
-  if (checks.length === 0) return "pending";
+  if (checks.length === 0) return "none";
   if (checks.some((c) => FAIL_STATES.has(c.state.toUpperCase()))) return "failed";
   if (checks.some((c) => PENDING_STATES.has(c.state.toUpperCase()))) return "pending";
   return "passed";
@@ -118,6 +125,16 @@ export interface BabysitterDeps {
    * pending/failed during the window resets the gate.
    */
   mergeGateMs?: number;
+  /**
+   * Opt-in policy for PRs that report no CI checks at all (issue #207, default
+   * off). When off, persistent zero checks stay `needs_human` (a repo without
+   * automated CI cannot be auto-verified). When on, the babysitter confirms the
+   * absence across a settle window — floored to one poll so a slow-registering
+   * workflow still gets a chance to appear — then merges with no automated
+   * verification. The settle window reuses `mergeGateMs`, so a repo can give
+   * late bot/human reviews time to land before the unverified merge.
+   */
+  mergeWithoutChecks?: boolean;
   /**
    * Whether the job's provider is currently limit-latched (issues #166/#167);
    * while true, CI fixes are deferred (within the CI wait budget) instead of
@@ -286,6 +303,10 @@ export async function ciBabysitter(
   const now = deps.now ?? Date.now;
   const deadline = now() + ciWaitMs;
   const gate = createMergeGate(deps.mergeGateMs ?? 0, now);
+  // No-checks settle gate (issue #207). Floored to one poll so a workflow that
+  // registers its checks a beat after the PR opens still gets observed before
+  // an unverified merge; reuses the merge-gate window otherwise.
+  const noChecksGate = createMergeGate(Math.max(deps.mergeGateMs ?? 0, pollMs), now);
   const limitBlocked = deps.limitBlocked ?? defaultLimitBlocked(jobArg, db);
   let limitWaitLogged = false;
 
@@ -300,12 +321,57 @@ export async function ciBabysitter(
 
     if (outcome === "pending") {
       gate.reset();
+      noChecksGate.reset();
       if (now() >= deadline) return escalateCiTimeout(job, prNumber, ciWaitMs, deps, db);
       await sleep(pollMs);
       continue;
     }
 
+    // No checks reported (issue #207). Without the opt-in, treat exactly like
+    // pending: a repo with no automated CI is escalated, never auto-merged.
+    if (outcome === "none" && !deps.mergeWithoutChecks) {
+      gate.reset();
+      noChecksGate.reset();
+      if (now() >= deadline) {
+        return escalateCiTimeout(job, prNumber, ciWaitMs, deps, db, "no CI checks were reported");
+      }
+      await sleep(pollMs);
+      continue;
+    }
+
+    // Opt-in no-checks merge: settle to confirm no checks are coming, then merge
+    // with an explicit note that the change had no automated verification.
+    if (outcome === "none") {
+      gate.reset();
+      if (noChecksGate.start()) {
+        recordEvent(
+          job.id,
+          "status",
+          { reason: "no CI checks reported; settling before an unverified merge", prNumber },
+          db,
+        );
+      }
+      if (noChecksGate.open()) {
+        if (now() >= deadline) {
+          return escalateCiTimeout(job, prNumber, ciWaitMs, deps, db, "no CI checks were reported");
+        }
+        await sleep(pollMs);
+        continue;
+      }
+      const aborted = externallySettled(job.id, db);
+      if (aborted) return aborted;
+      recordEvent(
+        job.id,
+        "status",
+        { reason: "merging without CI verification (no checks reported)", prNumber },
+        db,
+      );
+      await deps.gh.mergePr(prNumber);
+      return transitionJob(job.id, "merged", { prNumber }, db);
+    }
+
     if (outcome === "passed") {
+      noChecksGate.reset();
       if (gate.start()) {
         recordEvent(
           job.id,
@@ -328,6 +394,7 @@ export async function ciBabysitter(
 
     // failed
     gate.reset();
+    noChecksGate.reset();
     // Claude limit latch (issue #166): a CI-fix resume would only bounce off
     // the spawn guard while blocked. Keep polling — bounded by the CI wait
     // budget — instead of burning the retry budget or paging a human.
@@ -437,6 +504,8 @@ async function autoHealLoop(
   const ciWaitMs = deps.ciWaitMs ?? Number.POSITIVE_INFINITY;
   const deadline = now() + ciWaitMs;
   const gate = createMergeGate(deps.mergeGateMs ?? 0, now);
+  // No-checks settle gate (issue #207); see the matching gate in ciBabysitter.
+  const noChecksGate = createMergeGate(Math.max(deps.mergeGateMs ?? 0, pollMs), now);
   const limitBlocked = deps.limitBlocked ?? defaultLimitBlocked(jobArg, db);
 
   let job = jobArg;
@@ -455,6 +524,7 @@ async function autoHealLoop(
 
     if (outcome === "pending") {
       gate.reset();
+      noChecksGate.reset();
       if (now() >= deadline) {
         // Close the awaiting-CI session before parking the job: leaked
         // in-flight sessions count against the global concurrency cap forever.
@@ -465,7 +535,59 @@ async function autoHealLoop(
       continue;
     }
 
+    // No checks reported (issue #207). Without the opt-in this is not a failure
+    // to heal — treat it like pending so a repo with no automated CI escalates
+    // to a human instead of opening an empty healing session.
+    if (outcome === "none" && !deps.mergeWithoutChecks) {
+      gate.reset();
+      noChecksGate.reset();
+      if (now() >= deadline) {
+        if (pending) closeHealingSession(pending.sessionId, "escalated", db);
+        return escalateCiTimeout(job, prNumber, ciWaitMs, deps, db, "no CI checks were reported");
+      }
+      await sleep(pollMs);
+      continue;
+    }
+
+    // Opt-in no-checks merge: settle, then merge with no automated verification.
+    if (outcome === "none") {
+      gate.reset();
+      if (noChecksGate.start()) {
+        recordEvent(
+          job.id,
+          "status",
+          { reason: "no CI checks reported; settling before an unverified merge", prNumber },
+          db,
+        );
+      }
+      if (noChecksGate.open()) {
+        if (now() >= deadline) {
+          if (pending) closeHealingSession(pending.sessionId, "escalated", db);
+          return escalateCiTimeout(job, prNumber, ciWaitMs, deps, db, "no CI checks were reported");
+        }
+        await sleep(pollMs);
+        continue;
+      }
+      const aborted = externallySettled(job.id, db);
+      if (aborted) {
+        if (pending) closeHealingSession(pending.sessionId, "superseded", db);
+        return aborted;
+      }
+      // A heal in flight cannot be verified once every check has vanished; free
+      // its slot rather than leaving it stranded across the merge.
+      if (pending) closeHealingSession(pending.sessionId, "superseded", db);
+      recordEvent(
+        job.id,
+        "status",
+        { reason: "merging without CI verification (no checks reported)", prNumber },
+        db,
+      );
+      await deps.gh.mergePr(prNumber);
+      return transitionJob(job.id, "merged", { prNumber }, db);
+    }
+
     if (outcome === "passed") {
+      noChecksGate.reset();
       if (gate.start()) {
         recordEvent(
           job.id,
@@ -499,6 +621,7 @@ async function autoHealLoop(
 
     // --- failed ---
     gate.reset();
+    noChecksGate.reset();
     const failing = checks.filter((c) => FAIL_STATES.has(c.state.toUpperCase()));
     const headSha = await heal.headSha(prNumber);
 
