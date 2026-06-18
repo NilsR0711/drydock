@@ -118,6 +118,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoTriage, setAutoTriage] = useState(repo.autoTriageEnabled);
   const [autoProcess, setAutoProcess] = useState(repo.autoProcessEnabled);
   const [autoHeal, setAutoHeal] = useState(repo.autoHealCi);
+  const [mergeWithoutChecks, setMergeWithoutChecks] = useState(repo.mergeWithoutChecks);
   const [autoFeedback, setAutoFeedback] = useState(repo.autoReviewFeedback);
   const [autoDecompose, setAutoDecompose] = useState(repo.autoDecompose);
   const [planFirst, setPlanFirst] = useState(repo.planFirst);
@@ -453,6 +454,15 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               persist({ autoHealCi: v });
             }}
             help="Attempts bounded, verified fixes for failing CI. Never touches external or AI-review checks."
+          />
+          <AutoToggle
+            label="Merge PRs with no CI checks"
+            checked={mergeWithoutChecks}
+            onChange={(v) => {
+              setMergeWithoutChecks(v);
+              persist({ mergeWithoutChecks: v });
+            }}
+            help="For repos with manual-only or review-bot-only CI. After the merge-gate settle window, merges a PR that reports no checks at all — with NO automated verification. Leave off unless this repo truly has no automated CI."
           />
           <AutoToggle
             label="Heal failed deployments"

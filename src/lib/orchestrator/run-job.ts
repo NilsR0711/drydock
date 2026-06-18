@@ -346,6 +346,10 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         // Review settle gate (issue #159): hold the merge after CI goes green
         // so late bot/human reviews can land first. 0 merges immediately.
         mergeGateMs: repo.mergeGateMinutes * 60_000,
+        // No-checks merge policy (issue #207): when on, a PR that reports no CI
+        // checks at all is merged after the settle window instead of escalating
+        // — for repos whose CI is manual-only or review-bot-only.
+        mergeWithoutChecks: repo.mergeWithoutChecks,
         // Webhook nudge (issue #180): a verified check_suite/check_run (or
         // pipeline) delivery wakes this sleep so the next poll — and with it
         // the merge gate — advances within seconds instead of at the poll

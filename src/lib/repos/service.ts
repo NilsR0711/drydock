@@ -81,6 +81,10 @@ export const repoInputSchema = z.object({
   // CI (today's behavior); a positive value keeps polling that long after the
   // first all-green poll so late bot/human reviews can land before the merge.
   mergeGateMinutes: z.number().int().nonnegative().default(0),
+  // Opt-in auto-merge for PRs with no CI checks at all (issue #207). Off by
+  // default: absent automated CI means absent verification, so a repo must opt
+  // in explicitly. See the schema column for the full rationale.
+  mergeWithoutChecks: z.boolean().default(false),
   // Optional per-repo per-job USD cost ceiling (issue #57). Null/undefined falls
   // back to the global settings.maxJobCostUsd default.
   maxJobCostUsd: z.number().nonnegative().nullish(),

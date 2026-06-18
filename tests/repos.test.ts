@@ -88,6 +88,15 @@ describe("repos service", () => {
     expect(updated.dailyCostLimitUsd).toBe(25);
   });
 
+  it("defaults the merge-without-checks policy to off and can opt in (issue #207)", () => {
+    const repo = addRepo({ path: "/mwc", name: "mwc" }, db);
+    expect(repo.mergeWithoutChecks).toBe(false);
+    expect(repoAutomation(repo).mergeWithoutChecks).toBe(false);
+    const updated = updateRepo(repo.id, { mergeWithoutChecks: true }, db);
+    expect(updated.mergeWithoutChecks).toBe(true);
+    expect(repoAutomation(updated).mergeWithoutChecks).toBe(true);
+  });
+
   it("defaults the per-job cost ceiling override to unset (issue #57)", () => {
     const repo = addRepo({ path: "/jc", name: "jc" }, db);
     expect(repo.maxJobCostUsd).toBeNull();

@@ -90,6 +90,14 @@ export const repos = sqliteTable("repos", {
   // feed the review-feedback loop instead of arriving on a merged PR. Any
   // regression to pending/failed during the window resets the gate.
   mergeGateMinutes: integer("merge_gate_minutes").notNull().default(0),
+  // Opt-in: auto-merge a PR that reports no CI checks at all (issue #207,
+  // default off). Repos with manual-only (workflow_dispatch) CI or that rely
+  // solely on review bots report zero checks, so the babysitter would otherwise
+  // wait out the CI budget and escalate to needs_human. When on, the babysitter
+  // confirms the absence across the merge-gate settle window and then merges
+  // with NO automated verification. Off by default — absent CI means absent
+  // verification, so this must be opted into per repo.
+  mergeWithoutChecks: integer("merge_without_checks", { mode: "boolean" }).notNull().default(false),
   // Optional per-repo per-job USD cost ceiling (issue #57). Null falls back to
   // the global settings.maxJobCostUsd default; 0 disables the ceiling entirely.
   maxJobCostUsd: real("max_job_cost_usd"),
