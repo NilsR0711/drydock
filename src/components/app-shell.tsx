@@ -16,12 +16,14 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ClaudeUsagePill } from "@/components/claude-usage";
+import { CodexUsagePill } from "@/components/codex-usage";
 import { CredentialBanner } from "@/components/credential-banner";
 import { EmergencyStopButton } from "@/components/emergency-stop-button";
 import { PauseToggle } from "@/components/pause-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/update-banner";
 import type { ClaudeUsageView } from "@/lib/agents/claude-usage";
+import type { CodexUsageView } from "@/lib/agents/codex-usage";
 import type { CredentialFailure } from "@/lib/orchestrator/credential-status";
 import { cn } from "@/lib/utils";
 import type { InstallKind } from "@/lib/version/current";
@@ -51,6 +53,7 @@ export function AppShell({
   installKind = "local",
   credentialFailures = [],
   claudeUsage,
+  codexUsage,
 }: {
   children: React.ReactNode;
   adrPending?: number;
@@ -60,6 +63,7 @@ export function AppShell({
   installKind?: InstallKind;
   credentialFailures?: CredentialFailure[];
   claudeUsage?: ClaudeUsageView;
+  codexUsage?: CodexUsageView;
 }) {
   const pathname = usePathname();
   return (
@@ -110,6 +114,7 @@ export function AppShell({
           </nav>
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
             {claudeUsage && <ClaudeUsagePill view={claudeUsage} />}
+            {codexUsage && <CodexUsagePill view={codexUsage} />}
             {updateStatus && <UpdateBanner status={updateStatus} installKind={installKind} />}
             <PauseToggle paused={paused} />
             <EmergencyStopButton />

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AddRepoForm } from "@/components/add-repo-form";
 import { ClaudeUsageCard } from "@/components/claude-usage";
+import { CodexUsageCard } from "@/components/codex-usage";
 import { DashboardStats } from "@/components/dashboard-stats";
 import { PageHeader } from "@/components/page-header";
 import { RepoStatusCard } from "@/components/repo-status-card";
@@ -154,6 +155,8 @@ export function DashboardLive({
           </Card>
 
           <ClaudeUsageCard view={snapshot.claudeUsage} />
+
+          <CodexUsageCard view={snapshot.codexUsage} />
 
           {summary.needsHuman > 0 ? (
             <Alert
