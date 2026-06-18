@@ -21,13 +21,15 @@ export const claudeProvider: AgentProvider = {
   resumeMaxTurns: 15,
   defaultModel: CLAUDE_DEFAULT_MODEL,
 
-  buildStartArgs: ({ prompt, model, maxTurns }) => [
+  buildStartArgs: ({ prompt, model, maxTurns, bypassPermissions }) => [
     "-p",
     prompt,
     "--max-turns",
     String(maxTurns),
-    "--permission-mode",
-    "acceptEdits",
+    // An agent-driven release (issue #256) must run the repo's release commands
+    // itself, so it bypasses permissions entirely; every other run stays
+    // edits-only (acceptEdits), where bash/gh/git would block headlessly.
+    ...(bypassPermissions ? ["--dangerously-skip-permissions"] : ["--permission-mode", "acceptEdits"]),
     "--model",
     model,
     "--output-format",

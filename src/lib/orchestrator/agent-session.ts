@@ -61,6 +61,13 @@ export interface AgentSessionDeps {
   resumeModel?: string;
   /** Limit-resume path (issue #166): resume with this turn budget instead of the tight CI-fix budget. */
   resumeMaxTurns?: number;
+  /**
+   * Run the session with full, unprompted shell access (issue #256). Only an
+   * agent-driven release sets this so the agent can run the repo's release
+   * commands (gh/git/npm) itself; the default edits-only mode blocks them
+   * headlessly. CLI providers only — ignored by the http tool-loop path.
+   */
+  bypassPermissions?: boolean;
   /** HTTP transport override for http providers like openrouter (tests, issue #169). */
   fetchImpl?: typeof fetch;
   /** Tool executor override for http providers' tool loops (tests, issue #169). */
@@ -394,7 +401,12 @@ export async function spawnAgentSession(
     outputTokens: priorUsage.outputTokens + parser.totalOutputTokens,
   });
 
-  const args = provider.buildStartArgs({ prompt, model, maxTurns: job.maxTurns });
+  const args = provider.buildStartArgs({
+    prompt,
+    model,
+    maxTurns: job.maxTurns,
+    bypassPermissions: deps.bypassPermissions,
+  });
   // Tail of stderr, retained for provider-limit classification (issue #166).
   let stderrTail = "";
   const handle = runner(command, args, cwd, {

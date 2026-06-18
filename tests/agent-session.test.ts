@@ -61,6 +61,22 @@ describe("spawnAgentSession", () => {
     expect(getJob(job.id, db)?.sessionId).toBe("th_codex_abc");
   });
 
+  it("passes bypassPermissions through to the start args (issue #256)", async () => {
+    const job = createJob(
+      { repoId, issueNumber: 0, kind: "release", agent: "claude", model: "claude-opus-4-8" },
+      db,
+    );
+    const captured: Captured = {};
+    await spawnAgentSession(getJob(job.id, db) as never, "release it", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner("", captured),
+      bypassPermissions: true,
+    });
+    expect(captured.args).toContain("--dangerously-skip-permissions");
+    expect(captured.args).not.toContain("acceptEdits");
+  });
+
   it("captures the Claude subscription usage reading from the run (issue #188)", async () => {
     const job = createJob(
       { repoId, issueNumber: 188, agent: "claude", model: "claude-opus-4-8" },

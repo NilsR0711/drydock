@@ -29,6 +29,20 @@ describe("claudeProvider", () => {
     ]);
   });
 
+  it("swaps acceptEdits for full shell access when bypassPermissions is set (issue #256)", () => {
+    // An agent-driven release must run gh/git/npm itself, which acceptEdits
+    // blocks headlessly; bypass replaces it with --dangerously-skip-permissions.
+    const args = claudeProvider.buildStartArgs({
+      prompt: "release it",
+      model: "claude-opus-4-8",
+      maxTurns: 40,
+      bypassPermissions: true,
+    });
+    expect(args).toContain("--dangerously-skip-permissions");
+    expect(args).not.toContain("--permission-mode");
+    expect(args).not.toContain("acceptEdits");
+  });
+
   it("builds the SPEC §6.3 resume invocation with the recorded session id", () => {
     const args = claudeProvider.buildResumeArgs({
       prompt: "fix ci",
