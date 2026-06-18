@@ -6,6 +6,7 @@ import {
   Info,
   type LucideIcon,
   MessageSquare,
+  Rocket,
   Wand2,
 } from "lucide-react";
 import Link from "next/link";
@@ -60,6 +61,13 @@ const STAGES: StageDef[] = [
     title: "Review-feedback prompt",
     icon: MessageSquare,
     desc: "Runs when a trusted reviewer comments.",
+  },
+  {
+    id: "release",
+    name: TEMPLATE_NAMES.release,
+    title: "Release prompt",
+    icon: Rocket,
+    desc: "Drives the manual agent-run release (issue #256).",
   },
 ];
 

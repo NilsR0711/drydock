@@ -34,3 +34,4 @@
 - [031](adr/031-pr-audit.md) — Opt-in AI PR audit (read-only whole-PR review posted on the issue, locale-aware)
 - [032](adr/032-openrouter-backend.md) — OpenRouter as an HTTP agent backend with an auto-syncing model catalog (incl. free models)
 - [033](adr/033-sandboxed-agent-execution.md) — Opt-in sandboxed agent execution in a container (Docker/Podman, worktree-only mount, reliable teardown)
+- [034](adr/034-agent-driven-release.md) — Manual agent-driven release (new job kind + `released` state, full-shell-access session, agent discovers & performs the repo's release)
