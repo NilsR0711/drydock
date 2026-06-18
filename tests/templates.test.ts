@@ -163,6 +163,25 @@ describe("default template offers the ask-a-human channel (issue #251)", () => {
   });
 });
 
+describe("default templates push thematic commits with no AI attribution (issue #248)", () => {
+  for (const name of ["default", "limit-resume"] as const) {
+    it(`the ${name} template asks for focused, thematic Conventional-Commit commits`, () => {
+      const t = DEFAULT_TEMPLATES[name];
+      expect(t).toMatch(/thematic/i);
+      expect(t).toMatch(/conventional commit/i);
+      // It must steer away from a single mega-commit.
+      expect(t).toMatch(/mega-commit|one (giant|single|big) commit|single commit/i);
+    });
+
+    it(`the ${name} template forbids AI attribution in commit messages`, () => {
+      const t = DEFAULT_TEMPLATES[name];
+      expect(t).toMatch(/co-authored-by/i);
+      expect(t).toMatch(/generated with claude/i);
+      expect(t).toMatch(/attribution/i);
+    });
+  }
+});
+
 describe("resolveTemplateContent", () => {
   it("falls back to the code default when no row exists", () => {
     expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.main, db)).toBe(DEFAULT_TEMPLATES.default);
