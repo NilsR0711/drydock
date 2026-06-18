@@ -31,6 +31,17 @@ const nextConfig: NextConfig = {
       "*.test.*",
     ],
   },
+  // Force the metadata runtime into the standalone trace. Next 16.2.x's file
+  // tracer drops `next/dist/lib/metadata/get-metadata-route` (and its siblings)
+  // even though `router-utils/filesystem.js` statically requires it on boot, so
+  // `node .next/standalone/server.js` crashed with MODULE_NOT_FOUND the moment
+  // it started — the published `npx drydock` path never came up (issue #209).
+  // Upgrading Next did not move the tracer; this explicit include does, and the
+  // CI/prepublish smoke test (scripts/smoke-standalone.mjs) guards against it
+  // silently regressing if a future Next reshuffles these paths.
+  outputFileTracingIncludes: {
+    "*": ["node_modules/next/dist/lib/metadata/**/*.js"],
+  },
   // Keep these native modules external (not bundled) so their runtime `require`
   // resolves the real addon. NOTE: the production build runs `next build
   // --webpack` (see package.json), NOT Turbopack — Turbopack references an

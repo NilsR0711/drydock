@@ -44,6 +44,16 @@ describe("package.json publishability (issue #12)", () => {
     expect(pkg.scripts.prepublishOnly).toMatch(/build/);
   });
 
+  it("gates publish on a standalone smoke boot (issue #209)", () => {
+    // The standalone bundle can build cleanly yet crash on boot when the Next
+    // file tracer drops a runtime module. Booting `.next/standalone/server.js`
+    // before upload is the only check that catches it, so prepublishOnly must
+    // run the smoke test and an executable script must back it.
+    expect(typeof pkg.scripts.smoke).toBe("string");
+    expect(pkg.scripts.smoke).toMatch(/smoke-standalone/);
+    expect(pkg.scripts.prepublishOnly).toMatch(/smoke/);
+  });
+
   it("requires a Node version that supports the standalone runtime", () => {
     expect(pkg.engines?.node).toBeDefined();
   });

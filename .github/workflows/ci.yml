@@ -52,3 +52,10 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # A clean `next build` can still emit a `.next/standalone` bundle that
+      # crashes on boot when the file tracer drops a runtime module (issue #209).
+      # Boot the real bundle and require it to serve the homepage so a
+      # non-booting server is caught here, never after publish.
+      - name: Smoke-test standalone server
+        run: pnpm smoke
