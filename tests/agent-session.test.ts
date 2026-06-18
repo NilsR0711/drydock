@@ -10,6 +10,7 @@ import type { StreamCallbacks, StreamHandle, StreamRunner } from "@/lib/exec/str
 import { resumeAgentSession, spawnAgentSession } from "@/lib/orchestrator/agent-session";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
 import { latchProviderLimit } from "@/lib/orchestrator/provider-limit";
+import { getProviderUsage } from "@/lib/orchestrator/provider-usage";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
 import { LogBroker } from "@/lib/stream/broker";
@@ -61,6 +62,50 @@ describe("spawnAgentSession", () => {
     // 12000 input @ $1.25/MTok + 2000 output @ $10/MTok = 0.015 + 0.02
     expect(res.costUsd).toBeCloseTo(0.035, 5);
     expect(getJob(job.id, db)?.sessionId).toBe("th_codex_abc");
+  });
+
+  it("captures the Claude subscription usage reading from the run (issue #188)", async () => {
+    const job = createJob(
+      { repoId, issueNumber: 188, agent: "claude", model: "claude-opus-4-8" },
+      db,
+    );
+    const captured: Captured = {};
+    const reset = nowSec() + 3600;
+    const stream = `${[
+      JSON.stringify({ type: "system", subtype: "init", session_id: "s188" }),
+      JSON.stringify({
+        type: "rate_limit_event",
+        rate_limit_info: { status: "allowed_warning", resetsAt: reset, rateLimitType: "five_hour" },
+      }),
+      JSON.stringify({ type: "result", subtype: "success", session_id: "s188", is_error: false }),
+    ].join("\n")}\n`;
+    await spawnAgentSession(getJob(job.id, db) as never, "go", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner(stream, captured),
+    });
+    expect(getProviderUsage("claude", db)).toMatchObject({
+      status: "warning",
+      windowType: "five_hour",
+      resetsAt: reset,
+    });
+  });
+
+  it("does not record a usage reading when the run emits no rate_limit_event", async () => {
+    const job = createJob({ repoId, issueNumber: 189, agent: "claude" }, db);
+    const captured: Captured = {};
+    const stream = `${JSON.stringify({
+      type: "result",
+      subtype: "success",
+      session_id: "s189",
+      is_error: false,
+    })}\n`;
+    await spawnAgentSession(getJob(job.id, db) as never, "go", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner(stream, captured),
+    });
+    expect(getProviderUsage("claude", db)).toBeUndefined();
   });
 
   it("emits a parse_error event for a malformed stdout line instead of crashing (issue #46)", async () => {
