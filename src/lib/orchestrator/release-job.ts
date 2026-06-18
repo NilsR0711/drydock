@@ -113,8 +113,14 @@ export async function runReleaseJob(
   const consumeQuestions = deps.consumeQuestions ?? defaultConsumeQuestions;
   const consumeReleaseMetadata = deps.consumeReleaseMetadata ?? defaultConsumeReleaseMetadata;
 
-  // Move the run into the in-flight lane (idempotent across a recovered re-run).
-  if (run.status === "detected") transitionReleaseRun(run.id, "evaluating", {}, db);
+  // Move the run into the in-flight lane. A fresh run starts in `detected`; a
+  // run that previously failed/parked is in `error` (the retry lane) and must be
+  // re-opened too, or an operator requeue (needs_human → queued) would re-run the
+  // session against a stuck `error` run and `publishAgentReleaseRun` — which
+  // starts from `evaluating` — would throw on the invalid `error → proposed` hop.
+  if (run.status === "detected" || run.status === "error") {
+    transitionReleaseRun(run.id, "evaluating", {}, db);
+  }
 
   /** Settle the run as failed/parked, tolerating a run already past the active lane. */
   const failRun = (message: string): void => {

@@ -131,19 +131,34 @@ export async function startReleaseAction(repoId: number): Promise<StartReleaseRe
   if (repo.agent !== "claude") {
     throw new Error("Agent-driven release currently supports the Claude agent only.");
   }
-  const job = enqueueJob(
-    {
-      repoId: repo.id,
-      issueNumber: 0,
-      kind: "release",
-      agent: repo.agent,
-      model: repo.defaultModel,
-      dedupeKey: `release:${repo.id}`,
-    },
-    db,
-  );
-  if (!job) throw new Error("A release job is already in progress for this repo.");
-  createReleaseRun({ repoId: repo.id, mode: "agent", jobId: job.id }, db);
+  // Guard, enqueue, and record in one transaction so nothing can interleave
+  // (better-sqlite3 transactions are synchronous). `activeReleaseRun` also blocks
+  // a deterministic auto/manual run already in flight — that path creates no job,
+  // so the job dedupe key alone would not catch it, and two pipelines could cut
+  // the same release. Creating the run inside the transaction closes the window
+  // where a concurrent deterministic publish could slip past before it exists.
+  const job = db.transaction(() => {
+    const active = activeReleaseRun(repo.id, db);
+    if (active) {
+      throw new Error(
+        `A release run is already in progress for this repo (run ${active.id}, ${active.status}).`,
+      );
+    }
+    const created = enqueueJob(
+      {
+        repoId: repo.id,
+        issueNumber: 0,
+        kind: "release",
+        agent: repo.agent,
+        model: repo.defaultModel,
+        dedupeKey: `release:${repo.id}`,
+      },
+      db,
+    );
+    if (!created) throw new Error("A release job is already in progress for this repo.");
+    createReleaseRun({ repoId: repo.id, mode: "agent", jobId: created.id }, db);
+    return created;
+  });
   revalidatePath(`/repos/${repoId}`);
   return { jobId: job.id, runs: recentReleaseRuns(repo.id, db) };
 }

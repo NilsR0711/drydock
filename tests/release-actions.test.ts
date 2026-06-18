@@ -6,7 +6,7 @@ import { jobs, releaseRuns, repos } from "@/lib/db/schema";
 import { __setForgeFactory } from "@/lib/forge/registry";
 import { getJob } from "@/lib/orchestrator/jobs";
 import { startReleaseAction } from "@/lib/release/actions";
-import { findReleaseRunByJob } from "@/lib/release/release-service";
+import { createReleaseRun, findReleaseRunByJob } from "@/lib/release/release-service";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
 
@@ -60,6 +60,14 @@ describe("startReleaseAction (issue #256)", () => {
   it("refuses a second concurrent release for the same repo", async () => {
     const r = repo();
     await startReleaseAction(r.id);
+    await expect(startReleaseAction(r.id)).rejects.toThrow(/already in progress/);
+  });
+
+  it("refuses to start when a deterministic release run is already in flight", async () => {
+    const r = repo();
+    // A deterministic manual/auto run creates a `release_runs` row but no job, so
+    // the job dedupe key alone would not catch it — the activeReleaseRun guard must.
+    createReleaseRun({ repoId: r.id, mode: "manual" }, getDb());
     await expect(startReleaseAction(r.id)).rejects.toThrow(/already in progress/);
   });
 

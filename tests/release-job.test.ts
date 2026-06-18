@@ -141,6 +141,21 @@ describe("runReleaseJob (issue #256)", () => {
     expect(deps.worktrees.remove).toHaveBeenCalled();
   });
 
+  it("succeeds on an operator requeue after a prior needs_human (run reset from error)", async () => {
+    const job = releaseJobWithRun();
+    // First run parks: agent writes questions → job needs_human, run → error.
+    await runReleaseJob(
+      job.id,
+      baseDeps({ consumeQuestions: vi.fn(() => "How does this repo release?") }) as never,
+    );
+    expect(findReleaseRunByJob(job.id, db)?.status).toBe("error");
+    // Operator requeues: needs_human → queued, then the driver re-runs the job.
+    db.update(jobs).set({ status: "queued" }).where(eq(jobs.id, job.id)).run();
+    const result = await runReleaseJob(job.id, baseDeps() as never);
+    expect(result.status).toBe("released");
+    expect(findReleaseRunByJob(job.id, db)?.status).toBe("published");
+  });
+
   it("removes the worktree even when the session throws", async () => {
     const job = releaseJobWithRun();
     const deps = baseDeps({
