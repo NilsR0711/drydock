@@ -138,6 +138,19 @@ export const repos = sqliteTable("repos", {
   escalateModelOnRetry: integer("escalate_model_on_retry", { mode: "boolean" })
     .notNull()
     .default(false),
+  // Opt-in sandboxed agent execution (issue #182, ADR 033, default "none"). When
+  // "docker", the repo's agent CLI sessions run inside a container with the
+  // worktree bind-mounted as the only writable host path. `sandboxImage` is an
+  // explicit per-repo image override (null → devcontainer.json, else the global
+  // settings.sandboxDefaultImage). Network is off by default; CPU/memory caps are
+  // optional. Off by default — zero behavior change for existing repos.
+  sandbox: text("sandbox").notNull().default("none"),
+  sandboxImage: text("sandbox_image"),
+  sandboxAllowNetwork: integer("sandbox_allow_network", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  sandboxCpus: text("sandbox_cpus"),
+  sandboxMemory: text("sandbox_memory"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 

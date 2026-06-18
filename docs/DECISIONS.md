@@ -33,3 +33,4 @@
 - [030](adr/030-provider-limit-auto-wait.md) — Provider usage-limit auto-wait (`waiting_limit` job state, persistent latch, session-continuity resume)
 - [031](adr/031-pr-audit.md) — Opt-in AI PR audit (read-only whole-PR review posted on the issue, locale-aware)
 - [032](adr/032-openrouter-backend.md) — OpenRouter as an HTTP agent backend with an auto-syncing model catalog (incl. free models)
+- [033](adr/033-sandboxed-agent-execution.md) — Opt-in sandboxed agent execution in a container (Docker/Podman, worktree-only mount, reliable teardown)

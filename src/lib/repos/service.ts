@@ -110,6 +110,15 @@ export const repoInputSchema = z.object({
   prAuditPostOnPr: z.boolean().default(false),
   // Opt-in model escalation ladder on requeue (issue #179).
   escalateModelOnRetry: z.boolean().default(false),
+  // Opt-in sandboxed agent execution (issue #182, ADR 033). "docker" runs the
+  // repo's agent sessions inside a container; "none" (default) keeps today's
+  // host execution. Image/cpu/memory overrides are free text validated by the
+  // container runtime at spawn time, not here.
+  sandbox: z.enum(["none", "docker"]).default("none"),
+  sandboxImage: z.string().nullish(),
+  sandboxAllowNetwork: z.boolean().default(false),
+  sandboxCpus: z.string().nullish(),
+  sandboxMemory: z.string().nullish(),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 

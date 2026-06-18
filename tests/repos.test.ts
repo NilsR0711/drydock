@@ -468,3 +468,52 @@ describe("openrouter repos (issue #169)", () => {
     expect(() => updateRepo(repo.id, { agent: "codex" }, db)).toThrow(/unknown model id/i);
   });
 });
+
+describe("repos service — sandboxed execution (issue #182)", () => {
+  it("defaults to no sandbox for a new repo (no behavior change)", () => {
+    const repo = addRepo({ path: "/s0", name: "s0" }, db);
+    expect(repo.sandbox).toBe("none");
+    expect(repo.sandboxImage).toBeNull();
+    expect(repo.sandboxAllowNetwork).toBe(false);
+    expect(repo.sandboxCpus).toBeNull();
+    expect(repo.sandboxMemory).toBeNull();
+  });
+
+  it("persists an opted-in docker sandbox with its isolation knobs", () => {
+    const repo = addRepo(
+      {
+        path: "/s1",
+        name: "s1",
+        sandbox: "docker",
+        sandboxImage: "my/image:1",
+        sandboxAllowNetwork: true,
+        sandboxCpus: "2",
+        sandboxMemory: "4g",
+      },
+      db,
+    );
+    expect(repo.sandbox).toBe("docker");
+    expect(repo.sandboxImage).toBe("my/image:1");
+    expect(repo.sandboxAllowNetwork).toBe(true);
+    expect(repo.sandboxCpus).toBe("2");
+    expect(repo.sandboxMemory).toBe("4g");
+  });
+
+  it("rejects an unknown sandbox mode", () => {
+    expect(() => addRepo({ path: "/s2", name: "s2", sandbox: "vm" } as never, db)).toThrow();
+  });
+
+  it("toggles the sandbox on an existing repo without touching other fields", () => {
+    const repo = addRepo({ path: "/s3", name: "s3" }, db);
+    const updated = updateRepo(repo.id, { sandbox: "docker" }, db);
+    expect(updated.sandbox).toBe("docker");
+    expect(updated.name).toBe("s3");
+  });
+
+  it("exposes the sandbox fields through repoAutomation", () => {
+    const repo = addRepo({ path: "/s4", name: "s4", sandbox: "docker", sandboxImage: "img:2" }, db);
+    const auto = repoAutomation(repo);
+    expect(auto.sandbox).toBe("docker");
+    expect(auto.sandboxImage).toBe("img:2");
+  });
+});

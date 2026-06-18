@@ -6,6 +6,7 @@ import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
 import { jobs } from "@/lib/db/schema";
+import type { StreamRunner } from "@/lib/exec/stream-runner";
 import { getForge } from "@/lib/forge/registry";
 import { EmptyCommitError, type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { listIssues } from "@/lib/issues/service";
@@ -16,6 +17,12 @@ import { dispatch } from "@/lib/notify/notifier";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, resolveTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
 import { agentInstructionsPromptSection } from "@/lib/repos/agent-instructions";
+import { isSandboxEnabled, resolveSandboxConfig } from "@/lib/sandbox/config";
+import {
+  type PrepareSandboxInput,
+  type PrepareSandboxResult,
+  prepareSandboxSession,
+} from "@/lib/sandbox/session";
 import { getSettings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
 import {
@@ -83,6 +90,12 @@ export interface RunJobDeps {
    * the filesystem-backed reader.
    */
   consumePrMetadata?: (worktreePath: string) => PrMetadata | null;
+  /**
+   * Prepare the sandboxed-execution environment for a repo that opted into
+   * `sandbox: docker` (issue #182, ADR 033); injectable for tests. Defaults to
+   * prepareSandboxSession. Only invoked for CLI agents on opted-in repos.
+   */
+  prepareSandbox?: (input: PrepareSandboxInput) => Promise<PrepareSandboxResult>;
 }
 
 /** Keeps an unexpectedly verbose plan from flooding the work prompt. */
@@ -244,13 +257,25 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   // default. 0 disables it. Bounds the blast radius of one runaway session so a
   // single long loop cannot drain the whole daily budget by itself.
   const maxJobCostUsd = repo.maxJobCostUsd ?? settings.maxJobCostUsd;
+  // Sandboxed execution (issue #182, ADR 033). Resolved up front but only
+  // *applied* after the worktree exists (the image may come from its
+  // devcontainer.json) and only for CLI agents — HTTP providers have no
+  // subprocess to wrap. `sessionEnv` is the late-bound command/runner the
+  // session closures read at invocation time: on the host today, or the bare
+  // in-container command + a container-wrapping runner once a sandbox is
+  // prepared below. Off-by-default repos leave it untouched (no behavior change).
+  const sandboxConfig = resolveSandboxConfig(repo, settings);
+  const sandboxRequested = isSandboxEnabled(sandboxConfig) && provider.kind !== "http";
+  const prepareSandbox = deps.prepareSandbox ?? prepareSandboxSession;
+  const sessionEnv: { command: string; runner?: StreamRunner } = { command };
   const runSession =
     deps.runSession ??
     ((j, prompt, cwd) =>
       spawnAgentSession(j, prompt, cwd, {
         db,
         provider,
-        command,
+        command: sessionEnv.command,
+        runner: sessionEnv.runner,
         timeoutMs,
         costCapUsd: maxJobCostUsd,
       }));
@@ -296,7 +321,8 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       return resumeAgentSession(j, j.sessionId, "", cwd, {
         db,
         provider,
-        command,
+        command: sessionEnv.command,
+        runner: sessionEnv.runner,
         timeoutMs,
         costCapUsd: maxJobCostUsd,
         resumePrompt: prompt,
@@ -385,7 +411,8 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
             resumeAgentSession(rj, sessionId, failedLog, cwd, {
               db,
               provider,
-              command,
+              command: sessionEnv.command,
+              runner: sessionEnv.runner,
               timeoutMs,
               costCapUsd: maxJobCostUsd,
             }),
@@ -422,6 +449,35 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   try {
     wt = await worktrees.prepare(repo, job.id, job.issueNumber);
     recordEvent(job.id, "worktree", { path: wt.path, branch: wt.branch }, db);
+
+    // Sandboxed execution preflight (issue #182, ADR 033): detect a usable
+    // container runtime, resolve the image, and build the container-wrapping
+    // runner. A missing runtime / unresolvable image escalates to needs_human
+    // with a clear reason instead of failing opaquely at spawn time. Only the
+    // implement and resume sessions are wrapped; read-only one-shot passes
+    // (plan/verify/audit) stay on the host.
+    if (sandboxRequested) {
+      const prepared = await prepareSandbox({
+        config: sandboxConfig,
+        worktreePath: wt.path,
+        jobId: job.id,
+        agent: provider.id,
+        inContainerCommand: provider.defaultCommand,
+        preferredRuntime: settings.containerRuntime,
+      });
+      if (!prepared.ok) {
+        if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
+        return transitionJob(
+          job.id,
+          "needs_human",
+          { errorMessage: `Sandbox preflight failed: ${prepared.reason}`.slice(0, 500) },
+          db,
+        );
+      }
+      sessionEnv.runner = prepared.session.runner;
+      sessionEnv.command = prepared.session.command;
+      recordEvent(job.id, "status", { reason: `sandboxed execution (${sandboxConfig.mode})` }, db);
+    }
 
     // Limit-resume (issue #166): a job parked on a provider limit resumes its
     // stored session (`--resume`) instead of starting from scratch, keeping

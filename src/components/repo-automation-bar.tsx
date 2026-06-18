@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Container,
   GitPullRequestArrow,
   HeartPulse,
   MessageSquare,
@@ -159,6 +160,11 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [deployPlatform, setDeployPlatform] = useState(repo.deploymentPlatform ?? "");
   const [maxAttempts, setMaxAttempts] = useState(repo.maxAttempts);
   const [escalateModel, setEscalateModel] = useState(repo.escalateModelOnRetry);
+  const [sandbox, setSandbox] = useState(repo.sandbox === "docker");
+  const [sandboxImage, setSandboxImage] = useState(repo.sandboxImage ?? "");
+  const [sandboxNetwork, setSandboxNetwork] = useState(repo.sandboxAllowNetwork);
+  const [sandboxCpus, setSandboxCpus] = useState(repo.sandboxCpus ?? "");
+  const [sandboxMemory, setSandboxMemory] = useState(repo.sandboxMemory ?? "");
   const [agentInstructions, setAgentInstructions] = useState(repo.agentInstructions ?? "");
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -513,6 +519,92 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               }}
               help="Evaluates merged PRs since the last tag, picks the semver bump, and publishes — gated by a global kill-switch and fully previewable."
             />
+          </Fieldset>
+          <Fieldset
+            icon={Container}
+            legend="Sandbox"
+            tone="warning"
+            description="Isolate agent execution in a container."
+          >
+            <AutoToggle
+              label="Run the agent in a container"
+              checked={sandbox}
+              onChange={(v) => {
+                setSandbox(v);
+                persist({ sandbox: v ? "docker" : "none" });
+              }}
+              help="Runs this repo's agent sessions inside a container with the worktree bind-mounted as the only writable host path. Requires Docker or Podman on the host and an image that carries the agent CLI plus the repo's toolchain (devcontainer.json image is used if present). Git push still happens on the host."
+            >
+              <Field
+                label={
+                  <span className="inline-flex items-center gap-1.5">
+                    Image override
+                    <HelpTip content="Container image to run in. Leave blank to use the repo's devcontainer.json image, else the global default image from Settings." />
+                  </span>
+                }
+              >
+                <Input
+                  value={sandboxImage}
+                  onChange={(e) => setSandboxImage(e.target.value)}
+                  onBlur={() => persist({ sandboxImage: sandboxImage.trim() || null })}
+                  placeholder="devcontainer / global default"
+                  className="h-8 font-mono text-xs"
+                />
+              </Field>
+              <Field
+                label={
+                  <span className="inline-flex items-center gap-1.5">
+                    Resource caps
+                    <HelpTip content="Optional --cpus and --memory limits (e.g. 2 and 4g). Leave blank for no limit." />
+                  </span>
+                }
+              >
+                <div className="flex gap-2">
+                  <Input
+                    value={sandboxCpus}
+                    onChange={(e) => setSandboxCpus(e.target.value)}
+                    onBlur={() => {
+                      const v = sandboxCpus.trim();
+                      // Validate before persisting so a bad value surfaces here
+                      // rather than as an opaque container-start failure later.
+                      if (v && !/^\d+(\.\d+)?$/.test(v)) {
+                        error("Invalid CPU limit", "Use a positive number like 0.5, 1, or 2.");
+                        return;
+                      }
+                      persist({ sandboxCpus: v || null });
+                    }}
+                    placeholder="cpus"
+                    className="h-8 w-20 font-mono text-xs"
+                  />
+                  <Input
+                    value={sandboxMemory}
+                    onChange={(e) => setSandboxMemory(e.target.value)}
+                    onBlur={() => {
+                      const v = sandboxMemory.trim();
+                      if (v && !/^\d+(\.\d+)?\s*[bkmg]?$/i.test(v)) {
+                        error("Invalid memory limit", "Use a value like 512m, 2g, or 4096.");
+                        return;
+                      }
+                      persist({ sandboxMemory: v || null });
+                    }}
+                    placeholder="memory"
+                    className="h-8 w-24 font-mono text-xs"
+                  />
+                </div>
+              </Field>
+              <div className="flex items-center gap-2.5 self-end pb-1.5 sm:col-span-2">
+                <Switch
+                  checked={sandboxNetwork}
+                  onChange={(v) => {
+                    setSandboxNetwork(v);
+                    persist({ sandboxAllowNetwork: v });
+                  }}
+                  aria-label="Allow network access"
+                />
+                <span className="text-sm">Allow network access</span>
+                <HelpTip content="Off (default) runs the container with --network none. Turn on only if the toolchain must fetch dependencies during the run." />
+              </div>
+            </AutoToggle>
           </Fieldset>
           <Fieldset
             icon={MessageSquare}
