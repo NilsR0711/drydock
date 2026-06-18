@@ -90,10 +90,35 @@ export function parseArgs(argv) {
     return { mode: "service", action };
   }
 
+  // Daemon lifecycle (issue #216). `start`/`restart` launch the background
+  // server and accept the same host/port flags as `serve` (but not `--open`,
+  // since a detached daemon has no terminal to open a browser from). `stop` and
+  // `status` operate on the recorded daemon, so they take no flags.
+  if (argv[0] === "start" || argv[0] === "restart") {
+    const { host, port } = parseHostPort(argv.slice(1));
+    return { mode: argv[0], host, port };
+  }
+  if (argv[0] === "stop" || argv[0] === "status") {
+    if (argv.length > 1) throw new Error(`unexpected argument: ${argv[1]}`);
+    return { mode: argv[0] };
+  }
+
   // `drydock serve` is an explicit alias for the default mode so scripts and
   // service units can spell out what they launch.
   const flags = argv[0] === "serve" ? argv.slice(1) : argv;
+  const { host, port, open } = parseHostPort(flags, { allowOpen: true });
+  return { mode: "serve", host, port, open };
+}
 
+/**
+ * Parse the shared `--host`/`--port` (and optionally `--open`) flags into a
+ * directive fragment. Throws on unknown options or stray positional arguments so
+ * each command surfaces the same error messages.
+ *
+ * @param {string[]} flags
+ * @param {{ allowOpen?: boolean }} [opts]
+ */
+function parseHostPort(flags, { allowOpen = false } = {}) {
   let host = DEFAULT_HOST;
   let port = DEFAULT_PORT;
   let open = false;
@@ -101,7 +126,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < flags.length; i++) {
     const arg = flags[i];
 
-    if (arg === "--open") {
+    if (allowOpen && arg === "--open") {
       open = true;
       continue;
     }
@@ -128,7 +153,7 @@ export function parseArgs(argv) {
     throw new Error(`unexpected argument: ${arg}`);
   }
 
-  return { mode: "serve", host, port, open };
+  return { host, port, open };
 }
 
 function parsePort(raw) {
@@ -164,8 +189,12 @@ export function resolveDbPath({ env = process.env, home = homedir() } = {}) {
 const HELP = `drydock — autonomously turn GitHub issues into pull requests
 
 Usage:
-  drydock [options]      Start the server and dashboard
+  drydock [options]      Start the server and dashboard (foreground)
   drydock serve          Same as running with no subcommand
+  drydock start          Launch the server as a background daemon and return
+  drydock stop           Gracefully stop the background daemon (drains in-flight jobs)
+  drydock status         Report whether the daemon is running (pid, url, uptime)
+  drydock restart        Stop the daemon if running, then start a fresh one
   drydock update         Update to the latest published version
   drydock backup [path]  Snapshot the database (WAL-safe, works while running);
                          default target: <data dir>/backups/drydock-<timestamp>.db
@@ -450,9 +479,47 @@ async function main(argv) {
       );
       return;
     }
+    case "start": {
+      const { runStartCommand } = await import("./daemon.mjs");
+      process.exit(runStartCommand(directive, await daemonDeps()));
+      return;
+    }
+    case "stop": {
+      const { runStopCommand } = await import("./daemon.mjs");
+      process.exit(await runStopCommand(directive, await daemonDeps()));
+      return;
+    }
+    case "status": {
+      const { runStatusCommand } = await import("./daemon.mjs");
+      process.exit(runStatusCommand(directive, await daemonDeps()));
+      return;
+    }
+    case "restart": {
+      const { runRestartCommand } = await import("./daemon.mjs");
+      process.exit(await runRestartCommand(directive, await daemonDeps()));
+      return;
+    }
     default:
       await serve(directive);
   }
+}
+
+/**
+ * Concrete dependencies for the daemon lifecycle commands, resolved against this
+ * install's data dir and package root. Bundled here (rather than inside
+ * daemon.mjs) so the daemon module stays free of process-level state and fully
+ * injectable in tests.
+ */
+async function daemonDeps() {
+  const { resolveDaemonLogPath, resolveDaemonStatePath } = await import("./daemon.mjs");
+  const { resolveLockPath } = await import("./ops.mjs");
+  return {
+    statePath: resolveDaemonStatePath(),
+    logPath: resolveDaemonLogPath(),
+    lockPath: resolveLockPath(),
+    dataDir: resolveDataDir(),
+    packageRoot: PACKAGE_ROOT,
+  };
 }
 
 /**
