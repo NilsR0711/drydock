@@ -63,6 +63,22 @@ describe("runJob — issue body embedded in the implement prompt (issue #205)", 
     expect(captured.prompt).not.toContain("$ISSUE_BODY");
   });
 
+  it("caps an oversized issue title and body so the prompt stays bounded", async () => {
+    const hugeTitle = `${"T".repeat(2_000)}TITLE_TAIL_SENTINEL`;
+    const hugeBody = `${"B".repeat(50_000)}BODY_TAIL_SENTINEL`;
+    const viewIssue = vi.fn(async () => ({ title: hugeTitle, body: hugeBody }));
+    const { deps, captured } = capturingDeps({ viewIssue });
+    const job = createJob({ repoId, issueNumber: 1 }, db);
+
+    await runJob(job.id, deps as never);
+
+    // The leading content survives, but the oversized tails are dropped with a
+    // clear marker so the prompt cannot blow the model's context window.
+    expect(captured.prompt).toContain("… (truncated)");
+    expect(captured.prompt).not.toContain("TITLE_TAIL_SENTINEL");
+    expect(captured.prompt).not.toContain("BODY_TAIL_SENTINEL");
+  });
+
   it("falls back to empty context (no raw tokens) and still drives the job when the fetch fails", async () => {
     const viewIssue = vi.fn(async () => {
       throw new Error("gh: not authenticated");

@@ -80,6 +80,18 @@ export interface RunJobDeps {
 /** Keeps an unexpectedly verbose plan from flooding the work prompt. */
 const PLAN_MAX_CHARS = 10_000;
 
+// Bound the embedded issue text (issue #205) so a pathologically large issue
+// body cannot blow the model's context window and fail the run before any
+// implementation starts — the very failure mode embedding the body set out to
+// fix. A truncation marker tells the agent the text was cut.
+const ISSUE_TITLE_MAX_CHARS = 500;
+const ISSUE_BODY_MAX_CHARS = 20_000;
+
+/** Truncate to a max length with a clear marker, matching the plan-section cap. */
+function capPromptText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}\n… (truncated)` : text;
+}
+
 /** Render the plan as a dedicated, length-capped prompt section (issue #160). */
 export function planPromptSection(plan: string): string {
   const trimmed = plan.trim();
@@ -430,12 +442,14 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       } catch (err) {
         logError(`[run-job] failed to fetch issue #${job.issueNumber} for job ${job.id}`, err);
       }
+      const issueTitle = capPromptText(issue.title, ISSUE_TITLE_MAX_CHARS);
+      const issueBody = capPromptText(issue.body, ISSUE_BODY_MAX_CHARS);
       let prompt = renderTemplate(mainTemplate.content, {
         ISSUE_NUM: job.issueNumber,
         BRANCH: worktree.branch,
         REPO_NAME: repo.name,
-        ISSUE_TITLE: issue.title,
-        ISSUE_BODY: issue.body,
+        ISSUE_TITLE: issueTitle,
+        ISSUE_BODY: issueBody,
       });
 
       // Decomposed issues (issue #19, opt-in): surface the ordered subtasks in the
@@ -469,8 +483,8 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
             ISSUE_NUM: job.issueNumber,
             BRANCH: worktree.branch,
             REPO_NAME: repo.name,
-            ISSUE_TITLE: issue.title,
-            ISSUE_BODY: issue.body,
+            ISSUE_TITLE: issueTitle,
+            ISSUE_BODY: issueBody,
           },
         );
         try {
