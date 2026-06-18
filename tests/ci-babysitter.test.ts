@@ -41,8 +41,10 @@ function ciRunningJob(issue: number) {
 }
 
 describe("classifyChecks", () => {
-  it("returns pending for empty or in-progress", () => {
-    expect(classifyChecks([])).toBe("pending");
+  it("returns none when no checks are reported at all", () => {
+    expect(classifyChecks([])).toBe("none");
+  });
+  it("returns pending for in-progress checks", () => {
     expect(classifyChecks([{ name: "a", state: "IN_PROGRESS" }])).toBe("pending");
   });
   it("returns failed when any check failed", () => {
@@ -339,5 +341,115 @@ describe("ciBabysitter — merge gate (issue #159)", () => {
     });
     expect(resume).toHaveBeenCalledOnce();
     expect(final.status).toBe("merged");
+  });
+});
+
+describe("ciBabysitter — merge without CI checks (issue #207)", () => {
+  it("escalates to needs_human on persistent zero checks when the policy is off", async () => {
+    // Default behaviour: a repo that reports no checks at all must still be
+    // handed to a human once the wait budget is exhausted — never auto-merged.
+    const job = ciRunningJob(30);
+    const { gh, runner } = scriptedGh([[]]);
+    let t = 0;
+    const now = () => (t += 60_000);
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: vi.fn(),
+      sleep: vi.fn(),
+      now,
+      ciWaitMs: 2 * 60_000,
+      maxPolls: 1000,
+    });
+    expect(final.status).toBe("needs_human");
+    expect(final.errorMessage).toContain("CI did not complete in time");
+    expect(runner).not.toHaveBeenCalledWith(
+      "gh",
+      expect.arrayContaining(["pr", "merge", "5"]),
+      "/tmp/r",
+    );
+  });
+
+  it("merges after the settle window when the policy is on and no checks ever appear", async () => {
+    const job = ciRunningJob(31);
+    const { gh, runner } = scriptedGh([[]]);
+    let t = 0;
+    const sleep = vi.fn(async () => {
+      t += 2 * 60_000;
+    });
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: vi.fn(),
+      sleep,
+      now: () => t,
+      mergeWithoutChecks: true,
+      mergeGateMs: 5 * 60_000,
+      ciWaitMs: 60 * 60_000,
+      maxPolls: 1000,
+    });
+    expect(final.status).toBe("merged");
+    // Settles for the window (polls at 0, 2, 4 min) before merging at 6 min.
+    expect(sleep).toHaveBeenCalledTimes(3);
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      expect.arrayContaining(["pr", "merge", "5"]),
+      "/tmp/r",
+    );
+  });
+
+  it("does not merge on the first poll even without a configured settle window", async () => {
+    // The window floors to one poll interval so a slow-registering workflow
+    // still has a chance to report before an unverified merge.
+    const job = ciRunningJob(32);
+    const { gh, runner } = scriptedGh([[]]);
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: vi.fn(),
+      sleep: vi.fn(),
+      now: () => 0,
+      mergeWithoutChecks: true,
+      maxPolls: 1,
+    });
+    expect(final.status).not.toBe("merged");
+    expect(runner).not.toHaveBeenCalledWith(
+      "gh",
+      expect.arrayContaining(["pr", "merge", "5"]),
+      "/tmp/r",
+    );
+  });
+
+  it("abandons the no-checks window and runs the retry path once a real check fails", async () => {
+    // A check that surfaces mid-settle takes over the normal path: a failure
+    // must trigger a CI fix, never an unverified no-checks merge.
+    const job = ciRunningJob(33);
+    const { gh, runner } = scriptedGh([
+      [],
+      [{ name: "build", state: "FAILURE" }],
+      [{ name: "build", state: "SUCCESS" }],
+    ]);
+    const resume = vi.fn(async () => ({ exitCode: 0 }));
+    let t = 0;
+    const sleep = vi.fn(async () => {
+      t += 60_000;
+    });
+    const final = await ciBabysitter(job, 5, {
+      db,
+      gh,
+      resumeSession: resume,
+      sleep,
+      now: () => t,
+      mergeWithoutChecks: true,
+      ciWaitMs: 60 * 60_000,
+      maxPolls: 1000,
+    });
+    expect(resume).toHaveBeenCalledOnce();
+    expect(final.status).toBe("merged");
+    expect(runner).toHaveBeenCalledWith(
+      "gh",
+      expect.arrayContaining(["pr", "merge", "5"]),
+      "/tmp/r",
+    );
   });
 });

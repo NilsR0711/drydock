@@ -6,6 +6,7 @@ export interface RepoAutomation {
   autoProcessEnabled: boolean;
   autoHealCi: boolean;
   autoReviewFeedback: boolean;
+  mergeWithoutChecks: boolean;
   autoResolveMergeConflicts: boolean;
   includeProgressReplies: boolean;
   autoDecompose: boolean;
@@ -44,6 +45,7 @@ export function repoAutomation(repo: Repo): RepoAutomation {
     autoProcessEnabled: repo.autoProcessEnabled,
     autoHealCi: repo.autoHealCi,
     autoReviewFeedback: repo.autoReviewFeedback,
+    mergeWithoutChecks: repo.mergeWithoutChecks,
     autoResolveMergeConflicts: repo.autoResolveMergeConflicts,
     includeProgressReplies: repo.includeProgressReplies,
     autoDecompose: repo.autoDecompose,
