@@ -52,13 +52,13 @@ describe("formatLogForClipboard (issue #243)", () => {
   });
 
   it("reads top-down in time — the reverse of the on-screen display order", () => {
-    const clipboardIds = formatLogForClipboard(chronological)
+    const clipboardBodies = formatLogForClipboard(chronological)
       .split("\n")
       .map((row) => row.split("\t")[1]);
-    const displayIds = toDisplayOrder(chronological).map((l) =>
+    const displayBodies = toDisplayOrder(chronological).map((l) =>
       typeof l.payload === "string" ? l.payload : JSON.stringify(l.payload),
     );
-    expect(clipboardIds).toEqual([...displayIds].reverse());
+    expect(clipboardBodies).toEqual([...displayBodies].reverse());
   });
 
   it("serializes string payloads verbatim and object payloads as JSON", () => {
