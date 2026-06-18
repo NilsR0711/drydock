@@ -182,5 +182,24 @@ describe("announceNeedsHuman", () => {
     await announceNeedsHuman(parked, { db, forge });
 
     expect(forge.commentIssue).toHaveBeenCalled();
+    // The forge removal threw, so the local mirror must NOT claim the queue
+    // label is gone — it still hangs on the issue until a later sync/retry.
+    expect(cachedLabels(7)).toContain("drydock:queue");
+  });
+
+  it("attempts addLabels even when ensureLabel fails (steps are isolated)", async () => {
+    seedIssue(7, ["drydock:queue"]);
+    const job = createJob({ repoId, issueNumber: 7 }, db);
+    transitionJob(job.id, "working", {}, db);
+    const parked = transitionJob(job.id, "needs_human", { errorMessage: "boom" }, db);
+    const forge = fakeForge({
+      ensureLabel: vi.fn(async () => {
+        throw new Error("forge down");
+      }),
+    });
+
+    await announceNeedsHuman(parked, { db, forge });
+
+    expect(forge.addLabels).toHaveBeenCalledWith(7, ["drydock:needs-human"]);
   });
 });

@@ -63,12 +63,23 @@ export async function markIssueNeedsHuman(
   forge: NeedsHumanForge,
   db: DB = getDb(),
 ): Promise<void> {
+  // ensure + add are isolated so a transient ensureLabel hiccup on an
+  // already-existing label still lets the add through (best-effort each step).
   try {
     await forge.ensureLabel(repo.needsHumanLabel, NEEDS_HUMAN_LABEL_OPTS);
+  } catch (err) {
+    logError(`[needs-human] failed to ensure needs-human label on #${issueNumber}`, err);
+  }
+  try {
     await forge.addLabels(issueNumber, [repo.needsHumanLabel]);
   } catch (err) {
-    logError(`[needs-human] failed to set needs-human label on #${issueNumber}`, err);
+    logError(`[needs-human] failed to add needs-human label on #${issueNumber}`, err);
   }
+  // The forge removal and the local mirror are deliberately coupled (matching
+  // dequeueIssue): the mirror must reflect what actually happened on the forge.
+  // Mirroring a removal that the forge rejected would show the label as gone in
+  // the dashboard while it still hangs on the issue — the next sync corrects a
+  // skipped mirror, but never an inaccurate one.
   try {
     await forge.removeLabels(issueNumber, [repo.queueLabel]);
     setQueueLabelLocal(repo.id, issueNumber, repo.queueLabel, false, db);
