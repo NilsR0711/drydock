@@ -15,42 +15,48 @@ export const repos = sqliteTable("repos", {
   apiBaseUrl: text("api_base_url"),
   apiToken: text("api_token"),
   // Per-repo daily USD budget. 0 is off (unlimited), like the global default
-  // and the per-job cap (issue #234).
-  dailyCostLimitUsd: real("daily_cost_limit_usd").notNull().default(10),
+  // and the per-job cap (issue #234). Defaults to 0 so a new repo is fully
+  // autonomous out of the box (issue #254). New rows seed from repoInputSchema;
+  // existing rows keep their stored value and are intentionally not backfilled.
+  dailyCostLimitUsd: real("daily_cost_limit_usd").notNull().default(0),
   adrGating: integer("adr_gating", { mode: "boolean" }).notNull().default(false),
   sequential: integer("sequential", { mode: "boolean" }).notNull().default(true),
-  // Opt-in autonomous automation (both default off). See ADR 016.
-  autoTriageEnabled: integer("auto_triage_enabled", { mode: "boolean" }).notNull().default(false),
-  autoProcessEnabled: integer("auto_process_enabled", { mode: "boolean" }).notNull().default(false),
-  // Opt-in CI auto-healing (default off). See ADR 017.
-  autoHealCi: integer("auto_heal_ci", { mode: "boolean" }).notNull().default(false),
+  // Fully-autonomous automation (issue #254): on by default so a new repo runs
+  // the whole pipeline unattended. Kept in sync with repoInputSchema; opt-out
+  // per repo. See ADR 016.
+  autoTriageEnabled: integer("auto_triage_enabled", { mode: "boolean" }).notNull().default(true),
+  autoProcessEnabled: integer("auto_process_enabled", { mode: "boolean" }).notNull().default(true),
+  // CI auto-healing on by default for autonomous operation (issue #254). See ADR 017.
+  autoHealCi: integer("auto_heal_ci", { mode: "boolean" }).notNull().default(true),
   // PR review-feedback lifecycle (ADR 019). Defaults ON for autonomous
   // operation (issue #213): an issue-to-PR tool should act on review-bot
   // findings out of the box. Still bounded (per-sweep/per-item budgets, never
   // auto-merges) and opt-out per repo. The 0032 migration backfills existing
   // repos that still hold the legacy `false` default.
   autoReviewFeedback: integer("auto_review_feedback", { mode: "boolean" }).notNull().default(true),
-  // Bounded merge-conflict repair within the feedback loop (default off).
+  // Bounded merge-conflict repair within the feedback loop. On by default for
+  // autonomous operation (issue #254); still bounded and opt-out per repo.
   autoResolveMergeConflicts: integer("auto_resolve_merge_conflicts", { mode: "boolean" })
     .notNull()
-    .default(false),
+    .default(true),
   // Post incremental "working on it" replies (default off, to avoid noise).
   includeProgressReplies: integer("include_progress_replies", { mode: "boolean" })
     .notNull()
     .default(false),
-  // Opt-in decomposition of large issues into tracked subtasks (default off).
-  // See ADR 020.
-  autoDecompose: integer("auto_decompose", { mode: "boolean" }).notNull().default(false),
+  // Decomposition of large issues into tracked subtasks, on by default for
+  // autonomous operation (issue #254). See ADR 020.
+  autoDecompose: integer("auto_decompose", { mode: "boolean" }).notNull().default(true),
   // Opt-in plan-first stage (issue #160, default off). Before the implementation
   // session, a read-only one-shot pass produces an implementation plan that is
   // posted on the issue and embedded in the work prompt. Best-effort: any plan
   // failure falls back to the normal single-stage run.
   planFirst: integer("plan_first", { mode: "boolean" }).notNull().default(false),
-  // Opt-in post-PR verification pass (default off). See ADR 027. After a PR is
-  // opened, a read-only one-shot agent checks whether the diff satisfies the
-  // issue and its subtasks; the result updates subtask status and surfaces a
-  // summary. Never auto-merges and never corrupts state on failure.
-  verifyPr: integer("verify_pr", { mode: "boolean" }).notNull().default(false),
+  // Post-PR verification pass, on by default for autonomous operation (issue
+  // #254). See ADR 027. After a PR is opened, a read-only one-shot agent checks
+  // whether the diff satisfies the issue and its subtasks; the result updates
+  // subtask status and surfaces a summary. Never auto-merges and never corrupts
+  // state on failure.
+  verifyPr: integer("verify_pr", { mode: "boolean" }).notNull().default(true),
   // Opt-in post-merge deployment healing (default off). See ADR 021. When a
   // monitored deployment fails, a follow-up fix PR is opened with the logs.
   autoHealDeployments: integer("auto_heal_deployments", { mode: "boolean" })
@@ -124,11 +130,12 @@ export const repos = sqliteTable("repos", {
   // targeted, debounced sync for this repo. Null/empty leaves polling as the
   // sole sync path; the secret doubles as the per-repo opt-in switch.
   webhookSecret: text("webhook_secret"),
-  // Opt-in AI PR audit (issue #168, default off). A read-only, whole-PR review
-  // (Bugbot/CodeRabbit style) runs after a PR opens and is posted on the issue
-  // as an idempotent comment. Agent/model null inherits the repo's agent and
-  // defaultModel; the language is a simple/BCP 47 code, English by default.
-  autoPrAudit: integer("auto_pr_audit", { mode: "boolean" }).notNull().default(false),
+  // AI PR audit (issue #168), on by default for autonomous review (issue #254).
+  // A read-only, whole-PR review (Bugbot/CodeRabbit style) runs after a PR opens
+  // and is posted on the issue as an idempotent comment. Agent/model null
+  // inherits the repo's agent and defaultModel; the language is a simple/BCP 47
+  // code, English by default.
+  autoPrAudit: integer("auto_pr_audit", { mode: "boolean" }).notNull().default(true),
   prAuditAgent: text("pr_audit_agent"),
   prAuditModel: text("pr_audit_model"),
   prAuditLanguage: text("pr_audit_language").notNull().default("en"),

@@ -28,7 +28,7 @@ describe("togglePauseAction", () => {
 
   it("leaves other settings untouched", async () => {
     await togglePauseAction(true);
-    expect(getSettings().dailyCostLimitUsd).toBe(10);
+    expect(getSettings().dailyCostLimitUsd).toBe(0);
     expect(getSettings().maxParallelJobs).toBe(3);
   });
 });

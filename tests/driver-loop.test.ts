@@ -13,8 +13,20 @@ let db: DB;
 let repoId: number;
 beforeEach(() => {
   db = createDb(":memory:");
+  // The shared baseline repo stays inert: each test opts into the specific
+  // automation it exercises. The autonomous-by-default flags (issue #254) are
+  // pinned off here so this repo never auto-processes a fetched issue out from
+  // under a test that adds its own repo and asserts exact job counts.
   repoId = addRepo(
-    { path: "/repo", name: "acme", defaultModel: "claude-opus-4-7", sequential: false },
+    {
+      path: "/repo",
+      name: "acme",
+      defaultModel: "claude-opus-4-7",
+      sequential: false,
+      autoTriageEnabled: false,
+      autoProcessEnabled: false,
+      autoDecompose: false,
+    },
     db,
   ).id;
   setDrainMode(false);
@@ -31,6 +43,9 @@ function deps(started: number[], over: Record<string, unknown> = {}) {
     }),
     // Keep the credential watchdog (issue #177) from spawning real probes.
     credentialProbe: vi.fn(async () => {}),
+    // Decomposition defaults on per repo now (issue #254); these tests don't
+    // exercise it, so stub it rather than spawn a real `gh` for each candidate.
+    decompose: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -159,7 +174,13 @@ describe("driveTick", () => {
       started.push(jobId);
       return getJob(jobId, db) as Job;
     });
-    await driveTick({ db, fetchIssues, runJob, credentialProbe: async () => {} } as never);
+    await driveTick({
+      db,
+      fetchIssues,
+      runJob,
+      credentialProbe: async () => {},
+      decompose: async () => {},
+    } as never);
     const seqStarted = started.filter((id) => getJob(id, db)?.repoId === seqRepo);
     expect(seqStarted).toHaveLength(1);
   });
@@ -180,7 +201,13 @@ describe("driveTick", () => {
       started.push(jobId);
       return getJob(jobId, db) as Job;
     });
-    await driveTick({ db, fetchIssues, runJob, credentialProbe: async () => {} } as never);
+    await driveTick({
+      db,
+      fetchIssues,
+      runJob,
+      credentialProbe: async () => {},
+      decompose: async () => {},
+    } as never);
     const parStarted = started.filter((id) => getJob(id, db)?.repoId === parRepo);
     expect(parStarted.length).toBeGreaterThanOrEqual(2);
   });
@@ -302,6 +329,10 @@ describe("driveTick auto-processing", () => {
       fetchIssues: vi.fn(async () => fetched),
       forgeFor: () => fakeForge(),
       triage: vi.fn(async () => []),
+      // Decomposition is on by default per repo now (issue #254); these tests
+      // exercise the auto-process/enqueue path, so stub it to a no-op instead of
+      // letting the real generator run against the fake forge.
+      decompose: vi.fn(async () => {}),
       runJob: vi.fn(async (id: number) => getJob(id, db) as Job),
       ...over,
     };
@@ -411,7 +442,13 @@ describe("driveTick auto-processing", () => {
 
 describe("driveTick model/agent override (issue #101)", () => {
   it("uses issue modelOverride when enqueuing a manual-queue issue", async () => {
-    const r = addRepo({ path: "/mo", name: "mo", defaultModel: "claude-haiku-4-5" }, db);
+    // autoDecompose pinned off: these tests assert enqueue model/agent, not
+    // decomposition, and the default-on decompose (issue #254) would otherwise
+    // spawn a real `gh` for the queue-labeled issue.
+    const r = addRepo(
+      { path: "/mo", name: "mo", defaultModel: "claude-haiku-4-5", autoDecompose: false },
+      db,
+    );
     // Pre-seed the issue with a model override
     db.insert(issues)
       .values({
@@ -447,7 +484,10 @@ describe("driveTick model/agent override (issue #101)", () => {
   });
 
   it("falls back to repo default when no modelOverride is set", async () => {
-    const r = addRepo({ path: "/mo2", name: "mo2", defaultModel: "claude-sonnet-4-5" }, db);
+    const r = addRepo(
+      { path: "/mo2", name: "mo2", defaultModel: "claude-sonnet-4-5", autoDecompose: false },
+      db,
+    );
     db.insert(issues)
       .values({
         repoId: r.id,
@@ -479,7 +519,7 @@ describe("driveTick model/agent override (issue #101)", () => {
   });
 
   it("uses issue agentOverride when enqueuing", async () => {
-    const r = addRepo({ path: "/ao", name: "ao", agent: "claude" }, db);
+    const r = addRepo({ path: "/ao", name: "ao", agent: "claude", autoDecompose: false }, db);
     db.insert(issues)
       .values({
         repoId: r.id,

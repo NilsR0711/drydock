@@ -55,7 +55,10 @@ function deps(over: Record<string, unknown> = {}) {
 
 describe("runJob with decomposed subtasks", () => {
   it("injects the subtask checklist into the prompt and marks them done on merge", async () => {
-    const repo = addRepo({ path: "/r", name: "r", autoDecompose: true }, db);
+    const repo = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/r", name: "r", autoDecompose: true },
+      db,
+    );
     syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
     replaceSubtasks(repo.id, 1, ["Add API", "Wire UI"], "h", db);
 
@@ -72,7 +75,10 @@ describe("runJob with decomposed subtasks", () => {
   });
 
   it("does not touch the prompt or subtasks when the repo has not opted in", async () => {
-    const repo = addRepo({ path: "/r", name: "r", autoDecompose: false }, db);
+    const repo = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/r", name: "r", autoDecompose: false },
+      db,
+    );
     syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
     replaceSubtasks(repo.id, 1, ["Add API", "Wire UI"], "h", db);
 
@@ -86,7 +92,10 @@ describe("runJob with decomposed subtasks", () => {
   });
 
   it("parks subtasks as pending when the babysitter does not merge (issue #96)", async () => {
-    const repo = addRepo({ path: "/r", name: "r", autoDecompose: true }, db);
+    const repo = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/r", name: "r", autoDecompose: true },
+      db,
+    );
     syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
     replaceSubtasks(repo.id, 1, ["Add API", "Wire UI"], "h", db);
 
@@ -104,7 +113,10 @@ describe("runJob with decomposed subtasks", () => {
   });
 
   it("parks subtasks as pending on agent timeout (issue #96)", async () => {
-    const repo = addRepo({ path: "/r", name: "r", autoDecompose: true }, db);
+    const repo = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/r", name: "r", autoDecompose: true },
+      db,
+    );
     syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
     replaceSubtasks(repo.id, 1, ["Step 1", "Step 2"], "h", db);
 
@@ -132,7 +144,10 @@ describe("runJob with decomposed subtasks", () => {
   });
 
   it("parks subtasks as pending when per-job cost cap is reached (issue #96)", async () => {
-    const repo = addRepo({ path: "/r", name: "r", autoDecompose: true }, db);
+    const repo = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/r", name: "r", autoDecompose: true },
+      db,
+    );
     syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
     replaceSubtasks(repo.id, 1, ["Step 1", "Step 2"], "h", db);
 
@@ -160,7 +175,10 @@ describe("runJob with decomposed subtasks", () => {
   });
 
   it("parks subtasks as pending on non-zero agent exit (issue #96)", async () => {
-    const repo = addRepo({ path: "/r", name: "r", autoDecompose: true }, db);
+    const repo = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/r", name: "r", autoDecompose: true },
+      db,
+    );
     syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
     replaceSubtasks(repo.id, 1, ["Step 1", "Step 2"], "h", db);
 
@@ -181,7 +199,10 @@ describe("runJob with decomposed subtasks", () => {
   });
 
   it("parks subtasks as pending when agent produces no changes (EmptyCommitError) (issue #96)", async () => {
-    const repo = addRepo({ path: "/r", name: "r", autoDecompose: true }, db);
+    const repo = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/r", name: "r", autoDecompose: true },
+      db,
+    );
     syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
     replaceSubtasks(repo.id, 1, ["Step 1", "Step 2"], "h", db);
 
@@ -204,7 +225,10 @@ describe("runJob with decomposed subtasks", () => {
   });
 
   it("parks subtasks as pending when an unexpected error is thrown (issue #96)", async () => {
-    const repo = addRepo({ path: "/r", name: "r", autoDecompose: true }, db);
+    const repo = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/r", name: "r", autoDecompose: true },
+      db,
+    );
     syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
     replaceSubtasks(repo.id, 1, ["Step 1", "Step 2"], "h", db);
 
@@ -221,7 +245,10 @@ describe("runJob with decomposed subtasks", () => {
   });
 
   it("does not park subtasks when autoDecompose is off, even if subtasks exist (issue #96)", async () => {
-    const repo = addRepo({ path: "/r", name: "r", autoDecompose: false }, db);
+    const repo = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/r", name: "r", autoDecompose: false },
+      db,
+    );
     syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
     replaceSubtasks(repo.id, 1, ["Step 1", "Step 2"], "h", db);
 

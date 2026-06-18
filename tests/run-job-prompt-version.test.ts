@@ -44,7 +44,10 @@ function baseDeps(over: Record<string, unknown> = {}) {
 
 describe("runJob — implement prompt version recording (issue #178)", () => {
   it("records a null version when the job runs on the code-default template", async () => {
-    const repoId = addRepo({ path: "/repo", name: "acme" }, db).id;
+    const repoId = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/repo", name: "acme" },
+      db,
+    ).id;
     const job = createJob({ repoId, issueNumber: 1 }, db);
 
     await runJob(job.id, baseDeps() as never);
@@ -53,7 +56,10 @@ describe("runJob — implement prompt version recording (issue #178)", () => {
   });
 
   it("records the resolved version when a repo prompt template is active", async () => {
-    const repoId = addRepo({ path: "/repo", name: "acme" }, db).id;
+    const repoId = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/repo", name: "acme" },
+      db,
+    ).id;
     saveTemplate({ repoId, name: TEMPLATE_NAMES.main, content: "v1 prompt" }, db);
     saveTemplate({ repoId, name: TEMPLATE_NAMES.main, content: "v2 prompt" }, db);
     const job = createJob({ repoId, issueNumber: 1 }, db);
@@ -64,7 +70,10 @@ describe("runJob — implement prompt version recording (issue #178)", () => {
   });
 
   it("preserves the version across a limit resume without re-resolving the prompt", async () => {
-    const repoId = addRepo({ path: "/repo", name: "acme" }, db).id;
+    const repoId = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/repo", name: "acme" },
+      db,
+    ).id;
     const job = createJob({ repoId, issueNumber: 1 }, db);
     // Simulate a job whose first fresh run recorded version 2 and then parked
     // on a provider limit: the resume path must not touch implementPromptVersion.

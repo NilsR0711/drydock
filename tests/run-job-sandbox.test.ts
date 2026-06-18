@@ -43,7 +43,10 @@ function baseDeps(over: Record<string, unknown> = {}) {
 
 describe("runJob — sandboxed execution (issue #182)", () => {
   it("escalates to needs_human with a clear reason when the sandbox runtime is unavailable", async () => {
-    const repoId = addRepo({ path: "/r", name: "sbx", sandbox: "docker" }, db).id;
+    const repoId = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/r", name: "sbx", sandbox: "docker" },
+      db,
+    ).id;
     const prepareSandbox = vi.fn(async () => ({
       ok: false as const,
       reason: "No usable container runtime found (tried docker / podman).",
@@ -58,7 +61,10 @@ describe("runJob — sandboxed execution (issue #182)", () => {
   });
 
   it("prepares the sandbox with the job worktree and bare in-container command, then proceeds", async () => {
-    const repoId = addRepo({ path: "/r", name: "sbx2", sandbox: "docker" }, db).id;
+    const repoId = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/r", name: "sbx2", sandbox: "docker" },
+      db,
+    ).id;
     const prepareSandbox = vi.fn(async (_input: { jobId: number }) => ({
       ok: true as const,
       session: {
@@ -84,7 +90,10 @@ describe("runJob — sandboxed execution (issue #182)", () => {
   });
 
   it("never prepares a sandbox for a repo that has not opted in (no behavior change)", async () => {
-    const repoId = addRepo({ path: "/r", name: "plain" }, db).id;
+    const repoId = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/r", name: "plain" },
+      db,
+    ).id;
     const prepareSandbox = vi.fn();
     const deps = baseDeps({ prepareSandbox });
     const job = createJob({ repoId, issueNumber: 1 }, db);

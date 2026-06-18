@@ -11,7 +11,7 @@ let db: DB;
 let repoId: number;
 beforeEach(() => {
   db = createDb(":memory:");
-  repoId = addRepo({ path: "/repo", name: "acme" }, db).id;
+  repoId = addRepo({ verifyPr: false, autoPrAudit: false, path: "/repo", name: "acme" }, db).id;
 });
 
 /** A worktree stub whose commit/push/remove are spies; path "/wt" feeds readers. */

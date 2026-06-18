@@ -13,7 +13,16 @@ let repoId: number;
 
 beforeEach(() => {
   db = createDb(":memory:");
-  repoId = addRepo({ path: "/repo", name: "acme", defaultModel: "claude-opus-4-8" }, db).id;
+  repoId = addRepo(
+    {
+      verifyPr: false,
+      autoPrAudit: false,
+      path: "/repo",
+      name: "acme",
+      defaultModel: "claude-opus-4-8",
+    },
+    db,
+  ).id;
 });
 
 const PRESERVED_BRANCH = "drydock/issue-1-job-1";

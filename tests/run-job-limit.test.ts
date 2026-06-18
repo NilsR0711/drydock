@@ -20,7 +20,16 @@ let db: DB;
 let repoId: number;
 beforeEach(() => {
   db = createDb(":memory:");
-  repoId = addRepo({ path: "/repo", name: "acme", defaultModel: "claude-opus-4-8" }, db).id;
+  repoId = addRepo(
+    {
+      verifyPr: false,
+      autoPrAudit: false,
+      path: "/repo",
+      name: "acme",
+      defaultModel: "claude-opus-4-8",
+    },
+    db,
+  ).id;
 });
 
 function usageLimit(overrides: Partial<SessionLimitInfo> = {}): SessionLimitInfo {
@@ -283,7 +292,10 @@ describe("runJob limit-resume (issue #166)", () => {
   });
 
   it("skips the plan stage on a limit resume (the session already has its plan)", async () => {
-    const planRepo = addRepo({ path: "/p", name: "planned", planFirst: true }, db);
+    const planRepo = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/p", name: "planned", planFirst: true },
+      db,
+    );
     const runPlan = vi.fn(async () => ({ text: "the plan", exitCode: 0 }));
     const resumeLimitSession = vi.fn(async (job: Job) => {
       db.update(jobs).set({ status: "working" }).where(eq(jobs.id, job.id)).run();
