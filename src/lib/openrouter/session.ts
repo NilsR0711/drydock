@@ -244,7 +244,11 @@ export async function runOpenRouterJobSession(
         chunks.push({ kind: "tool_use", name: call.name, id: call.id, input });
       }
       if (chunks.length > 0) {
-        broker.publish(job.id, { type: "assistant", payload: { chunks, costUsd } });
+        // Running usage so the job detail metric cards tick live (issue #242).
+        broker.publish(job.id, {
+          type: "assistant",
+          payload: { chunks, costUsd, inputTokens, outputTokens },
+        });
       }
 
       // Per-job cost ceiling (issue #57): same semantics as the CLI runner —
