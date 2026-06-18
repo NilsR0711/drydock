@@ -116,8 +116,16 @@ export class WorktreeManager {
     return res.stdout;
   }
 
-  async prepare(repo: Repo, jobId: number, issueNumber = 0): Promise<Worktree> {
-    const branch = `drydock/issue-${issueNumber}-job-${jobId}`;
+  async prepare(
+    repo: Repo,
+    jobId: number,
+    issueNumber = 0,
+    // Branch-name label; defaults to the issue slug. An agent-driven release
+    // (issue #256) passes "release" so its throwaway branch reads
+    // `drydock/release-job-N` rather than `drydock/issue-0-job-N`.
+    label = `issue-${issueNumber}`,
+  ): Promise<Worktree> {
+    const branch = `drydock/${label}-job-${jobId}`;
     const path = join(repoWorktreesDir(repo.name), `job-${jobId}`);
     const base = await this.withRepoLock(repo.path, async () => {
       // Branch and path derive solely from the job id, so a retry of the same

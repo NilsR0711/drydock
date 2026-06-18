@@ -68,6 +68,7 @@ describe("getHealth", () => {
       retrying: 0,
       waiting_limit: 0,
       merged: 1,
+      released: 0,
       needs_human: 0,
       aborted: 0,
       interrupted: 0,

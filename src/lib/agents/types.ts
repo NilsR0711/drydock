@@ -48,6 +48,13 @@ export interface BuildArgsOptions {
   prompt: string;
   model: string;
   maxTurns: number;
+  /**
+   * Run the session with full, unprompted shell access instead of the default
+   * edits-only permission mode (issue #256). Only an agent-driven release sets
+   * this: it must run the repo's release commands (gh/git/npm) itself, which the
+   * default mode blocks headlessly. Off everywhere else, so no behaviour change.
+   */
+  bypassPermissions?: boolean;
 }
 
 export interface ResumeArgsOptions extends BuildArgsOptions {

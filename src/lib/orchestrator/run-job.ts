@@ -44,6 +44,7 @@ import { consumePrMetadata as defaultConsumePrMetadata, type PrMetadata } from "
 import { nudgeAwareSleep } from "./pr-nudge";
 import { clearProviderLimit, latchProviderLimit, limitAutoWaitEnabled } from "./provider-limit";
 import { consumeQuestions as defaultConsumeQuestions } from "./questions-metadata";
+import { runReleaseJob } from "./release-job";
 import { InvalidTransitionError } from "./state-machine";
 import {
   markSubtasksDone,
@@ -340,6 +341,12 @@ export function buildCiFixResume(opts: {
 export async function runJob(jobId: number, deps: RunJobDeps = {}): Promise<Job> {
   const db = deps.db ?? getDb();
   const send: NotifyEvent = deps.notify ?? ((event, text) => dispatch(event, text, db));
+  // Agent-driven release jobs (issue #256) run an entirely different flow — no
+  // PR, no CI, the agent performs the release itself — so they are handled by a
+  // dedicated runner. The driver loop dispatches every claimed job here, so this
+  // is where the two kinds fork; the issue-implementation flow below is untouched.
+  const claimed = getJob(jobId, db);
+  if (claimed?.kind === "release") return runReleaseJob(jobId, { db }, send);
   const result = await runJobCore(jobId, deps, send);
   if (result.status === "merged") {
     await send(

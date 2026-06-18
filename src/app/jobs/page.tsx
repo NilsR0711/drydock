@@ -83,7 +83,7 @@ export default async function JobsIndexPage({
                     <span className="flex min-w-0 items-center gap-2.5">
                       <Badge status={row.status} className="shrink-0" />
                       <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                        {row.repoName} #{row.issueNumber}
+                        {row.repoName} {row.kind === "release" ? "Release" : `#${row.issueNumber}`}
                       </span>
                       {row.issueTitle && <span className="truncate text-sm">{row.issueTitle}</span>}
                     </span>

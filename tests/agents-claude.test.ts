@@ -29,6 +29,20 @@ describe("claudeProvider", () => {
     ]);
   });
 
+  it("swaps acceptEdits for full shell access when bypassPermissions is set (issue #256)", () => {
+    // An agent-driven release must run gh/git/npm itself, which acceptEdits
+    // blocks headlessly; bypass replaces it with --dangerously-skip-permissions.
+    const args = claudeProvider.buildStartArgs({
+      prompt: "release it",
+      model: "claude-opus-4-8",
+      maxTurns: 40,
+      bypassPermissions: true,
+    });
+    expect(args).toContain("--dangerously-skip-permissions");
+    expect(args).not.toContain("--permission-mode");
+    expect(args).not.toContain("acceptEdits");
+  });
+
   it("builds the SPEC §6.3 resume invocation with the recorded session id", () => {
     const args = claudeProvider.buildResumeArgs({
       prompt: "fix ci",
@@ -40,6 +54,25 @@ describe("claudeProvider", () => {
     expect(args).toContain("--resume");
     expect(args).toContain("sess-abc");
     expect(args).toContain("claude-haiku-4-5");
+  });
+
+  it("keeps full shell access on resume when bypassPermissions is set (issue #256)", () => {
+    const args = claudeProvider.buildResumeArgs({
+      prompt: "continue",
+      sessionId: "sess-abc",
+      model: claudeProvider.resumeModel,
+      maxTurns: 15,
+      bypassPermissions: true,
+    });
+    expect(args).toContain("--dangerously-skip-permissions");
+    // A normal resume (no flag) carries no permission flag at all.
+    const plain = claudeProvider.buildResumeArgs({
+      prompt: "continue",
+      sessionId: "sess-abc",
+      model: claudeProvider.resumeModel,
+      maxTurns: 15,
+    });
+    expect(plain).not.toContain("--dangerously-skip-permissions");
   });
 
   it("builds a plain one-shot invocation for a text prompt (issue #49)", () => {

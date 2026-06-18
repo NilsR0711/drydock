@@ -193,7 +193,7 @@ function field(payload: unknown, key: string): string | undefined {
 }
 
 /** Job states whose log stream produces no further events once entered. */
-const STREAM_END_STATES = new Set(["merged", "needs_human", "aborted", "interrupted"]);
+const STREAM_END_STATES = new Set(["merged", "released", "needs_human", "aborted", "interrupted"]);
 
 /**
  * Whether a log event marks the end of the stream: an agent result/exit, or a

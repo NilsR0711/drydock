@@ -7,6 +7,7 @@ import { getRepo } from "@/lib/db/queries";
 import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient } from "@/lib/forge/types";
 import { commandForAgent } from "@/lib/orchestrator/agent-command";
+import { enqueueJob } from "@/lib/orchestrator/queue";
 import {
   previewRelease,
   publishRelease,
@@ -106,4 +107,58 @@ export async function publishReleaseAction(repoId: number): Promise<ReleaseRunSu
   }
   revalidatePath(`/repos/${repoId}`);
   return recentReleaseRuns(repo.id, db);
+}
+
+/** The result of starting an agent-driven release: the new job + the run list. */
+export interface StartReleaseResult {
+  jobId: number;
+  runs: ReleaseRunSummary[];
+}
+
+/**
+ * Start an agent-driven release for a repo (issue #256): enqueue a release job
+ * whose agent discovers how the repo releases and performs it, then record a
+ * linked `release_runs` row (mode "agent") so the panel shows the run and can
+ * deep-link to the job's live log. Gated by the same global + per-repo opt-in
+ * and forge capability as the deterministic path; additionally requires the
+ * Claude agent, the only one wired for the full-shell-access release session.
+ * The job's dedupe key (`release:<repoId>`) refuses a second concurrent release
+ * (double submit, second tab) until the prior one settles — a release is hard to
+ * reverse, so a duplicate must never slip through.
+ */
+export async function startReleaseAction(repoId: number): Promise<StartReleaseResult> {
+  const { db, repo } = releaseContext(repoId);
+  if (repo.agent !== "claude") {
+    throw new Error("Agent-driven release currently supports the Claude agent only.");
+  }
+  // Guard, enqueue, and record in one transaction so nothing can interleave
+  // (better-sqlite3 transactions are synchronous). `activeReleaseRun` also blocks
+  // a deterministic auto/manual run already in flight — that path creates no job,
+  // so the job dedupe key alone would not catch it, and two pipelines could cut
+  // the same release. Creating the run inside the transaction closes the window
+  // where a concurrent deterministic publish could slip past before it exists.
+  const job = db.transaction(() => {
+    const active = activeReleaseRun(repo.id, db);
+    if (active) {
+      throw new Error(
+        `A release run is already in progress for this repo (run ${active.id}, ${active.status}).`,
+      );
+    }
+    const created = enqueueJob(
+      {
+        repoId: repo.id,
+        issueNumber: 0,
+        kind: "release",
+        agent: repo.agent,
+        model: repo.defaultModel,
+        dedupeKey: `release:${repo.id}`,
+      },
+      db,
+    );
+    if (!created) throw new Error("A release job is already in progress for this repo.");
+    createReleaseRun({ repoId: repo.id, mode: "agent", jobId: created.id }, db);
+    return created;
+  });
+  revalidatePath(`/repos/${repoId}`);
+  return { jobId: job.id, runs: recentReleaseRuns(repo.id, db) };
 }

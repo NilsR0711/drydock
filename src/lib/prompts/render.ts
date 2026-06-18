@@ -8,7 +8,10 @@ export const SUPPORTED_VARIABLES = [
   "$REPO_NAME",
   "$CI_LOG",
   "$PR_FORMAT",
+  // The human's guidance, injected into the human-resume prompt (issue #257).
   "$INSTRUCTION",
+  // The repo's default branch, used by the agent-driven release prompt (#256).
+  "$DEFAULT_BRANCH",
 ] as const;
 export type TemplateVar = (typeof SUPPORTED_VARIABLES)[number];
 
@@ -21,6 +24,7 @@ export interface TemplateVars {
   CI_LOG?: string;
   PR_FORMAT?: string;
   INSTRUCTION?: string;
+  DEFAULT_BRANCH?: string;
 }
 
 /**
@@ -37,6 +41,7 @@ export function renderTemplate(content: string, vars: TemplateVars): string {
     $CI_LOG: vars.CI_LOG ?? "$CI_LOG",
     $PR_FORMAT: vars.PR_FORMAT ?? "$PR_FORMAT",
     $INSTRUCTION: vars.INSTRUCTION ?? "$INSTRUCTION",
+    $DEFAULT_BRANCH: vars.DEFAULT_BRANCH ?? "$DEFAULT_BRANCH",
   };
   let out = content;
   for (const token of [...SUPPORTED_VARIABLES].sort((a, b) => b.length - a.length)) {

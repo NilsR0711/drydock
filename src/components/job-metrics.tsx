@@ -19,6 +19,7 @@ const METRIC_EVENTS = ["assistant", "result"] as const;
 export function JobMetrics({
   jobId,
   issueNumber,
+  subject,
   model,
   initialCostUsd,
   inputTokens: initialInputTokens,
@@ -31,6 +32,8 @@ export function JobMetrics({
 }: {
   jobId: number;
   issueNumber: number;
+  /** Overrides the issue label in the token subline (e.g. "Release", issue #256). */
+  subject?: string;
   model: string | null;
   initialCostUsd: number;
   inputTokens: number;
@@ -88,7 +91,7 @@ export function JobMetrics({
   }, [active, finishedAt]);
 
   const durationSec = startedAt != null ? Math.max(0, (finishedAt ?? now) - startedAt) : null;
-  const tokenSub = `${(tokens.input / 1000).toFixed(0)}k in · ${(tokens.output / 1000).toFixed(1)}k out · #${issueNumber}`;
+  const tokenSub = `${(tokens.input / 1000).toFixed(0)}k in · ${(tokens.output / 1000).toFixed(1)}k out · ${subject ?? `#${issueNumber}`}`;
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
