@@ -1,4 +1,7 @@
 import { and, asc, count, desc, eq, or, type SQL, sql } from "drizzle-orm";
+import { type ClaudeUsageView, deriveClaudeUsageView } from "@/lib/agents/claude-usage";
+import { providerLimitBlocked } from "@/lib/orchestrator/provider-limit";
+import { getProviderUsage } from "@/lib/orchestrator/provider-usage";
 import { type DB, getDb } from "./client";
 import { todayCost } from "./cost-queries";
 import { type Issue, issues, type Job, jobs, type Repo, repos } from "./schema";
@@ -136,6 +139,22 @@ export interface RepoDashboardRow {
 export interface DashboardSnapshot {
   summary: DashboardSummary;
   repos: RepoDashboardRow[];
+  /** Proactive Claude OAuth subscription-window indicator (issue #188). */
+  claudeUsage: ClaudeUsageView;
+}
+
+/**
+ * Render-ready Claude OAuth usage state for the navbar pill and dashboard card
+ * (issue #188). Merges the last opportunistically-captured subscription-window
+ * reading with any active provider-limit latch (the terminal parked state).
+ */
+export function getClaudeUsageView(db: DB = getDb()): ClaudeUsageView {
+  const now = Math.floor(Date.now() / 1000);
+  return deriveClaudeUsageView({
+    reading: getProviderUsage("claude", db),
+    latchedUntil: providerLimitBlocked("claude", db, now)?.blockedUntil,
+    now,
+  });
 }
 
 const IN_FLIGHT = ["working", "ci_running", "retrying"];
@@ -195,7 +214,7 @@ export function dashboardSnapshot(db: DB = getDb()): DashboardSnapshot {
     return a.name.localeCompare(b.name);
   });
 
-  return { summary: dashboardSummary(db), repos: rows };
+  return { summary: dashboardSummary(db), repos: rows, claudeUsage: getClaudeUsageView(db) };
 }
 
 export interface JobHistoryFilters {

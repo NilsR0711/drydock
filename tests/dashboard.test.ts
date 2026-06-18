@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import type { ClaudeUsageReading } from "@/lib/agents/claude-usage";
 import { createDb, type DB } from "@/lib/db/client";
-import { dashboardSnapshot, dashboardSummary } from "@/lib/db/queries";
+import { dashboardSnapshot, dashboardSummary, getClaudeUsageView } from "@/lib/db/queries";
 import { jobs } from "@/lib/db/schema";
+import { latchProviderLimit } from "@/lib/orchestrator/provider-limit";
+import { saveProviderUsage } from "@/lib/orchestrator/provider-usage";
 import { addRepo } from "@/lib/repos/service";
 
 let db: DB;
@@ -136,5 +139,36 @@ describe("dashboardSnapshot", () => {
     expect(row?.todaySpend).toBe(0);
     expect(row?.lastActivityAt).toBeNull();
     expect(row?.attention).toBe(false);
+  });
+
+  it("includes a Claude usage view, unknown when nothing is recorded (issue #188)", () => {
+    expect(dashboardSnapshot(db).claudeUsage.state).toBe("unknown");
+  });
+});
+
+describe("getClaudeUsageView", () => {
+  const fresh = (): ClaudeUsageReading => ({
+    status: "warning",
+    windowType: "five_hour",
+    resetsAt: Math.floor(Date.now() / 1000) + 3600,
+    capturedAt: Math.floor(Date.now() / 1000),
+  });
+
+  it("reflects a fresh recorded reading", () => {
+    saveProviderUsage("claude", fresh(), db);
+    const view = getClaudeUsageView(db);
+    expect(view.state).toBe("warning");
+    expect(view.tone).toBe("warning");
+    expect(view.windowType).toBe("five_hour");
+  });
+
+  it("folds an active provider-limit latch into the blocked state", () => {
+    latchProviderLimit(
+      { agent: "claude", kind: "usage_limit", rawSnippet: "limit", resetAt: now() + 7200 },
+      db,
+    );
+    const view = getClaudeUsageView(db);
+    expect(view.state).toBe("blocked");
+    expect(view.blocked).toBe(true);
   });
 });

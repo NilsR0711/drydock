@@ -3,7 +3,8 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import { AppShell } from "@/components/app-shell";
 import { Providers } from "@/components/providers";
 import { pendingCount } from "@/lib/adr/service";
-import { needsHumanJobs } from "@/lib/db/queries";
+import { type ClaudeUsageView, deriveClaudeUsageView } from "@/lib/agents/claude-usage";
+import { getClaudeUsageView, needsHumanJobs } from "@/lib/db/queries";
 import {
   type CredentialFailure,
   getCredentialFailures,
@@ -32,11 +33,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   let needsHuman = 0;
   let paused = false;
   let credentialFailures: CredentialFailure[] = [];
+  let claudeUsage: ClaudeUsageView = deriveClaudeUsageView({ now: Math.floor(Date.now() / 1000) });
   try {
     pending = pendingCount();
     needsHuman = needsHumanJobs().length;
     paused = getSettings().paused;
     credentialFailures = getCredentialFailures();
+    claudeUsage = getClaudeUsageView();
   } catch {
     // DB may not exist yet on first boot
   }
@@ -60,6 +63,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             updateStatus={updateStatus}
             installKind={installKind}
             credentialFailures={credentialFailures}
+            claudeUsage={claudeUsage}
           >
             {children}
           </AppShell>
