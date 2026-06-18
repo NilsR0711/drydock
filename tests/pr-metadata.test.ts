@@ -65,6 +65,7 @@ describe("readPrMetadata / consumePrMetadata", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  /** Write `.drydock/PR.md` under the temp worktree and return its absolute path. */
   function writeMeta(content: string) {
     const file = join(dir, PR_METADATA_PATH);
     mkdirSync(join(dir, ".drydock"), { recursive: true });

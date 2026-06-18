@@ -14,6 +14,7 @@ beforeEach(() => {
   repoId = addRepo({ path: "/repo", name: "acme" }, db).id;
 });
 
+/** A worktree stub whose commit/push are spies; path "/wt" feeds the metadata reader. */
 function fakeWorktrees() {
   const wt: Worktree = { path: "/wt", branch: "drydock/issue-1-job-1" };
   return {
@@ -30,6 +31,7 @@ interface PrInput {
   body: string;
 }
 
+/** Build runJob deps that drive a job straight to merged, capturing the PR input. */
 function baseDeps(over: Record<string, unknown> = {}) {
   const captured: { pr?: PrInput } = {};
   const deps = {
