@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"th_codex_rl"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"i1","item_type":"assistant_message","text":"Done."}}
+{"type":"token_count","rate_limits":{"primary":{"used_percent":42.5,"window_minutes":300,"resets_in_seconds":8940},"secondary":{"used_percent":12,"window_minutes":10080,"resets_in_seconds":421200}},"usage":{"input_tokens":1000,"output_tokens":200}}
+{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":200,"reasoning_output_tokens":0}}

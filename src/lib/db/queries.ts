@@ -1,7 +1,8 @@
 import { and, asc, count, desc, eq, or, type SQL, sql } from "drizzle-orm";
 import { type ClaudeUsageView, deriveClaudeUsageView } from "@/lib/agents/claude-usage";
+import { buildCodexUsageView, type CodexUsageView } from "@/lib/agents/codex-usage";
 import { providerLimitBlocked } from "@/lib/orchestrator/provider-limit";
-import { getProviderUsage } from "@/lib/orchestrator/provider-usage";
+import { getCodexUsage, getProviderUsage } from "@/lib/orchestrator/provider-usage";
 import { type DB, getDb } from "./client";
 import { todayCost } from "./cost-queries";
 import { type Issue, issues, type Job, jobs, type Repo, repos } from "./schema";
@@ -141,6 +142,8 @@ export interface DashboardSnapshot {
   repos: RepoDashboardRow[];
   /** Proactive Claude OAuth subscription-window indicator (issue #188). */
   claudeUsage: ClaudeUsageView;
+  /** Proactive Codex OAuth quota indicator (issue #189). */
+  codexUsage: CodexUsageView;
 }
 
 /**
@@ -153,6 +156,20 @@ export function getClaudeUsageView(db: DB = getDb()): ClaudeUsageView {
   return deriveClaudeUsageView({
     reading: getProviderUsage("claude", db),
     latchedUntil: providerLimitBlocked("claude", db, now)?.blockedUntil,
+    now,
+  });
+}
+
+/**
+ * Render-ready Codex OAuth usage state for the navbar pill and dashboard card
+ * (issue #189). Merges the last captured `rate_limits` snapshot with any active
+ * provider-limit latch (the terminal parked state).
+ */
+export function getCodexUsageView(db: DB = getDb()): CodexUsageView {
+  const now = Math.floor(Date.now() / 1000);
+  return buildCodexUsageView({
+    snapshot: getCodexUsage(db),
+    latchedUntil: providerLimitBlocked("codex", db, now)?.blockedUntil,
     now,
   });
 }
@@ -214,7 +231,12 @@ export function dashboardSnapshot(db: DB = getDb()): DashboardSnapshot {
     return a.name.localeCompare(b.name);
   });
 
-  return { summary: dashboardSummary(db), repos: rows, claudeUsage: getClaudeUsageView(db) };
+  return {
+    summary: dashboardSummary(db),
+    repos: rows,
+    claudeUsage: getClaudeUsageView(db),
+    codexUsage: getCodexUsageView(db),
+  };
 }
 
 export interface JobHistoryFilters {

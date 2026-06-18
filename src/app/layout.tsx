@@ -4,7 +4,8 @@ import { AppShell } from "@/components/app-shell";
 import { Providers } from "@/components/providers";
 import { pendingCount } from "@/lib/adr/service";
 import { type ClaudeUsageView, deriveClaudeUsageView } from "@/lib/agents/claude-usage";
-import { getClaudeUsageView, needsHumanJobs } from "@/lib/db/queries";
+import { buildCodexUsageView, type CodexUsageView } from "@/lib/agents/codex-usage";
+import { getClaudeUsageView, getCodexUsageView, needsHumanJobs } from "@/lib/db/queries";
 import {
   type CredentialFailure,
   getCredentialFailures,
@@ -34,12 +35,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   let paused = false;
   let credentialFailures: CredentialFailure[] = [];
   let claudeUsage: ClaudeUsageView = deriveClaudeUsageView({ now: Math.floor(Date.now() / 1000) });
+  let codexUsage: CodexUsageView = buildCodexUsageView({ now: Math.floor(Date.now() / 1000) });
   try {
     pending = pendingCount();
     needsHuman = needsHumanJobs().length;
     paused = getSettings().paused;
     credentialFailures = getCredentialFailures();
     claudeUsage = getClaudeUsageView();
+    codexUsage = getCodexUsageView();
   } catch {
     // DB may not exist yet on first boot
   }
@@ -64,6 +67,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             installKind={installKind}
             credentialFailures={credentialFailures}
             claudeUsage={claudeUsage}
+            codexUsage={codexUsage}
           >
             {children}
           </AppShell>

@@ -10,17 +10,14 @@ import type { StreamCallbacks, StreamHandle, StreamRunner } from "@/lib/exec/str
 import { resumeAgentSession, spawnAgentSession } from "@/lib/orchestrator/agent-session";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
 import { latchProviderLimit } from "@/lib/orchestrator/provider-limit";
-import { getProviderUsage } from "@/lib/orchestrator/provider-usage";
+import { getCodexUsage, getProviderUsage } from "@/lib/orchestrator/provider-usage";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
 import { LogBroker } from "@/lib/stream/broker";
 import { StreamJsonParser } from "@/lib/stream/parser";
 
-function codexFixture(): string {
-  return readFileSync(
-    fileURLToPath(new URL("./fixtures/codex/success.jsonl", import.meta.url)),
-    "utf8",
-  );
+function codexFixture(name = "success.jsonl"): string {
+  return readFileSync(fileURLToPath(new URL(`./fixtures/codex/${name}`, import.meta.url)), "utf8");
 }
 
 interface Captured {
@@ -106,6 +103,32 @@ describe("spawnAgentSession", () => {
       runner: captureRunner(stream, captured),
     });
     expect(getProviderUsage("claude", db)).toBeUndefined();
+  });
+
+  it("persists the Codex OAuth usage snapshot reported in the stream (issue #189)", async () => {
+    const job = createJob({ repoId, issueNumber: 190, agent: "codex", model: "gpt-5-codex" }, db);
+    const before = nowSec();
+    await spawnAgentSession(getJob(job.id, db) as never, "fix it", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner(codexFixture("rate-limits.jsonl"), {}),
+    });
+    const usage = getCodexUsage(db);
+    expect(usage?.primary?.usedPercent).toBe(42.5);
+    expect(usage?.secondary?.usedPercent).toBe(12);
+    // The relative 8940s reset was anchored to capture time, not lost.
+    expect(usage?.primary?.resetsAt).toBeGreaterThanOrEqual(before + 8940);
+    expect(usage?.primary?.resetsAt).toBeLessThanOrEqual(nowSec() + 8940);
+  });
+
+  it("records no Codex usage when the stream reports no quota (issue #189)", async () => {
+    const job = createJob({ repoId, issueNumber: 191, agent: "codex", model: "gpt-5-codex" }, db);
+    await spawnAgentSession(getJob(job.id, db) as never, "fix it", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner(codexFixture(), {}),
+    });
+    expect(getCodexUsage(db)).toBeUndefined();
   });
 
   it("emits a parse_error event for a malformed stdout line instead of crashing (issue #46)", async () => {
