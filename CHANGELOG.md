@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.1.8](https://github.com/NilsR0711/drydock/compare/v0.1.7...v0.1.8) (2026-06-18)
+
+
+### Features
+
+* agent auto-files follow-up issues via .drydock/FOLLOWUPS.md ([#264](https://github.com/NilsR0711/drydock/issues/264)) ([b7fa515](https://github.com/NilsR0711/drydock/commit/b7fa515141376fe2ccde1502b3f52fe00119b80a))
+* alert with sound + notification when a job needs a human ([#258](https://github.com/NilsR0711/drydock/issues/258)) ([59a6f8f](https://github.com/NilsR0711/drydock/commit/59a6f8f1da76c1063d1cacba35218b6c45d185ba))
+* autonomous needs_human handoff via .drydock/QUESTIONS.md ([#251](https://github.com/NilsR0711/drydock/issues/251)) ([a0132f8](https://github.com/NilsR0711/drydock/commit/a0132f87a8dabbecf4a78c19948e0c2d4c9685bc))
+* **cost:** make cost budgets turn-off-able and consistent (0 = unlimited) ([#234](https://github.com/NilsR0711/drydock/issues/234)) ([#239](https://github.com/NilsR0711/drydock/issues/239)) ([470406d](https://github.com/NilsR0711/drydock/commit/470406d463cc16f339dcff53e90e77dfb43ad412))
+* **job-detail:** tick Duration live and refresh metrics from the stream ([#247](https://github.com/NilsR0711/drydock/issues/247)) ([3ccd3a0](https://github.com/NilsR0711/drydock/commit/3ccd3a0a52dc91a487b03ac767ad29a97e7da23a)), closes [#242](https://github.com/NilsR0711/drydock/issues/242)
+* **log-viewer:** show newest job events at the top ([#243](https://github.com/NilsR0711/drydock/issues/243)) ([#245](https://github.com/NilsR0711/drydock/issues/245)) ([be7897b](https://github.com/NilsR0711/drydock/commit/be7897b8647602a486db2e5bef3e7f665ca88c05))
+* make 'fully autonomous' the default (all auto-flags on, no cost/turn ceilings) ([#271](https://github.com/NilsR0711/drydock/issues/271)) ([cf4f9c4](https://github.com/NilsR0711/drydock/commit/cf4f9c444ef9799f31d927166504bcb52ecdf3e8))
+* manual agent-driven release button ([#256](https://github.com/NilsR0711/drydock/issues/256)) ([507e47a](https://github.com/NilsR0711/drydock/commit/507e47ab1d432bb3a26987a411519afae424aff4))
+* **mcp:** ship the stdio MCP server in the npm distribution ([#230](https://github.com/NilsR0711/drydock/issues/230)) ([#238](https://github.com/NilsR0711/drydock/issues/238)) ([4740f0d](https://github.com/NilsR0711/drydock/commit/4740f0dad8a3f535f553001d5bd99cde69d134ba))
+* **needs-human:** resume a parked job with typed instructions on its branch ([#257](https://github.com/NilsR0711/drydock/issues/257)) ([#266](https://github.com/NilsR0711/drydock/issues/266)) ([c1e958f](https://github.com/NilsR0711/drydock/commit/c1e958f04a2d51a3644885538ba583ebde33ed10))
+* **orchestrator:** make needs_human visible on the GitHub issue ([#250](https://github.com/NilsR0711/drydock/issues/250)) ([#263](https://github.com/NilsR0711/drydock/issues/263)) ([b72df56](https://github.com/NilsR0711/drydock/commit/b72df561229f745da332e3ccd4bbbe697f762513))
+* preserve branch + commits when a job parks in needs_human ([#249](https://github.com/NilsR0711/drydock/issues/249)) ([#262](https://github.com/NilsR0711/drydock/issues/262)) ([a278274](https://github.com/NilsR0711/drydock/commit/a278274b18228108e1e0c04bb6fc895d00920c7c))
+* **prompts:** make the PR body format a per-repo editable template ([#252](https://github.com/NilsR0711/drydock/issues/252)) ([#253](https://github.com/NilsR0711/drydock/issues/253)) ([4166f95](https://github.com/NilsR0711/drydock/commit/4166f95e16019dd5b2ec9c26193a06d819868866))
+* **prompts:** rewrite default agent prompts to best-in-class (TDD, docs-aware, verify-before-finish) ([#268](https://github.com/NilsR0711/drydock/issues/268)) ([0afa998](https://github.com/NilsR0711/drydock/commit/0afa998f1ba14c5120e4448021e36ef53cb718c3))
+* thematic commits and no AI attribution on worked branches ([#259](https://github.com/NilsR0711/drydock/issues/259)) ([8d7fe71](https://github.com/NilsR0711/drydock/commit/8d7fe7154026f51e14e074fc2fadb32829f2c47d))
+
+
+### Bug Fixes
+
+* **dashboard:** live-update repo list/count after adding a repo ([#232](https://github.com/NilsR0711/drydock/issues/232)) ([#237](https://github.com/NilsR0711/drydock/issues/237)) ([f374812](https://github.com/NilsR0711/drydock/commit/f3748122c3a7cc8c849cf42d4044ee3abc0dba34))
+* **driver:** stop silently dropping manually queued review-pattern issues ([#240](https://github.com/NilsR0711/drydock/issues/240)) ([#244](https://github.com/NilsR0711/drydock/issues/244)) ([3e8be17](https://github.com/NilsR0711/drydock/commit/3e8be17cf8ae897c898efead9918a9b36d134abd))
+* **exec:** wire agent stdin to /dev/null to silence benign CLI warning ([#236](https://github.com/NilsR0711/drydock/issues/236)) ([39e5cda](https://github.com/NilsR0711/drydock/commit/39e5cda3bed83e4732ebfb6c5c9863fd00355125)), closes [#233](https://github.com/NilsR0711/drydock/issues/233)
+* **git:** guard against empty commit message after stripping AI attribution ([#270](https://github.com/NilsR0711/drydock/issues/270)) ([e3ce3e3](https://github.com/NilsR0711/drydock/commit/e3ce3e38955cb6d70f0b5dbdca17898049bc19d0)), closes [#269](https://github.com/NilsR0711/drydock/issues/269)
+* **health:** report driver.lockHeld per-process, not lock-exists ([#235](https://github.com/NilsR0711/drydock/issues/235)) ([3949c78](https://github.com/NilsR0711/drydock/commit/3949c787ca3cc72fe3efb665d03eba8c9f1f59ff)), closes [#231](https://github.com/NilsR0711/drydock/issues/231)
+* **log-viewer:** live log stream never updates for Claude jobs ([#241](https://github.com/NilsR0711/drydock/issues/241)) ([c888e62](https://github.com/NilsR0711/drydock/commit/c888e624b088d5dc8158cc07753aa096aabebfc0))
+
 ## [0.1.7](https://github.com/NilsR0711/drydock/compare/v0.1.6...v0.1.7) (2026-06-18)
 
 
