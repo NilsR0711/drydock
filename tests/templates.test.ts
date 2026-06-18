@@ -9,6 +9,7 @@ import {
   renderTemplate,
   resolveTemplate,
   resolveTemplateContent,
+  SUPPORTED_VARIABLES,
   saveTemplate,
 } from "@/lib/prompts/templates";
 import { addRepo } from "@/lib/repos/service";
@@ -36,6 +37,41 @@ describe("renderTemplate", () => {
 
   it("substitutes $CI_LOG", () => {
     expect(renderTemplate("log:\n$CI_LOG", { CI_LOG: "boom" })).toBe("log:\nboom");
+  });
+
+  it("substitutes $ISSUE_TITLE and $ISSUE_BODY (issue #205)", () => {
+    const out = renderTemplate("Title: $ISSUE_TITLE\nBody:\n$ISSUE_BODY", {
+      ISSUE_TITLE: "Fix the crash",
+      ISSUE_BODY: "Steps:\n1. break\n2. fix",
+    });
+    expect(out).toBe("Title: Fix the crash\nBody:\nSteps:\n1. break\n2. fix");
+  });
+
+  it("substitutes an empty $ISSUE_BODY with an empty string, not the token", () => {
+    expect(renderTemplate("body:[$ISSUE_BODY]", { ISSUE_BODY: "" })).toBe("body:[]");
+  });
+
+  it("leaves $ISSUE_TITLE and $ISSUE_BODY untouched when those vars are missing", () => {
+    expect(renderTemplate("$ISSUE_TITLE | $ISSUE_BODY", {})).toBe("$ISSUE_TITLE | $ISSUE_BODY");
+  });
+});
+
+describe("SUPPORTED_VARIABLES", () => {
+  it("includes the issue title and body tokens (issue #205)", () => {
+    expect(SUPPORTED_VARIABLES).toContain("$ISSUE_TITLE");
+    expect(SUPPORTED_VARIABLES).toContain("$ISSUE_BODY");
+  });
+});
+
+describe("default templates embed the issue context (issue #205)", () => {
+  it("the main template references the issue title and body", () => {
+    expect(DEFAULT_TEMPLATES.default).toContain("$ISSUE_TITLE");
+    expect(DEFAULT_TEMPLATES.default).toContain("$ISSUE_BODY");
+  });
+
+  it("the plan template references the issue title and body", () => {
+    expect(DEFAULT_TEMPLATES.plan).toContain("$ISSUE_TITLE");
+    expect(DEFAULT_TEMPLATES.plan).toContain("$ISSUE_BODY");
   });
 });
 

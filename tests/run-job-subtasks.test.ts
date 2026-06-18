@@ -40,6 +40,7 @@ function deps(over: Record<string, unknown> = {}) {
       return { exitCode: 0, sessionId: "s1", costUsd: 0.1, inputTokens: 1, outputTokens: 1 };
     }),
     createPr: vi.fn(async () => 55),
+    viewIssue: vi.fn(async () => ({ title: "", body: "" })),
     runBabysitter: vi.fn(async (job: Job) => {
       db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, job.id)).run();
       return getJob(job.id, db) as Job;

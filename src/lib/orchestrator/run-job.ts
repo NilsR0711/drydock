@@ -66,6 +66,11 @@ export interface RunJobDeps {
   /** Post a comment on the job's issue; injectable for tests. */
   commentIssue?: (issueNumber: number, body: string) => Promise<void>;
   /**
+   * Fetch the issue title+body to embed in the implement prompt (issue #205);
+   * injectable for tests. Defaults to the forge's `viewIssue`.
+   */
+  viewIssue?: (issueNumber: number) => Promise<{ title: string; body: string }>;
+  /**
    * Resume the stored session of a limit-parked job (issue #166); injectable
    * for tests. Defaults to resumeAgentSession on the job's own model.
    */
@@ -74,6 +79,18 @@ export interface RunJobDeps {
 
 /** Keeps an unexpectedly verbose plan from flooding the work prompt. */
 const PLAN_MAX_CHARS = 10_000;
+
+// Bound the embedded issue text (issue #205) so a pathologically large issue
+// body cannot blow the model's context window and fail the run before any
+// implementation starts — the very failure mode embedding the body set out to
+// fix. A truncation marker tells the agent the text was cut.
+const ISSUE_TITLE_MAX_CHARS = 500;
+const ISSUE_BODY_MAX_CHARS = 20_000;
+
+/** Truncate to a max length with a clear marker, matching the plan-section cap. */
+function capPromptText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}\n… (truncated)` : text;
+}
 
 /** Render the plan as a dedicated, length-capped prompt section (issue #160). */
 export function planPromptSection(plan: string): string {
@@ -249,6 +266,12 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   const commentIssue =
     deps.commentIssue ??
     ((issueNumber: number, body: string) => forge.commentIssue(issueNumber, body));
+  // Issue context for the implement prompt (issue #205): the title+body are
+  // embedded so a headless agent needs no GitHub access to learn the task.
+  const viewIssue =
+    deps.viewIssue ??
+    ((issueNumber: number) =>
+      forge.viewIssue(issueNumber).then((d) => ({ title: d.title, body: d.body })));
   // Limit-resume runner (issue #166): continues a limit-parked job's stored
   // session on the job's own model and turn budget — this is the main work
   // resuming, not a cheap CI fix.
@@ -408,10 +431,25 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         .set({ implementPromptVersion: mainTemplate.version })
         .where(eq(jobs.id, job.id))
         .run();
+      // Embed the issue title+body directly (issue #205) so the headless agent
+      // learns what to build without GitHub access — under acceptEdits its `gh`
+      // calls block on an approval that never comes. Best-effort: a fetch
+      // failure falls back to empty context (the prompt still carries the issue
+      // number) rather than failing the job before any work runs.
+      let issue = { title: "", body: "" };
+      try {
+        issue = await viewIssue(job.issueNumber);
+      } catch (err) {
+        logError(`[run-job] failed to fetch issue #${job.issueNumber} for job ${job.id}`, err);
+      }
+      const issueTitle = capPromptText(issue.title, ISSUE_TITLE_MAX_CHARS);
+      const issueBody = capPromptText(issue.body, ISSUE_BODY_MAX_CHARS);
       let prompt = renderTemplate(mainTemplate.content, {
         ISSUE_NUM: job.issueNumber,
         BRANCH: worktree.branch,
         REPO_NAME: repo.name,
+        ISSUE_TITLE: issueTitle,
+        ISSUE_BODY: issueBody,
       });
 
       // Decomposed issues (issue #19, opt-in): surface the ordered subtasks in the
@@ -445,6 +483,8 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
             ISSUE_NUM: job.issueNumber,
             BRANCH: worktree.branch,
             REPO_NAME: repo.name,
+            ISSUE_TITLE: issueTitle,
+            ISSUE_BODY: issueBody,
           },
         );
         try {

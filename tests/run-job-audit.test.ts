@@ -37,6 +37,7 @@ function deps(over: Record<string, unknown> = {}) {
         return { exitCode: 0, sessionId: "s1", costUsd: 0.1, inputTokens: 1, outputTokens: 1 };
       }),
       createPr: vi.fn(async () => 55),
+      viewIssue: vi.fn(async () => ({ title: "", body: "" })),
       verify: vi.fn(async () => {
         order.push("verify");
       }),
