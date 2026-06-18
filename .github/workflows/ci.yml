@@ -19,12 +19,23 @@ env:
 
 jobs:
   verify:
-    name: Verify (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    name: Verify (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node: ["20", "22"]
+        # The daemon lifecycle must behave identically on every OS (issue #216),
+        # so the test suite runs on all three. The heavier lint/typecheck/build
+        # are OS-independent and run on ubuntu only; macOS/Windows run a single
+        # Node version (22) to exercise the cross-platform process handling
+        # without doubling the slowest runners.
+        exclude:
+          - os: macos-latest
+            node: "20"
+          - os: windows-latest
+            node: "20"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -42,15 +53,18 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint & format
+        if: matrix.os == 'ubuntu-latest'
         run: pnpm lint
 
       - name: Typecheck
+        if: matrix.os == 'ubuntu-latest'
         run: pnpm typecheck
 
       - name: Test
         run: pnpm test
 
       - name: Build
+        if: matrix.os == 'ubuntu-latest'
         run: pnpm build
 
       # A clean `next build` can still emit a `.next/standalone` bundle that
