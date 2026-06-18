@@ -351,6 +351,39 @@ describe("spawnAgentSession", () => {
 });
 
 describe("resumeAgentSession fallback", () => {
+  it("captures the Claude subscription usage reading on the resume path (issue #188)", async () => {
+    const job = createJob(
+      { repoId, issueNumber: 188, agent: "claude", model: "claude-opus-4-8" },
+      db,
+    );
+    db.update(jobs).set({ sessionId: "s-resume" }).where(eq(jobs.id, job.id)).run();
+    const captured: Captured = {};
+    const reset = nowSec() + 3600;
+    const stream = `${[
+      JSON.stringify({ type: "system", subtype: "init", session_id: "s-resume" }),
+      JSON.stringify({
+        type: "rate_limit_event",
+        rate_limit_info: { status: "rejected", resetsAt: reset, rateLimitType: "five_hour" },
+      }),
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        session_id: "s-resume",
+        is_error: false,
+      }),
+    ].join("\n")}\n`;
+    await resumeAgentSession(getJob(job.id, db) as never, "s-resume", "CI log", "/work", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner(stream, captured),
+    });
+    expect(getProviderUsage("claude", db)).toMatchObject({
+      status: "blocked",
+      windowType: "five_hour",
+      resetsAt: reset,
+    });
+  });
+
   it("starts a fresh session when the provider cannot resume", async () => {
     const noResume: AgentProvider = {
       ...codexProvider,

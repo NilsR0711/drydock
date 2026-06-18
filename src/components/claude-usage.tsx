@@ -50,8 +50,10 @@ function countdown(view: ClaudeUsageView): string | null {
 /** Compact navbar pill — always visible, escalating tone as the quota nears. */
 export function ClaudeUsagePill({ view }: { view: ClaudeUsageView }) {
   const hydrated = useHydrated();
-  useTick(hydrated && view.resetsAt !== null);
   const left = hydrated ? countdown(view) : null;
+  // Tick only while a countdown is actually running; stop once it elapses so
+  // the components don't rerender every second forever.
+  useTick(left !== null);
 
   let text: string;
   if (view.state === "blocked") text = left ? `Claude limited · ${left}` : "Claude limited";
@@ -77,8 +79,8 @@ export function ClaudeUsagePill({ view }: { view: ClaudeUsageView }) {
 /** Dashboard right-rail card with the window state and a reset countdown. */
 export function ClaudeUsageCard({ view }: { view: ClaudeUsageView }) {
   const hydrated = useHydrated();
-  useTick(hydrated && view.resetsAt !== null);
   const left = hydrated ? countdown(view) : null;
+  useTick(left !== null);
   const win = windowLabel(view.windowType);
 
   let detail: string;

@@ -28,18 +28,19 @@ export function getProviderUsage(agent: string, db: DB = getDb()): ClaudeUsageRe
   }
 }
 
-/** Persist the latest usage reading for `agent`, replacing any prior value. */
+/**
+ * Persist the latest usage reading for `agent`, replacing any prior value. Uses
+ * an atomic upsert: parallel sessions can finish and write the same key at once,
+ * and a read-then-write would race two inserts into a duplicate-key failure.
+ */
 export function saveProviderUsage(
   agent: string,
   reading: ClaudeUsageReading,
   db: DB = getDb(),
 ): void {
-  const key = keyFor(agent);
   const value = JSON.stringify(reading);
-  const existing = db.select().from(settings).where(eq(settings.key, key)).get();
-  if (existing) {
-    db.update(settings).set({ value }).where(eq(settings.key, key)).run();
-  } else {
-    db.insert(settings).values({ key, value }).run();
-  }
+  db.insert(settings)
+    .values({ key: keyFor(agent), value })
+    .onConflictDoUpdate({ target: settings.key, set: { value } })
+    .run();
 }
