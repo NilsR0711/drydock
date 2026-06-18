@@ -43,6 +43,12 @@ describe("settings", () => {
     expect(() => saveSettings({ maxJobCostUsd: -1 }, db)).toThrow();
   });
 
+  it("defaults the needs-human sound to on and persists an override (issue #258)", () => {
+    expect(getSettings(db).needsHumanSoundEnabled).toBe(true);
+    saveSettings({ needsHumanSoundEnabled: false }, db);
+    expect(getSettings(db).needsHumanSoundEnabled).toBe(false);
+  });
+
   it("rejects an unknown defaultModel id (issue #93)", () => {
     expect(() => saveSettings({ defaultModel: "claude-nonexistent-99" }, db)).toThrow();
   });
