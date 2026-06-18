@@ -90,6 +90,16 @@ describe("default templates are unambiguous about committing (issue #206)", () =
   });
 });
 
+describe("default templates request PR metadata (issue #212)", () => {
+  it("the main template instructs the agent to write .drydock/PR.md", () => {
+    expect(DEFAULT_TEMPLATES.default).toContain(".drydock/PR.md");
+  });
+
+  it("the limit-resume template instructs the agent to write .drydock/PR.md", () => {
+    expect(DEFAULT_TEMPLATES["limit-resume"]).toContain(".drydock/PR.md");
+  });
+});
+
 describe("resolveTemplateContent", () => {
   it("falls back to the code default when no row exists", () => {
     expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.main, db)).toBe(DEFAULT_TEMPLATES.default);

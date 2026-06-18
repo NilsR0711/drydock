@@ -28,6 +28,7 @@ import { ciBabysitter, type ResumeOutcome, resumeFailureReason } from "./ci-baby
 import { getJob, recordEvent, transitionJob } from "./jobs";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
 import { runPrAuditPass } from "./pr-audit-driver";
+import { consumePrMetadata as defaultConsumePrMetadata, type PrMetadata } from "./pr-metadata";
 import { nudgeAwareSleep } from "./pr-nudge";
 import { clearProviderLimit, latchProviderLimit, limitAutoWaitEnabled } from "./provider-limit";
 import { InvalidTransitionError } from "./state-machine";
@@ -75,6 +76,13 @@ export interface RunJobDeps {
    * for tests. Defaults to resumeAgentSession on the job's own model.
    */
   resumeLimitSession?: (job: Job, prompt: string, cwd: string) => Promise<AgentSessionResult>;
+  /**
+   * Read and consume the agent-authored `.drydock/PR.md` from the worktree
+   * (issue #212), returning the commit subject / PR title + body and removing
+   * the file so it stays out of the commit. Injectable for tests; defaults to
+   * the filesystem-backed reader.
+   */
+  consumePrMetadata?: (worktreePath: string) => PrMetadata | null;
 }
 
 /** Keeps an unexpectedly verbose plan from flooding the work prompt. */
@@ -272,6 +280,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     deps.viewIssue ??
     ((issueNumber: number) =>
       forge.viewIssue(issueNumber).then((d) => ({ title: d.title, body: d.body })));
+  // Agent-authored PR metadata (issue #212): read+remove `.drydock/PR.md` so the
+  // commit and PR carry a meaningful subject/body instead of "Fix #N".
+  const consumePrMetadata = deps.consumePrMetadata ?? defaultConsumePrMetadata;
   // Limit-resume runner (issue #166): continues a limit-parked job's stored
   // session on the job's own model and turn budget — this is the main work
   // resuming, not a cheap CI fix.
@@ -648,8 +659,14 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       }
     }
 
+    // Consume the agent-authored PR metadata (issue #212) before committing, so
+    // the commit subject is meaningful and `.drydock/PR.md` is removed from the
+    // working tree before `git add -A` stages it. Absent/unusable falls back to
+    // the issue-based defaults below.
+    const prMeta = consumePrMetadata(wt.path);
+    const commitMessage = prMeta?.title ?? `Fix #${job.issueNumber}`;
     try {
-      await worktrees.commitAndPush(wt, `Fix #${job.issueNumber}`);
+      await worktrees.commitAndPush(wt, commitMessage);
     } catch (err) {
       // A legitimate no-op run (the issue needed no code change) produces an
       // empty commit. Report it as a clear outcome rather than a raw git error
@@ -666,13 +683,18 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       throw err;
     }
     const title =
+      prMeta?.title ??
       listIssues(repo.id, db).find((i) => i.number === job.issueNumber)?.title ??
       `Fix #${job.issueNumber}`;
+    // Always close the issue from the PR; append the marker to the agent's body
+    // when present, otherwise the marker is the whole body (prior behavior).
+    const closes = `Closes #${job.issueNumber}`;
+    const body = prMeta?.body ? `${prMeta.body}\n\n${closes}` : closes;
     const prNumber = await createPr({
       head: wt.branch,
       base: repo.defaultBranch,
       title,
-      body: `Closes #${job.issueNumber}`,
+      body,
     });
     transitionJob(job.id, "ci_running", { branch: wt.branch, prNumber }, db);
     await send("pr_opened", `🔀 PR opened: ${repo.id}#${job.issueNumber} (PR #${prNumber}).`);
