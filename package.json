@@ -38,7 +38,7 @@
     "drizzle"
   ],
   "scripts": {
-    "dev": "next dev -H 127.0.0.1 -p 3737",
+    "dev": "node scripts/dev.mjs",
     "build": "next build --webpack && node scripts/package-standalone.mjs",
     "start": "next start -H 127.0.0.1 -p 3737",
     "lint": "biome ci .",

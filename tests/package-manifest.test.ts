@@ -58,4 +58,12 @@ describe("package.json publishability (issue #12)", () => {
     // emits a plain `require("better-sqlite3")`. Guard against regressing.
     expect(pkg.scripts.build).toMatch(/--webpack/);
   });
+
+  it("runs the dev server through the memory-capped wrapper (issue #204)", () => {
+    // `next dev` defaults to Turbopack, whose native memory grew unbounded
+    // (~108 GB RSS) and hard-crashed the host. The wrapper pins webpack and
+    // caps the V8 heap; guard against regressing back to a bare `next dev`.
+    expect(pkg.scripts.dev).toMatch(/scripts\/dev\.mjs/);
+    expect(pkg.scripts.dev).not.toMatch(/next dev/);
+  });
 });
