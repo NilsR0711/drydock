@@ -182,6 +182,16 @@ describe("default templates push thematic commits with no AI attribution (issue 
   }
 });
 
+describe("default template offers the follow-up channel (issue #261)", () => {
+  it("the main template tells the agent to write .drydock/FOLLOWUPS.md for deferred work", () => {
+    expect(DEFAULT_TEMPLATES.default).toContain(".drydock/FOLLOWUPS.md");
+  });
+
+  it("directs out-of-scope ideas to FOLLOWUPS.md instead of only the PR body", () => {
+    expect(DEFAULT_TEMPLATES.default).toMatch(/out of scope/i);
+  });
+});
+
 describe("resolveTemplateContent", () => {
   it("falls back to the code default when no row exists", () => {
     expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.main, db)).toBe(DEFAULT_TEMPLATES.default);
