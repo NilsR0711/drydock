@@ -1,13 +1,18 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   acquireInstanceLock,
   isDraining,
+  LOCK_TTL_MS,
   readInstanceLock,
+  refreshInstanceLock,
   registerActiveJob,
+  releaseInstanceLock,
   setDrainMode,
+  startInstanceLockHeartbeat,
+  stopInstanceLockHeartbeat,
   unregisterActiveJob,
   waitForIdle,
 } from "@/lib/orchestrator/runtime";
@@ -19,8 +24,15 @@ beforeEach(() => {
   setDrainMode(false);
 });
 afterEach(() => {
+  stopInstanceLockHeartbeat();
   delete process.env.DRYDOCK_HOME;
+  rmSync(home, { recursive: true, force: true });
 });
+
+const lockFile = () => join(home, "instance.lock");
+const writeLockFile = (record: Record<string, unknown>) =>
+  writeFileSync(lockFile(), JSON.stringify(record));
+const readLockFile = () => JSON.parse(readFileSync(lockFile(), "utf8"));
 
 describe("drain mode", () => {
   it("toggles", () => {
@@ -50,17 +62,44 @@ describe("instance lock", () => {
     expect(content).toContain(String(process.pid));
   });
 
+  it("records a heartbeat timestamp when it acquires", () => {
+    const before = Date.now();
+    expect(acquireInstanceLock()).toBe(true);
+    expect(readLockFile().ts).toBeGreaterThanOrEqual(before);
+  });
+
   it("acquires when the existing lock is stale (dead pid)", () => {
-    writeFileSync(join(home, "instance.lock"), JSON.stringify({ pid: 999999999, ts: 1 }));
+    writeLockFile({ pid: 999999999, ts: 1 });
     expect(acquireInstanceLock()).toBe(true);
   });
 
-  it("refuses when a live pid holds the lock", () => {
-    writeFileSync(
-      join(home, "instance.lock"),
-      JSON.stringify({ pid: process.pid, ts: Date.now() }),
-    );
+  it("refuses when a live foreign pid holds a fresh lock", () => {
+    // The vitest parent process is alive for the duration of the test.
+    writeLockFile({ pid: process.ppid, ts: Date.now() });
     expect(acquireInstanceLock()).toBe(false);
+  });
+
+  it("reclaims a lock whose heartbeat expired even though the pid is alive (pid reuse)", () => {
+    // After a host crash a fresh process can inherit the dead holder's pid, so
+    // pidAlive() alone would wedge the lock forever (issue #211). An expired
+    // heartbeat is the tell that this live pid is not the real Drydock holder.
+    writeLockFile({ pid: process.ppid, ts: Date.now() - LOCK_TTL_MS - 1000 });
+    expect(acquireInstanceLock()).toBe(true);
+    expect(readLockFile().pid).toBe(process.pid);
+  });
+
+  it("takes over its own pid's lock (container pid reuse / double init)", () => {
+    // A crashed instance can be restarted with the same pid (pid 1 in a
+    // container) or initialized twice in one server; either way this process
+    // should own the lock rather than refuse forever.
+    writeLockFile({ pid: process.pid, ts: Date.now() - LOCK_TTL_MS - 1000 });
+    expect(acquireInstanceLock()).toBe(true);
+    expect(readLockFile().pid).toBe(process.pid);
+  });
+
+  it("treats a live foreign holder with no heartbeat as stale", () => {
+    writeLockFile({ pid: process.ppid });
+    expect(acquireInstanceLock()).toBe(true);
   });
 
   it("takes over a corrupt lock file and rewrites it with our pid", () => {
@@ -71,10 +110,70 @@ describe("instance lock", () => {
   });
 
   it("writes our pid after taking over a stale lock", () => {
-    writeFileSync(join(home, "instance.lock"), JSON.stringify({ pid: 999999999, ts: 1 }));
+    writeLockFile({ pid: 999999999, ts: 1 });
     expect(acquireInstanceLock()).toBe(true);
-    const parsed = JSON.parse(readFileSync(join(home, "instance.lock"), "utf8"));
-    expect(parsed.pid).toBe(process.pid);
+    expect(readLockFile().pid).toBe(process.pid);
+  });
+});
+
+describe("instance lock heartbeat", () => {
+  it("refreshInstanceLock advances the heartbeat while we still hold it", () => {
+    expect(acquireInstanceLock()).toBe(true);
+    writeLockFile({ pid: process.pid, ts: 1 });
+    const before = Date.now();
+    expect(refreshInstanceLock()).toBe(true);
+    expect(readLockFile().ts).toBeGreaterThanOrEqual(before);
+  });
+
+  it("refreshInstanceLock does not touch a lock owned by another pid", () => {
+    writeLockFile({ pid: process.ppid, ts: 1 });
+    expect(refreshInstanceLock()).toBe(false);
+    expect(readLockFile()).toEqual({ pid: process.ppid, ts: 1 });
+  });
+
+  it("refreshInstanceLock returns false when the lock file is gone", () => {
+    expect(refreshInstanceLock()).toBe(false);
+  });
+
+  it("refreshInstanceLock leaves no temp file behind on the failure path", () => {
+    writeLockFile({ pid: process.ppid, ts: 1 });
+    expect(refreshInstanceLock()).toBe(false);
+    expect(existsSync(`${lockFile()}.${process.pid}.tmp`)).toBe(false);
+  });
+
+  it("startInstanceLockHeartbeat keeps the heartbeat fresh", async () => {
+    expect(acquireInstanceLock()).toBe(true);
+    writeLockFile({ pid: process.pid, ts: 1 });
+    startInstanceLockHeartbeat(5);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(readLockFile().ts).toBeGreaterThan(1);
+  });
+
+  it("startInstanceLockHeartbeat stops once the lock is lost", async () => {
+    expect(acquireInstanceLock()).toBe(true);
+    startInstanceLockHeartbeat(5);
+    // Another process steals the lock; our heartbeat must give up, not clobber it.
+    writeLockFile({ pid: process.ppid, ts: 1 });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(readLockFile()).toEqual({ pid: process.ppid, ts: 1 });
+  });
+});
+
+describe("releaseInstanceLock", () => {
+  it("removes the lock file we own", () => {
+    expect(acquireInstanceLock()).toBe(true);
+    releaseInstanceLock();
+    expect(existsSync(lockFile())).toBe(false);
+  });
+
+  it("leaves a lock owned by another pid untouched", () => {
+    writeLockFile({ pid: process.ppid, ts: Date.now() });
+    releaseInstanceLock();
+    expect(existsSync(lockFile())).toBe(true);
+  });
+
+  it("is a no-op when no lock file exists", () => {
+    expect(() => releaseInstanceLock()).not.toThrow();
   });
 });
 
@@ -100,6 +199,20 @@ describe("readInstanceLock", () => {
   it("treats a dead pid as not held", () => {
     writeFileSync(join(home, "instance.lock"), JSON.stringify({ pid: 999999999, ts: 1 }));
     expect(readInstanceLock()).toEqual({ held: false, pid: 999999999, self: false });
+  });
+
+  it("reports a live foreign holder with an expired heartbeat as not held", () => {
+    // pid reuse: the live pid is no longer the real Drydock holder (issue #211).
+    writeFileSync(
+      join(home, "instance.lock"),
+      JSON.stringify({ pid: process.ppid, ts: Date.now() - LOCK_TTL_MS - 1000 }),
+    );
+    expect(readInstanceLock()).toEqual({ held: false, pid: process.ppid, self: false });
+  });
+
+  it("treats a holder with no heartbeat as not held", () => {
+    writeFileSync(join(home, "instance.lock"), JSON.stringify({ pid: process.ppid }));
+    expect(readInstanceLock()).toEqual({ held: false, pid: process.ppid, self: false });
   });
 
   it("treats a corrupt lock file as not held", () => {
