@@ -29,6 +29,7 @@ interface VersionInfo {
 
 const TEMPLATE_OPTIONS = [
   { value: TEMPLATE_NAMES.main, label: "Main" },
+  { value: TEMPLATE_NAMES.prFormat, label: "PR format" },
   { value: TEMPLATE_NAMES.ciFix, label: "CI fix" },
   { value: TEMPLATE_NAMES.plan, label: "Plan" },
   { value: TEMPLATE_NAMES.limitResume, label: "Limit resume" },
@@ -105,6 +106,7 @@ export function PromptEditor({
     BRANCH: "fix/issue-42",
     REPO_NAME: "acme",
     CI_LOG: "example CI failure output",
+    PR_FORMAT: "TL;DR of the change.\n\n## Problem\n…\n\n## Solution\n…",
   });
 
   return (

@@ -5,6 +5,10 @@ export const TEMPLATE_NAMES = {
   ciFix: "ci-fix",
   plan: "plan",
   limitResume: "limit-resume",
+  // The PR body structure, kept separate from the implement prompt so a repo can
+  // reshape its PR descriptions without touching the rest of the prompt (issue
+  // #252). Injected into the implement prompt via the $PR_FORMAT variable.
+  prFormat: "pr-format",
 } as const;
 export type TemplateName = (typeof TEMPLATE_NAMES)[keyof typeof TEMPLATE_NAMES];
 
@@ -27,9 +31,12 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, string> = {
     "",
     "Before you finish, write a file `.drydock/PR.md` describing the change for the",
     "pull request. The first line is a Conventional Commit subject (used as the",
-    "commit message and PR title), then a blank line, then a structured body with",
-    "sections: Problem, Solution, Tests, Risks. Drydock reads this file, appends",
-    "`Closes #$ISSUE_NUM` to the body, and removes the file — do not commit it.",
+    "commit message and PR title), then a blank line, then a body in this format:",
+    "",
+    "$PR_FORMAT",
+    "",
+    "Drydock reads this file, appends `Closes #$ISSUE_NUM` to the body, and removes",
+    "the file — do not commit it.",
   ].join("\n"),
   "ci-fix": "CI failed. Fix the failure and keep changes minimal.\n\nFailed CI log:\n$CI_LOG",
   plan: [
@@ -55,8 +62,29 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, string> = {
     "Keep the change focused. You may commit your work or leave it uncommitted — either is fine.",
     "Do not push or open a pull request yourself; Drydock commits, pushes, and opens the PR.",
     "Before finishing, write `.drydock/PR.md`: first line a Conventional Commit subject (used as",
-    "the commit message and PR title), then a blank line, then a body with Problem, Solution,",
-    "Tests, and Risks sections. Drydock appends `Closes #$ISSUE_NUM` and removes the file — do",
-    "not commit it.",
+    "the commit message and PR title), then a blank line, then a body in this format:",
+    "",
+    "$PR_FORMAT",
+    "",
+    "Drydock appends `Closes #$ISSUE_NUM` and removes the file — do not commit it.",
+  ].join("\n"),
+  // The PR body structure injected into the implement prompt via $PR_FORMAT
+  // (issue #252). Leads with a TL;DR so a reviewer grasps the change at a
+  // glance, then the structured sections. Per-repo editable on /prompts; the
+  // first `.drydock/PR.md` line (the title) is owned by the implement prompt.
+  "pr-format": [
+    "A one-paragraph **TL;DR** summarising the change in plain language, then:",
+    "",
+    "## Problem",
+    "What was wrong or missing, and why it mattered.",
+    "",
+    "## Solution",
+    "What you changed and the key decisions behind it.",
+    "",
+    "## Tests",
+    "What you added or ran to verify the change.",
+    "",
+    "## Risks",
+    'Anything reviewers should watch for, or "None".',
   ].join("\n"),
 };
