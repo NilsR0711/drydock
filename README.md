@@ -213,6 +213,10 @@ drydock --version      # installed version
 drydock --port 8080                   # change port (default: 3737)
 # Non-loopback binds require an explicit opt-in because the dashboard has no auth:
 DRYDOCK_ALLOW_REMOTE=1 drydock --host 0.0.0.0 --port 8080
+drydock start          # run as a background daemon, detached from the terminal
+drydock status         # is the daemon running? (pid, url, uptime) — exit 3 when stopped
+drydock stop           # gracefully stop the daemon (drains in-flight jobs)
+drydock restart        # stop then start
 drydock update         # update a global install (reports current → latest, skips if already current)
 drydock backup         # WAL-safe DB snapshot, works while the server runs
 drydock restore <path> # replace the DB with a backup (server must be stopped)
@@ -341,8 +345,9 @@ pnpm mcp            # start the local stdio MCP server (see "MCP server")
 - **Tests never touch the network** — the `claude`/`gh`/`git` CLIs are injected as fakes.
 - **Architecture decisions** live in [`docs/adr/`](docs/adr) (index:
   [`docs/DECISIONS.md`](docs/DECISIONS.md)).
-- CI runs lint, typecheck, tests, and build on Node 20 & 22; CodeQL scans the codebase;
-  Dependabot keeps dependencies and actions current.
+- CI runs the test suite on ubuntu, macOS, and windows (so the cross-platform daemon
+  lifecycle is exercised on every target OS) across Node 20 & 22, with lint, typecheck, and
+  build on ubuntu; CodeQL scans the codebase; Dependabot keeps dependencies and actions current.
 
 ## Operations
 
@@ -363,9 +368,20 @@ pnpm mcp            # start the local stdio MCP server (see "MCP server")
   limit). HTTP 200 while the driver loop ticks; 503 when the loop is stalled (no tick
   within 3 poll intervals), not running, or the DB is unreachable. Read-only and
   secret-free, served from a single cheap query set with no forge calls.
+- **Background daemon** — `drydock start` launches the server detached from the terminal and
+  returns immediately, so closing the shell or losing the SSH session no longer kills it.
+  `drydock status` reports whether it is running (pid, url, uptime; exit 3 when stopped),
+  `drydock stop` shuts it down gracefully — draining in-flight jobs first — and `drydock
+  restart` does both. It works identically on macOS, Windows, and Linux: stop asks the server
+  to drain over a loopback control endpoint (the only portable mechanism on Windows, which has
+  no usable POSIX signals) and only falls back to a signal if that endpoint is unreachable.
+  Single-instance: starting while a daemon (or foreground `drydock`) already runs is refused,
+  and a stale state file left by a crash is taken over. Daemon state lives in
+  `<data dir>/daemon.json` and the detached process logs to `<data dir>/drydock.log`.
 - **Run at login** — `drydock service install` generates and loads a launchd agent (macOS)
   or systemd user unit (Linux) that runs `drydock serve` at login and restarts it on
-  crashes; `drydock service uninstall` removes it again.
+  crashes; `drydock service uninstall` removes it again. (For an ad-hoc background run without
+  a login service, use `drydock start`.)
 - **Retention & pruning** — finished jobs' verbose log events are pruned past the
   **log retention** window (default 30 days; cost summary rows are kept). A daily in-process
   sweep runs automatically; for a manual run use `pnpm db:prune [--days <n>] [--no-vacuum]`,

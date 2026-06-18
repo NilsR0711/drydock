@@ -6,9 +6,13 @@ All automation lives in `.github/workflows/`. Workflows are scoped to the
 ## `ci.yml` — Verify
 
 Runs on every push to `master` and every PR. Installs with a frozen lockfile,
-then runs lint, typecheck, test, build, and a standalone smoke test across a
-Node 20/22 matrix. Superseded runs on the same ref are cancelled (`concurrency`
-with `cancel-in-progress: true`).
+then runs the test suite across an OS × Node matrix — `ubuntu-latest`,
+`macos-latest`, and `windows-latest` on Node 20/22 — so the cross-platform
+daemon lifecycle (`drydock start`/`stop`/`status`/`restart`, issue #216) is
+exercised on every target OS. The OS-independent lint, typecheck, build, and
+standalone smoke test run on ubuntu only; macOS and Windows are pinned to a
+single Node version (22) so the slowest runners don't double. Superseded runs
+on the same ref are cancelled (`concurrency` with `cancel-in-progress: true`).
 
 The smoke step (`pnpm smoke` → `scripts/smoke-standalone.mjs`) boots the built
 `.next/standalone/server.js` and requires it to serve the homepage. A clean
