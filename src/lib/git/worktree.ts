@@ -32,13 +32,25 @@ export function repoWorktreesDir(repoName: string): string {
 }
 
 /**
+ * Coding assistants Drydock may spawn (or that a contributor might use) which
+ * stamp their own attribution into commit messages. Kept broad on purpose: the
+ * policy is "no tool/model attribution" (issue #248), not "no Claude", so a
+ * Codex/OpenAI run must be scrubbed just like a Claude one.
+ */
+const AI_ASSISTANT_NAMES = "claude|anthropic|codex|openai|chatgpt|copilot|gemini|cursor|devin";
+
+/**
  * Lines an AI assistant adds to its own commit messages by default. Repo policy
  * forbids AI attribution (issue #248), but an agent may still emit a trailer
  * despite the prompt, so commits are scrubbed before push as defense in depth.
  * Matched case-insensitively against trimmed lines; a human `Co-Authored-By`
- * trailer (no assistant name) is deliberately left intact.
+ * trailer (one that names no known assistant) is deliberately left intact, as is
+ * a non-AI "Generated with …" line (e.g. a build tool).
  */
-const AI_ATTRIBUTION_LINE = /^(co-authored-by:.*(claude|anthropic)|🤖?\s*generated with .*claude)/i;
+const AI_ATTRIBUTION_LINE = new RegExp(
+  `^(?:co-authored-by:.*\\b(?:${AI_ASSISTANT_NAMES})\\b|🤖?\\s*generated (?:with|by)\\b.*\\b(?:${AI_ASSISTANT_NAMES})\\b)`,
+  "i",
+);
 
 /**
  * Strip AI-attribution trailers from a commit message, returning the cleaned
