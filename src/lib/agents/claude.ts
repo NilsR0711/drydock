@@ -29,7 +29,9 @@ export const claudeProvider: AgentProvider = {
     // An agent-driven release (issue #256) must run the repo's release commands
     // itself, so it bypasses permissions entirely; every other run stays
     // edits-only (acceptEdits), where bash/gh/git would block headlessly.
-    ...(bypassPermissions ? ["--dangerously-skip-permissions"] : ["--permission-mode", "acceptEdits"]),
+    ...(bypassPermissions
+      ? ["--dangerously-skip-permissions"]
+      : ["--permission-mode", "acceptEdits"]),
     "--model",
     model,
     "--output-format",

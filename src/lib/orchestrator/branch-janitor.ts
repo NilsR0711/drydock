@@ -79,7 +79,7 @@ async function cleanupMergedBranches(
   const cleaned = cleanedJobIds(repoId, db);
   const liveBranches = new Set(
     jobs
-      .filter((j) => !["merged", "aborted"].includes(j.status))
+      .filter((j) => !["merged", "released", "aborted"].includes(j.status))
       .map((j) => j.branch)
       .filter(isDrydockBranch),
   );

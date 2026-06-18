@@ -31,6 +31,9 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const isLimitParked = job.status === "waiting_limit";
 
   const repoName = repo?.name ?? `repo #${job.repoId}`;
+  // A release job (issue #256) carries the sentinel issueNumber 0, so label it
+  // by kind rather than as "#0".
+  const subjectLabel = job.kind === "release" ? "Release" : `#${job.issueNumber}`;
   // The Duration card ticks client-side from startedAt; nowSec seeds it so the
   // SSR markup and the first client render agree (issue #242).
   const nowSec = Math.floor(Date.now() / 1000);
@@ -41,14 +44,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         breadcrumb={[
           { label: "Dashboard", href: "/" },
           { label: repoName, href: `/repos/${job.repoId}` },
-          { label: `#${job.issueNumber}` },
+          { label: subjectLabel },
         ]}
         title={`Job #${job.id}`}
         subtitle={
           <span className="inline-flex items-center gap-2">
             <Badge status={job.status} />
             <span className="font-mono">
-              {repoName} #{job.issueNumber}
+              {repoName} {subjectLabel}
             </span>
           </span>
         }
@@ -90,6 +93,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       <JobMetrics
         jobId={job.id}
         issueNumber={job.issueNumber}
+        subject={job.kind === "release" ? "Release" : undefined}
         active={inFlight}
         model={job.model}
         initialCostUsd={job.costUsd}

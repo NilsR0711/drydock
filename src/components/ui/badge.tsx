@@ -20,6 +20,7 @@ export const STATUS_TONE: Record<string, Tone> = {
   retrying: "warning",
   waiting_limit: "warning",
   merged: "success",
+  released: "success",
   needs_human: "destructive",
   aborted: "neutral",
   interrupted: "warning",

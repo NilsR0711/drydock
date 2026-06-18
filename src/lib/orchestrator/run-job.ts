@@ -34,12 +34,12 @@ import {
 import { ciBabysitter, type ResumeOutcome, resumeFailureReason } from "./ci-babysitter";
 import { getJob, recordEvent, transitionJob } from "./jobs";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
-import { runReleaseJob } from "./release-job";
 import { runPrAuditPass } from "./pr-audit-driver";
 import { consumePrMetadata as defaultConsumePrMetadata, type PrMetadata } from "./pr-metadata";
 import { nudgeAwareSleep } from "./pr-nudge";
 import { clearProviderLimit, latchProviderLimit, limitAutoWaitEnabled } from "./provider-limit";
 import { consumeQuestions as defaultConsumeQuestions } from "./questions-metadata";
+import { runReleaseJob } from "./release-job";
 import { InvalidTransitionError } from "./state-machine";
 import {
   markSubtasksDone,

@@ -83,7 +83,9 @@ describe("runReleaseJob (issue #256)", () => {
 
   it("parks the job in needs_human when the agent writes open questions", async () => {
     const job = releaseJobWithRun();
-    const deps = baseDeps({ consumeQuestions: vi.fn(() => "Which release flow does this repo use?") });
+    const deps = baseDeps({
+      consumeQuestions: vi.fn(() => "Which release flow does this repo use?"),
+    });
     const result = await runReleaseJob(job.id, deps as never);
 
     expect(result.status).toBe("needs_human");

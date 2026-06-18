@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
+import { createJob } from "@/lib/orchestrator/jobs";
 import {
   createReleaseRun,
   findReleaseRunByJob,
@@ -9,7 +10,6 @@ import {
   transitionReleaseRun,
 } from "@/lib/release/release-service";
 import { InvalidReleaseTransitionError } from "@/lib/release/release-state";
-import { createJob } from "@/lib/orchestrator/jobs";
 import { addRepo } from "@/lib/repos/service";
 
 let db: DB;

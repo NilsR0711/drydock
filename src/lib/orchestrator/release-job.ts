@@ -1,7 +1,7 @@
 import { getAgentProvider } from "@/lib/agents/registry";
 import { type DB, getDb } from "@/lib/db/client";
-import type { Job, Repo } from "@/lib/db/schema";
 import { getRepo } from "@/lib/db/queries";
+import type { Job, Repo } from "@/lib/db/schema";
 import type { Worktree } from "@/lib/git/worktree";
 import { WorktreeManager } from "@/lib/git/worktree";
 import { logError } from "@/lib/log/logger";
@@ -85,7 +85,9 @@ export async function runReleaseJob(
 
   // The run is normally created by the start action; recreate defensively so a
   // direct/recovered run is still recorded in the panel.
-  const run = findReleaseRunByJob(jobId, db) ?? createReleaseRun({ repoId: repo.id, mode: "agent", jobId }, db);
+  const run =
+    findReleaseRunByJob(jobId, db) ??
+    createReleaseRun({ repoId: repo.id, mode: "agent", jobId }, db);
 
   if (job.status === "queued") transitionJob(job.id, "working", {}, db);
 

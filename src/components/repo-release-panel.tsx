@@ -1,13 +1,19 @@
 "use client";
 
-import { Tag } from "lucide-react";
+import { Sparkles, Tag } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import type { ReleasePreview } from "@/lib/orchestrator/release-driver";
-import { previewReleaseAction, publishReleaseAction } from "@/lib/release/actions";
+import {
+  previewReleaseAction,
+  publishReleaseAction,
+  startReleaseAction,
+} from "@/lib/release/actions";
 import type { ReleaseRunSummary } from "@/lib/release/release-service";
 
 const STATUS_TONE: Record<string, Tone> = {
@@ -37,6 +43,7 @@ export function RepoReleasePanel({
   const [preview, setPreview] = useState<ReleasePreview | null>(null);
   const [pending, start] = useTransition();
   const { error, success, info } = useToast();
+  const router = useRouter();
 
   function onPreview() {
     start(async () => {
@@ -72,6 +79,21 @@ export function RepoReleasePanel({
     });
   }
 
+  function onRunAgent() {
+    start(async () => {
+      try {
+        const { jobId, runs: updated } = await startReleaseAction(repoId);
+        setRuns(updated);
+        setPreview(null);
+        info("Release started", "An agent is figuring out and running this repo's release.");
+        // Jump straight to the job's live log so the agent's steps are visible.
+        router.push(`/jobs/${jobId}`);
+      } catch (e) {
+        error("Release failed to start", e instanceof Error ? e.message : String(e));
+      }
+    });
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -82,8 +104,13 @@ export function RepoReleasePanel({
           <Button variant="outline" size="sm" onClick={onPreview} disabled={pending}>
             Preview
           </Button>
-          <Button size="sm" onClick={onPublish} disabled={pending}>
+          <Button variant="outline" size="sm" onClick={onPublish} disabled={pending}>
             Publish release
+          </Button>
+          {/* Agent-driven release (issue #256): the agent discovers how this repo
+              releases and performs it. Distinct from the deterministic publish. */}
+          <Button size="sm" onClick={onRunAgent} disabled={pending}>
+            <Sparkles className="h-3.5 w-3.5" /> Run release (agent)
           </Button>
         </div>
       </div>
@@ -129,6 +156,14 @@ export function RepoReleasePanel({
               {r.tag && <span className="text-xs text-muted-foreground">{r.mode}</span>}
               {r.triggerPrNumber != null && (
                 <span className="text-xs text-muted-foreground">PR #{r.triggerPrNumber}</span>
+              )}
+              {r.jobId != null && (
+                <Link
+                  href={`/jobs/${r.jobId}`}
+                  className="text-xs text-primary underline-offset-2 hover:underline"
+                >
+                  job log
+                </Link>
               )}
               <Badge tone={STATUS_TONE[r.status] ?? "neutral"}>{r.status}</Badge>
               {r.errorMessage && (

@@ -33,7 +33,7 @@ export function RepoActivity({
                 href={`/jobs/${activeJob.id}`}
                 className="font-mono text-xs text-muted-foreground hover:text-foreground"
               >
-                #{activeJob.issueNumber}
+                {activeJob.kind === "release" ? "Release" : `#${activeJob.issueNumber}`}
               </Link>
               <Link
                 href={`/jobs/${activeJob.id}`}
@@ -96,7 +96,7 @@ export function RepoActivity({
                 >
                   <Badge status={j.status} className="shrink-0" />
                   <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                    #{j.issueNumber}
+                    {j.kind === "release" ? "Release" : `#${j.issueNumber}`}
                   </span>
                   <span className="ml-auto tnum shrink-0 text-xs text-muted-foreground">
                     {formatUsd(j.costUsd)}
