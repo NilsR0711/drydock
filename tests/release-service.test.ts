@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import {
   createReleaseRun,
+  findReleaseRunByJob,
   getReleaseRun,
+  publishAgentReleaseRun,
   recentReleaseRuns,
   transitionReleaseRun,
 } from "@/lib/release/release-service";
 import { InvalidReleaseTransitionError } from "@/lib/release/release-state";
+import { createJob } from "@/lib/orchestrator/jobs";
 import { addRepo } from "@/lib/repos/service";
 
 let db: DB;
@@ -122,5 +125,45 @@ describe("recentReleaseRuns", () => {
 describe("getReleaseRun", () => {
   it("returns undefined for an unknown id", () => {
     expect(getReleaseRun(999, db)).toBeUndefined();
+  });
+});
+
+describe("agent-driven release runs (issue #256)", () => {
+  function releaseJob(repoId: number) {
+    return createJob({ repoId, issueNumber: 0, kind: "release" }, db);
+  }
+
+  it("records the mode and the backing job id, and exposes them in summaries", () => {
+    const r = repo();
+    const job = releaseJob(r.id);
+    const run = createReleaseRun({ repoId: r.id, mode: "agent", jobId: job.id }, db);
+    expect(run.mode).toBe("agent");
+    expect(run.jobId).toBe(job.id);
+    expect(recentReleaseRuns(r.id, db)[0]?.jobId).toBe(job.id);
+    expect(recentReleaseRuns(r.id, db)[0]?.mode).toBe("agent");
+  });
+
+  it("finds the run backing a given job", () => {
+    const r = repo();
+    const job = releaseJob(r.id);
+    const run = createReleaseRun({ repoId: r.id, mode: "agent", jobId: job.id }, db);
+    expect(findReleaseRunByJob(job.id, db)?.id).toBe(run.id);
+    expect(findReleaseRunByJob(999, db)).toBeUndefined();
+  });
+
+  it("walks an evaluating agent run to published with version fields", () => {
+    const r = repo();
+    const job = releaseJob(r.id);
+    const run = createReleaseRun({ repoId: r.id, mode: "agent", jobId: job.id }, db);
+    transitionReleaseRun(run.id, "evaluating", {}, db);
+    const published = publishAgentReleaseRun(
+      run.id,
+      { tag: "v2.0.0", title: "v2.0.0", notes: "- big" },
+      db,
+    );
+    expect(published.status).toBe("published");
+    expect(published.tag).toBe("v2.0.0");
+    expect(published.title).toBe("v2.0.0");
+    expect(published.notes).toBe("- big");
   });
 });

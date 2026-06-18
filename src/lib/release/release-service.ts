@@ -15,7 +15,7 @@ function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-export type ReleaseMode = "auto" | "manual";
+export type ReleaseMode = "auto" | "manual" | "agent";
 
 export interface CreateReleaseRunInput {
   repoId: number;
@@ -23,6 +23,8 @@ export interface CreateReleaseRunInput {
   /** The merged PR and its merge commit SHA (auto runs); omit for manual runs. */
   triggerPrNumber?: number | null;
   triggerSha?: string | null;
+  /** The job executing an agent-driven release (mode "agent", issue #256). */
+  jobId?: number | null;
 }
 
 /**
@@ -47,6 +49,7 @@ export function createReleaseRun(input: CreateReleaseRunInput, db: DB = getDb())
       mode: input.mode,
       triggerPrNumber: input.triggerPrNumber ?? null,
       triggerSha,
+      jobId: input.jobId ?? null,
     })
     .returning()
     .get();
@@ -104,6 +107,11 @@ export function findReleaseRunByTriggerPr(
     .get();
 }
 
+/** The run backing a given agent-driven release job (issue #256), if any. */
+export function findReleaseRunByJob(jobId: number, db: DB = getDb()): ReleaseRun | undefined {
+  return db.select().from(releaseRuns).where(eq(releaseRuns.jobId, jobId)).get();
+}
+
 /** Fields a transition may set alongside the new status. */
 export interface ReleaseRunPatch {
   bump?: SemverBump;
@@ -140,10 +148,29 @@ export function transitionReleaseRun(
     .get();
 }
 
+/**
+ * Settle an agent-driven release run as published (issue #256). The agent
+ * already performed the release; this only records the outcome, walking the
+ * shared release state machine's terminal hops (evaluating → proposed →
+ * publishing → published) and stamping whatever tag/title/notes the agent
+ * reported via `.drydock/RELEASE.md`. Kept here so the strict transition
+ * validation stays the single source of truth for the column.
+ */
+export function publishAgentReleaseRun(
+  id: number,
+  patch: { tag?: string | null; title?: string | null; notes?: string | null } = {},
+  db: DB = getDb(),
+): ReleaseRun {
+  transitionReleaseRun(id, "proposed", patch, db);
+  transitionReleaseRun(id, "publishing", {}, db);
+  return transitionReleaseRun(id, "published", {}, db);
+}
+
 export interface ReleaseRunSummary {
   id: number;
   mode: string;
   status: string;
+  jobId: number | null;
   triggerPrNumber: number | null;
   fromTag: string | null;
   tag: string | null;
@@ -179,6 +206,7 @@ export function recentReleaseRuns(
       id: r.id,
       mode: r.mode,
       status: r.status,
+      jobId: r.jobId,
       triggerPrNumber: r.triggerPrNumber,
       fromTag: r.fromTag,
       tag: r.tag,
