@@ -97,6 +97,26 @@ describe("repos service", () => {
     expect(repoAutomation(updated).mergeWithoutChecks).toBe(true);
   });
 
+  it("defaults review-feedback ON with sensible trusted-bot defaults and can opt out (issue #213)", () => {
+    const repo = addRepo({ path: "/arf", name: "arf" }, db);
+    // Autonomous operation: act on review-bot feedback out of the box.
+    expect(repo.autoReviewFeedback).toBe(true);
+    expect(repoAutomation(repo).autoReviewFeedback).toBe(true);
+    // The loop is inert without trusted bots, so ship well-known reviewers.
+    expect(repoAutomation(repo).trustedBots).toEqual(["cursor[bot]", "coderabbitai[bot]"]);
+    // Opt-out per repo remains available.
+    const off = updateRepo(repo.id, { autoReviewFeedback: false }, db);
+    expect(off.autoReviewFeedback).toBe(false);
+    expect(repoAutomation(off).autoReviewFeedback).toBe(false);
+  });
+
+  it("lets a repo override the default trusted bots (issue #213)", () => {
+    const repo = addRepo({ path: "/tb", name: "tb", trustedBots: ["coderabbitai[bot]"] }, db);
+    expect(repoAutomation(repo).trustedBots).toEqual(["coderabbitai[bot]"]);
+    const updated = updateRepo(repo.id, { trustedBots: [] }, db);
+    expect(repoAutomation(updated).trustedBots).toEqual([]);
+  });
+
   it("defaults the per-job cost ceiling override to unset (issue #57)", () => {
     const repo = addRepo({ path: "/jc", name: "jc" }, db);
     expect(repo.maxJobCostUsd).toBeNull();
