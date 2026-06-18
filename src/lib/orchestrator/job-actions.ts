@@ -5,6 +5,7 @@ import { notifyPauseTransition } from "@/lib/notify/lifecycle";
 import { getSettings, saveSettings } from "@/lib/settings/service";
 import { requeueJobWithEscalation } from "./escalation";
 import { getJob, transitionJob } from "./jobs";
+import { resumeJobWithInstruction } from "./resume-instruction";
 import { abortAllJobs, abortJob } from "./singleton";
 import { canTransition, InvalidTransitionError, type JobStatus } from "./state-machine";
 
@@ -17,6 +18,21 @@ export async function requeueJobAction(jobId: number) {
   const job = requeueJobWithEscalation(jobId);
   revalidatePath("/needs-human");
   revalidatePath("/");
+  revalidatePath(`/repos/${job.repoId}`);
+  return job;
+}
+
+/**
+ * Resume a needs_human job with operator guidance (issue #257): store the typed
+ * instruction on the job and requeue it. The next run resumes the stored session
+ * with the instruction as the prompt, on the job's preserved branch, so the
+ * agent continues its prior work taking the guidance into account.
+ */
+export async function resumeJobWithInstructionAction(jobId: number, instruction: string) {
+  const job = resumeJobWithInstruction(jobId, instruction);
+  revalidatePath("/needs-human");
+  revalidatePath("/");
+  revalidatePath(`/jobs/${jobId}`);
   revalidatePath(`/repos/${job.repoId}`);
   return job;
 }

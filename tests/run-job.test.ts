@@ -22,6 +22,7 @@ function fakeWorktrees(removed: { v: boolean }) {
   return {
     prepare: vi.fn(async () => wt),
     commitAndPush: vi.fn(async () => {}),
+    commitAndPushForHuman: vi.fn(async () => false),
     remove: vi.fn(async () => {
       removed.v = true;
     }),
@@ -42,6 +43,7 @@ function baseDeps(removed: { v: boolean }, over: Record<string, unknown> = {}) {
       db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, job.id)).run();
       return getJob(job.id, db) as Job;
     }),
+    announceNeedsHuman: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -112,6 +114,53 @@ describe("runJob", () => {
     expect(result.status).toBe("needs_human");
     expect(deps.createPr).not.toHaveBeenCalled();
     expect(removed.v).toBe(true);
+  });
+
+  it("announces the parked job on its issue for every needs_human outcome (issue #250)", async () => {
+    const removed = { v: false };
+    const announceNeedsHuman = vi.fn(async () => {});
+    const deps = baseDeps(removed, {
+      announceNeedsHuman,
+      runSession: vi.fn(async (job: Job) => {
+        db.update(jobs).set({ status: "working" }).where(eq(jobs.id, job.id)).run();
+        return { exitCode: 1, sessionId: "s1", costUsd: 0, inputTokens: 0, outputTokens: 0 };
+      }),
+    });
+    const job = createJob({ repoId, issueNumber: 1 }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("needs_human");
+    expect(announceNeedsHuman).toHaveBeenCalledTimes(1);
+    expect(announceNeedsHuman).toHaveBeenCalledWith(
+      expect.objectContaining({ id: job.id, status: "needs_human" }),
+    );
+  });
+
+  it("announces a babysitter-escalated needs_human outcome (issue #250)", async () => {
+    const removed = { v: false };
+    const announceNeedsHuman = vi.fn(async () => {});
+    const deps = baseDeps(removed, {
+      announceNeedsHuman,
+      runBabysitter: vi.fn(async (job: Job) => {
+        db.update(jobs)
+          .set({ status: "needs_human", errorMessage: "CI never settled" })
+          .where(eq(jobs.id, job.id))
+          .run();
+        return getJob(job.id, db) as Job;
+      }),
+    });
+    const job = createJob({ repoId, issueNumber: 1 }, db);
+    const result = await runJob(job.id, deps as never);
+    expect(result.status).toBe("needs_human");
+    expect(announceNeedsHuman).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not announce needs_human for a merged outcome (issue #250)", async () => {
+    const removed = { v: false };
+    const announceNeedsHuman = vi.fn(async () => {});
+    const deps = baseDeps(removed, { announceNeedsHuman });
+    const job = createJob({ repoId, issueNumber: 1 }, db);
+    await runJob(job.id, deps as never);
+    expect(announceNeedsHuman).not.toHaveBeenCalled();
   });
 
   it("marks needs_human with a timed-out reason when the session hits the wall-clock limit (issue #47)", async () => {

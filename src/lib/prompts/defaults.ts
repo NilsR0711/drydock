@@ -5,6 +5,9 @@ export const TEMPLATE_NAMES = {
   ciFix: "ci-fix",
   plan: "plan",
   limitResume: "limit-resume",
+  // Continuation prompt for a needs_human job an operator unblocked with typed
+  // guidance (issue #257); the human's instruction is injected via $INSTRUCTION.
+  humanResume: "human-resume",
   // The PR body structure, kept separate from the implement prompt so a repo can
   // reshape its PR descriptions without touching the rest of the prompt (issue
   // #252). Injected into the implement prompt via the $PR_FORMAT variable.
@@ -29,9 +32,14 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, string> = {
     "Issue body:",
     "$ISSUE_BODY",
     "",
-    "Keep the change focused. You may commit your work or leave it uncommitted —",
-    "either is fine. Do not push or open a pull request yourself; Drydock commits",
-    "any remaining changes, pushes the branch, and opens the PR.",
+    "Keep the change focused. Split your work into focused, thematic commits as",
+    "you go: group changes by concern and give each commit a clear Conventional",
+    "Commit subject (`type(scope): summary`). Do not dump everything into one",
+    "mega-commit. Never add AI attribution to a commit: no `Co-Authored-By` trailer",
+    "naming an assistant, no `Generated with Claude Code` line, and no mention of",
+    "the tool or model anywhere in the message. Do not push or open a pull request",
+    "yourself; Drydock pushes the branch and opens the PR, committing any changes",
+    "you leave uncommitted.",
     "",
     "Before you finish, write a file `.drydock/PR.md` describing the change for the",
     "pull request. The first line is a Conventional Commit subject (used as the",
@@ -48,6 +56,14 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, string> = {
     "then preserves your branch, hands the questions to a human, and parks the job",
     "instead of opening a PR. Use this only for true blockers — not for routine",
     "choices you can reasonably make yourself.",
+    "",
+    'Whenever you consciously leave something out of scope ("this should be a',
+    'separate issue / follow-up / different PR"), append a follow-up to',
+    "`.drydock/FOLLOWUPS.md` instead of only noting it in the PR. Use a `## ` heading",
+    "per item: the heading is a clear Conventional-style issue title, and the lines",
+    "below it are the body — context, rationale, and acceptance criteria. Drydock",
+    "opens a real issue for each, links them from the PR, and removes the file — do",
+    "not commit it.",
   ].join("\n"),
   "ci-fix": "CI failed. Fix the failure and keep changes minimal.\n\nFailed CI log:\n$CI_LOG",
   plan: [
@@ -70,8 +86,33 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, string> = {
     `Your previous session on issue #$ISSUE_NUM in "$REPO_NAME" was interrupted by a usage limit.`,
     `You are resuming in a fresh checkout of branch "$BRANCH"; any uncommitted changes from the`,
     "interrupted session are gone. Re-apply whatever is missing and finish implementing the issue.",
-    "Keep the change focused. You may commit your work or leave it uncommitted — either is fine.",
-    "Do not push or open a pull request yourself; Drydock commits, pushes, and opens the PR.",
+    "Keep the change focused. Split your work into focused, thematic commits, each with a clear",
+    "Conventional Commit subject (`type(scope): summary`) grouped by concern — not one mega-commit.",
+    "Never add AI attribution to a commit: no `Co-Authored-By` trailer naming an assistant, no",
+    "`Generated with Claude Code` line, and no mention of the tool or model in the message.",
+    "Do not push or open a pull request yourself; Drydock pushes and opens the PR, committing",
+    "anything you leave uncommitted.",
+    "Before finishing, write `.drydock/PR.md`: first line a Conventional Commit subject (used as",
+    "the commit message and PR title), then a blank line, then a body in this format:",
+    "",
+    "$PR_FORMAT",
+    "",
+    "Drydock appends `Closes #$ISSUE_NUM` and removes the file — do not commit it.",
+  ].join("\n"),
+  // Continuation prompt for a session resumed with human guidance (issue #257):
+  // a needs_human job an operator unblocked by typing how to proceed. The
+  // conversation context survives via --resume and the prior commits are
+  // checked out on the same branch; the operator's instruction leads.
+  "human-resume": [
+    `Your previous session on issue #$ISSUE_NUM in "$REPO_NAME" was paused for a human to review.`,
+    `A human has looked at where you got stuck and given you this instruction:`,
+    "",
+    "$INSTRUCTION",
+    "",
+    `You are resuming on branch "$BRANCH" with your prior commits intact. Follow the instruction`,
+    "above to get unblocked and finish implementing the issue. Keep the change focused. You may",
+    "commit your work or leave it uncommitted — either is fine. Do not push or open a pull request",
+    "yourself; Drydock commits, pushes, and opens the PR.",
     "Before finishing, write `.drydock/PR.md`: first line a Conventional Commit subject (used as",
     "the commit message and PR title), then a blank line, then a body in this format:",
     "",

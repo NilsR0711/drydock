@@ -105,6 +105,12 @@ export const settingsSchema = z.object({
   containerRuntime: z.enum(["auto", "docker", "podman"]).default("auto"),
   // Lifecycle events that trigger a notification on every configured channel.
   notifyEvents: z.array(z.enum(NOTIFICATION_EVENTS)).default([...NOTIFICATION_EVENTS]),
+  // Play an in-app sound the moment a job parks in needs_human (issue #258). On
+  // by default per the autonomous model — when a human IS needed, make it
+  // obvious. The toast and any backgrounded-tab desktop notification still fire
+  // when this is off; only the audible cue is gated. Client-side only, and it
+  // honors the browser autoplay policy (sound after the first interaction).
+  needsHumanSoundEnabled: z.boolean().default(true),
   // Finished jobs older than this many days have their verbose job_events
   // pruned (their cost summary rows are kept). See issue #24.
   retentionDays: z.number().int().positive().default(30),

@@ -13,12 +13,15 @@ interface Toast {
   title: string;
   description?: string;
   variant: ToastVariant;
+  href?: string;
 }
 
-interface ToastInput {
+export interface ToastInput {
   title: string;
   description?: string;
   variant?: ToastVariant;
+  /** When set, the title becomes a link to this URL (e.g. a job detail page). */
+  href?: string;
 }
 
 interface ToastContextValue {
@@ -47,6 +50,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         title: input.title,
         description: input.description,
         variant: input.variant ?? "info",
+        href: input.href,
       };
       setToasts((prev) => [...prev, next]);
       setTimeout(() => remove(id), AUTO_DISMISS_MS);
@@ -98,7 +102,13 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: numb
     <div className="dd-toast dd-toast-in pointer-events-auto relative flex items-start gap-3 overflow-hidden rounded-xl border border-card-border bg-card p-3.5 shadow-lg">
       <Icon className={cn("mt-0.5 h-[18px] w-[18px] shrink-0", style.icon)} />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{t.title}</p>
+        {t.href ? (
+          <a href={t.href} className="text-sm font-medium underline-offset-2 hover:underline">
+            {t.title}
+          </a>
+        ) : (
+          <p className="text-sm font-medium">{t.title}</p>
+        )}
         {t.description && <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>}
       </div>
       <button

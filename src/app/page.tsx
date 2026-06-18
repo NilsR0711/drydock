@@ -2,6 +2,7 @@ import { DashboardLive } from "@/components/dashboard-live";
 import { getDb } from "@/lib/db/client";
 import { dailyCosts } from "@/lib/db/cost-queries";
 import { dashboardSnapshot } from "@/lib/db/queries";
+import { getSettings } from "@/lib/settings/service";
 
 export const dynamic = "force-dynamic";
 
@@ -26,5 +27,6 @@ export default function DashboardPage() {
   // Real 7-day spend trend (zero-filled days with no jobs) for the sidebar sparkline.
   const byDay = new Map(dailyCosts(db).map((d) => [d.day, d.costUsd]));
   const spend7d = last7Days().map((day) => byDay.get(day) ?? 0);
-  return <DashboardLive initial={snapshot} spend7d={spend7d} />;
+  const soundEnabled = getSettings(db).needsHumanSoundEnabled;
+  return <DashboardLive initial={snapshot} spend7d={spend7d} soundEnabled={soundEnabled} />;
 }

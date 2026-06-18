@@ -137,9 +137,22 @@ export interface RepoDashboardRow {
   attention: boolean;
 }
 
+/** A parked job, named for the live dashboard's needs_human alert (issue #258). */
+export interface NeedsHumanJobRef {
+  id: number;
+  repoName: string;
+  issueNumber: number;
+}
+
 export interface DashboardSnapshot {
   summary: DashboardSummary;
   repos: RepoDashboardRow[];
+  /**
+   * Jobs currently parked in needs_human (newest first). The live dashboard
+   * diffs successive snapshots by id to fire a one-shot sound + toast the
+   * moment a new job crosses the edge (issue #258).
+   */
+  needsHumanJobs: NeedsHumanJobRef[];
   /** Proactive Claude OAuth subscription-window indicator (issue #188). */
   claudeUsage: ClaudeUsageView;
   /** Proactive Codex OAuth quota indicator (issue #189). */
@@ -234,6 +247,11 @@ export function dashboardSnapshot(db: DB = getDb()): DashboardSnapshot {
   return {
     summary: dashboardSummary(db),
     repos: rows,
+    needsHumanJobs: needsHumanJobs(db).map((j) => ({
+      id: j.id,
+      repoName: j.repoName,
+      issueNumber: j.issueNumber,
+    })),
     claudeUsage: getClaudeUsageView(db),
     codexUsage: getCodexUsageView(db),
   };

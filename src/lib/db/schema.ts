@@ -203,6 +203,13 @@ export const jobs = sqliteTable(
     // sessionId makes the next run resume the session (`--resume`) instead of
     // starting from scratch; cleared when the run restarts.
     limitKind: text("limit_kind"),
+    // Human guidance for a needs_human job the operator unblocked by typing
+    // instructions (issue #257). A set value plus a recorded sessionId makes the
+    // next run resume the stored session with this text as the prompt — on the
+    // job's preserved branch when one was pushed at park time — so the agent
+    // continues its prior work with the guidance instead of retrying blind.
+    // Cleared when the run restarts.
+    humanInstruction: text("human_instruction"),
     // Lease-based queue (issue #23). A claimed job carries a lease token held by
     // exactly one worker; heartbeats push leaseExpiresAt forward. attempts counts
     // claims (for backoff/maxAttempts), availableAt gates when a deferred/backed-off

@@ -51,6 +51,29 @@ describe("dashboardSnapshot", () => {
     expect(row?.todaySpend).toBeCloseTo(0.5);
   });
 
+  it("lists parked jobs with repo + issue so the live tab can alert (issue #258)", () => {
+    const repo = addRepo({ path: "/r", name: "acme" }, db).id;
+    db.insert(jobs)
+      .values([
+        { repoId: repo, issueNumber: 1, status: "working", startedAt: now() },
+        { repoId: repo, issueNumber: 42, status: "needs_human" },
+      ])
+      .run();
+
+    const snap = dashboardSnapshot(db);
+    expect(snap.needsHumanJobs).toHaveLength(1);
+    expect(snap.needsHumanJobs[0]).toMatchObject({ issueNumber: 42, repoName: "acme" });
+    expect(typeof snap.needsHumanJobs[0]?.id).toBe("number");
+  });
+
+  it("returns an empty needsHumanJobs list when nothing is parked (issue #258)", () => {
+    const repo = addRepo({ path: "/r", name: "r" }, db).id;
+    db.insert(jobs)
+      .values([{ repoId: repo, issueNumber: 1, status: "working", startedAt: now() }])
+      .run();
+    expect(dashboardSnapshot(db).needsHumanJobs).toEqual([]);
+  });
+
   it("counts retrying jobs as working", () => {
     const repo = addRepo({ path: "/r", name: "r" }, db).id;
     db.insert(jobs)
