@@ -2,7 +2,7 @@
 
 import { FolderGit2, Info, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AddRepoForm } from "@/components/add-repo-form";
 import { ClaudeUsageCard } from "@/components/claude-usage";
 import { CodexUsageCard } from "@/components/codex-usage";
@@ -15,9 +15,48 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Sparkline } from "@/components/ui/sparkline";
+import { useToast } from "@/components/ui/toast";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { DashboardSnapshot } from "@/lib/db/queries";
+import { installAudioUnlock, playChime } from "@/lib/ui/chime";
+import {
+  type NeedsHumanJobRef,
+  newlyParkedJobs,
+  shouldNotifyDesktop,
+} from "@/lib/ui/needs-human-alert";
 import { formatUsd } from "@/lib/utils";
+
+/**
+ * Best-effort OS-level alert when the dashboard tab is backgrounded. Fires only
+ * when the user has already granted notification permission — we never nag for
+ * it — and quietly does nothing otherwise (issue #258).
+ */
+function notifyDesktop(job: NeedsHumanJobRef): void {
+  const supported = typeof window !== "undefined" && "Notification" in window;
+  if (
+    !supported ||
+    !shouldNotifyDesktop({
+      supported,
+      permission: Notification.permission,
+      hidden: typeof document !== "undefined" && document.hidden,
+    })
+  ) {
+    return;
+  }
+  try {
+    const n = new Notification(`${job.repoName} #${job.issueNumber} needs a human`, {
+      body: "A guardrail paused work before anything risky was written.",
+      tag: `needs-human-${job.id}`,
+    });
+    n.onclick = () => {
+      window.focus();
+      window.location.assign(`/jobs/${job.id}`);
+      n.close();
+    };
+  } catch {
+    // Notification construction can throw on some platforms — ignore.
+  }
+}
 
 /** Default per-repo daily cap (schema default) used to scale the budget gauge. */
 const DEFAULT_DAILY_LIMIT = 10;
@@ -30,22 +69,56 @@ const DEFAULT_DAILY_LIMIT = 10;
 export function DashboardLive({
   initial,
   spend7d,
+  soundEnabled = true,
 }: {
   initial: DashboardSnapshot;
   /** Real per-day spend (oldest → newest, today last) for the trend sparkline. */
   spend7d?: number[];
+  /** Whether to play the audible cue when a job parks in needs_human (#258). */
+  soundEnabled?: boolean;
 }) {
   const router = useRouter();
+  const { toast } = useToast();
   const [snapshot, setSnapshot] = useState(initial);
   const [showAdd, setShowAdd] = useState(false);
 
+  // Jobs already parked when this tab connected form the baseline so they don't
+  // re-alert; only jobs that cross the edge later fire the sound + toast (#258).
+  const seenNeedsHuman = useRef(new Set(initial.needsHumanJobs.map((j) => j.id)));
+  // Read live inside the once-mounted SSE handler without reconnecting the stream.
+  const soundRef = useRef(soundEnabled);
+  soundRef.current = soundEnabled;
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+
   useEffect(() => {
+    // Arm the autoplay unlock so a later chime is allowed to sound.
+    installAudioUnlock();
     const es = new EventSource("/api/sse/dashboard");
     es.addEventListener("snapshot", (ev: MessageEvent) => {
+      let snap: DashboardSnapshot;
       try {
-        setSnapshot(JSON.parse(ev.data) as DashboardSnapshot);
+        snap = JSON.parse(ev.data) as DashboardSnapshot;
       } catch {
         // Ignore a malformed frame; the next snapshot will recover.
+        return;
+      }
+      setSnapshot(snap);
+
+      const parked = snap.needsHumanJobs ?? [];
+      const fresh = newlyParkedJobs(seenNeedsHuman.current, parked);
+      for (const job of parked) seenNeedsHuman.current.add(job.id);
+      if (fresh.length === 0) return;
+
+      if (soundRef.current) playChime();
+      for (const job of fresh) {
+        toastRef.current({
+          title: `${job.repoName} #${job.issueNumber} needs a human`,
+          description: "A guardrail paused work before anything risky was written.",
+          variant: "error",
+          href: `/jobs/${job.id}`,
+        });
+        notifyDesktop(job);
       }
     });
     return () => es.close();
