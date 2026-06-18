@@ -5,7 +5,7 @@ import type { AgentId } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
-import { jobs } from "@/lib/db/schema";
+import { followupIssues, jobs } from "@/lib/db/schema";
 import type { StreamRunner } from "@/lib/exec/stream-runner";
 import { getForge } from "@/lib/forge/registry";
 import { EmptyCommitError, type Worktree, WorktreeManager } from "@/lib/git/worktree";
@@ -32,6 +32,10 @@ import {
   spawnAgentSession,
 } from "./agent-session";
 import { ciBabysitter, type ResumeOutcome, resumeFailureReason } from "./ci-babysitter";
+import {
+  consumeFollowups as defaultConsumeFollowups,
+  type FollowupIssue,
+} from "./followups-metadata";
 import { getJob, recordEvent, transitionJob } from "./jobs";
 import { announceNeedsHuman as defaultAnnounceNeedsHuman } from "./needs-human";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
@@ -81,6 +85,12 @@ export interface RunJobDeps {
   /** Post a comment on the job's issue; injectable for tests. */
   commentIssue?: (issueNumber: number, body: string) => Promise<void>;
   /**
+   * Open a follow-up issue for out-of-scope work the agent deferred (issue
+   * #261); returns the new issue number. Injectable for tests; defaults to the
+   * forge's `createIssue`.
+   */
+  createIssue?: (title: string, body: string) => Promise<number>;
+  /**
    * Fetch the issue title+body to embed in the implement prompt (issue #205);
    * injectable for tests. Defaults to the forge's `viewIssue`.
    */
@@ -104,6 +114,13 @@ export interface RunJobDeps {
    * defaults to the filesystem-backed reader.
    */
   consumeQuestions?: (worktreePath: string) => string | null;
+  /**
+   * Read and consume the agent-authored `.drydock/FOLLOWUPS.md` from the
+   * worktree (issue #261), returning the deferred follow-up issues and removing
+   * the file so it stays out of the commit. Injectable for tests; defaults to
+   * the filesystem-backed reader.
+   */
+  consumeFollowups?: (worktreePath: string) => FollowupIssue[];
   /**
    * Mark the job's issue as needing a human (issue #251): apply the needs-human
    * label and drop the queue label. Injectable for tests; defaults to the
@@ -156,6 +173,62 @@ export function planPromptSection(plan: string): string {
     "",
     capped,
   ].join("\n");
+}
+
+/**
+ * File a GitHub issue for each agent-deferred follow-up (issue #261) and return
+ * the resulting issue numbers in entry order, for linking from the PR body.
+ *
+ * Dedupe is scoped to the originating job: an entry whose title was already
+ * filed for this job (a limit-resume rerun re-emitting the same
+ * `.drydock/FOLLOWUPS.md`) reuses the recorded issue number instead of opening a
+ * duplicate. Each filing is best-effort — a forge hiccup on one entry is logged
+ * and skipped so it never strands the run or blocks the PR.
+ */
+async function fileFollowups(
+  followups: FollowupIssue[],
+  jobId: number,
+  createIssue: (title: string, body: string) => Promise<number>,
+  db: DB,
+): Promise<number[]> {
+  if (followups.length === 0) return [];
+  const filed = new Map<string, number>(
+    db
+      .select()
+      .from(followupIssues)
+      .where(eq(followupIssues.jobId, jobId))
+      .all()
+      .map((row) => [row.title, row.ghIssueNumber] as const),
+  );
+  const numbers: number[] = [];
+  for (const { title, body } of followups) {
+    const existing = filed.get(title);
+    if (existing !== undefined) {
+      numbers.push(existing);
+      continue;
+    }
+    // Keep forge filing and DB persistence in separate failure domains: once a
+    // real issue exists it must always be linked from the PR and recorded for
+    // dedupe, so a DB hiccup cannot silently lose an already-filed issue.
+    let ghIssueNumber: number;
+    try {
+      ghIssueNumber = await createIssue(title, body);
+    } catch (err) {
+      logError(`[run-job] follow-up issue filing failed for job ${jobId}: ${title}`, err);
+      continue;
+    }
+    numbers.push(ghIssueNumber);
+    filed.set(title, ghIssueNumber);
+    try {
+      db.insert(followupIssues).values({ jobId, ghIssueNumber, title }).run();
+    } catch (err) {
+      logError(
+        `[run-job] follow-up issue recording failed for job ${jobId}: #${ghIssueNumber}`,
+        err,
+      );
+    }
+  }
+  return numbers;
 }
 
 /** Event-aware notification sink: routes a lifecycle event + message downstream. */
@@ -333,6 +406,10 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   const commentIssue =
     deps.commentIssue ??
     ((issueNumber: number, body: string) => forge.commentIssue(issueNumber, body));
+  // Agent-authored follow-up issues (issue #261): file a real issue for each
+  // out-of-scope item the agent deferred via `.drydock/FOLLOWUPS.md`.
+  const createIssue =
+    deps.createIssue ?? ((title: string, body: string) => forge.createIssue(title, body));
   // Issue context for the implement prompt (issue #205): the title+body are
   // embedded so a headless agent needs no GitHub access to learn the task.
   const viewIssue =
@@ -345,6 +422,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   // Agent-authored open questions (issue #251): read+remove `.drydock/QUESTIONS.md`
   // and apply the needs-human label when the agent parks a blocking decision.
   const consumeQuestions = deps.consumeQuestions ?? defaultConsumeQuestions;
+  const consumeFollowups = deps.consumeFollowups ?? defaultConsumeFollowups;
   const markNeedsHuman =
     deps.markNeedsHuman ?? ((issueNumber: number) => markIssueNeedsHuman(repo.id, issueNumber, db));
   // Limit-resume runner (issue #166): continues a limit-parked job's stored
@@ -753,6 +831,13 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // work it committed by pushing the branch, post the questions as an issue
     // comment, apply the needs-human label, and park the job in needs_human.
     // Consuming the file removes it so the scratch never lands in the branch.
+    //
+    // Agent-deferred follow-ups (issue #261): consume `.drydock/FOLLOWUPS.md`
+    // here too, before any commit path — the questions handoff below commits and
+    // returns early, so reading+removing it now keeps the scratch out of that
+    // partial-work commit. The parsed entries are only filed on the PR path; the
+    // questions path discards them (the parked run can re-emit them on resume).
+    const followups = consumeFollowups(wt.path);
     const questions = consumeQuestions(wt.path);
     if (questions) {
       if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
@@ -821,10 +906,15 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       prMeta?.title ??
       listIssues(repo.id, db).find((i) => i.number === job.issueNumber)?.title ??
       `Fix #${job.issueNumber}`;
+    // File the deferred follow-ups now that the work is committed (issue #261),
+    // so a no-op run never opens stray issues, then link them from the PR body.
+    const spunOff = await fileFollowups(followups, job.id, createIssue, db);
     // Always close the issue from the PR; append the marker to the agent's body
     // when present, otherwise the marker is the whole body (prior behavior).
     const closes = `Closes #${job.issueNumber}`;
-    const body = prMeta?.body ? `${prMeta.body}\n\n${closes}` : closes;
+    const spunOffLine =
+      spunOff.length > 0 ? `Spun off: ${spunOff.map((n) => `#${n}`).join(", ")}` : "";
+    const body = [prMeta?.body, closes, spunOffLine].filter(Boolean).join("\n\n");
     const prNumber = await createPr({
       head: wt.branch,
       base: repo.defaultBranch,
