@@ -375,13 +375,13 @@ describe("childExitCode", () => {
     expect(childExitCode(2, null)).toBe(2);
   });
 
-  it("maps signal termination to the POSIX 128 + signo convention", () => {
+  it("maps any signal termination to the POSIX 128 + signo convention", () => {
     expect(childExitCode(null, "SIGINT")).toBe(130);
     expect(childExitCode(null, "SIGTERM")).toBe(143);
+    expect(childExitCode(null, "SIGKILL")).toBe(137);
   });
 
-  it("falls back to 1 for an unmapped or missing signal", () => {
-    expect(childExitCode(null, "SIGKILL")).toBe(1);
+  it("falls back to 1 when no signal is reported", () => {
     expect(childExitCode(null, null)).toBe(1);
   });
 });

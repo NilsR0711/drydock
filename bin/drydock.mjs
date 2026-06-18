@@ -7,7 +7,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { constants, homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -380,17 +380,18 @@ async function waitForServer(url, { attempts = 100, intervalMs = 100 } = {}) {
 /**
  * Translate a spawned child's `exit` event into this launcher's own exit code.
  * A normal exit forwards the child's code; a signal kill (`code === null`) maps
- * to the POSIX `128 + signo` convention so supervisors (launchd/systemd) and MCP
- * hosts observe the abnormal termination instead of a masked success.
+ * to the POSIX `128 + signo` convention (e.g. SIGINT→130, SIGTERM→143,
+ * SIGKILL→137) so supervisors (launchd/systemd) and MCP hosts observe the
+ * abnormal termination instead of a masked success. Falls back to 1 when no
+ * signal is reported or its name is unknown to this platform.
  *
  * @param {number | null} code
  * @param {NodeJS.Signals | null} [signal]
  */
 export function childExitCode(code, signal) {
   if (code !== null) return code;
-  if (signal === "SIGINT") return 130;
-  if (signal === "SIGTERM") return 143;
-  return 1;
+  const signo = signal ? constants.signals[signal] : undefined;
+  return signo ? 128 + signo : 1;
 }
 
 /**
