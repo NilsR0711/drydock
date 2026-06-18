@@ -51,7 +51,9 @@ export const repoInputSchema = z.object({
   autoTriageEnabled: z.boolean().default(false),
   autoProcessEnabled: z.boolean().default(false),
   autoHealCi: z.boolean().default(false),
-  autoReviewFeedback: z.boolean().default(false),
+  // Defaults ON for autonomous operation (issue #213); opt-out per repo. Paired
+  // with the trustedBots defaults below, since the loop is inert without them.
+  autoReviewFeedback: z.boolean().default(true),
   autoResolveMergeConflicts: z.boolean().default(false),
   includeProgressReplies: z.boolean().default(false),
   autoDecompose: z.boolean().default(false),
@@ -67,7 +69,9 @@ export const repoInputSchema = z.object({
   autoLabelWhitelist: jsonStringArray('["bug","enhancement","documentation","ready"]'),
   priorityAuthors: jsonStringArray("[]"),
   trustedReviewers: jsonStringArray("[]"),
-  trustedBots: jsonStringArray("[]"),
+  // Sensible defaults so review-feedback acts on well-known bots out of the
+  // box (issue #213); kept in sync with the schema column default.
+  trustedBots: jsonStringArray('["cursor[bot]","coderabbitai[bot]"]'),
   ignoredBots: jsonStringArray('["dependabot[bot]","github-actions[bot]","codecov[bot]"]'),
   minAuthorAssociation: z.enum(["approved", "any"]).default("approved"),
   maxAttempts: z.number().int().positive().default(3),

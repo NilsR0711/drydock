@@ -22,8 +22,12 @@ export const repos = sqliteTable("repos", {
   autoProcessEnabled: integer("auto_process_enabled", { mode: "boolean" }).notNull().default(false),
   // Opt-in CI auto-healing (default off). See ADR 017.
   autoHealCi: integer("auto_heal_ci", { mode: "boolean" }).notNull().default(false),
-  // Opt-in PR review-feedback lifecycle (default off). See ADR 019.
-  autoReviewFeedback: integer("auto_review_feedback", { mode: "boolean" }).notNull().default(false),
+  // PR review-feedback lifecycle (ADR 019). Defaults ON for autonomous
+  // operation (issue #213): an issue-to-PR tool should act on review-bot
+  // findings out of the box. Still bounded (per-sweep/per-item budgets, never
+  // auto-merges) and opt-out per repo. The 0032 migration backfills existing
+  // repos that still hold the legacy `false` default.
+  autoReviewFeedback: integer("auto_review_feedback", { mode: "boolean" }).notNull().default(true),
   // Bounded merge-conflict repair within the feedback loop (default off).
   autoResolveMergeConflicts: integer("auto_resolve_merge_conflicts", { mode: "boolean" })
     .notNull()
@@ -57,7 +61,9 @@ export const repos = sqliteTable("repos", {
   // feedback is acted on. Bot accounts ([bot] logins) are ignored unless
   // explicitly allowlisted in trustedBots; ignored bots are never acted on.
   trustedReviewers: text("trusted_reviewers").notNull().default("[]"),
-  trustedBots: text("trusted_bots").notNull().default("[]"),
+  // Well-known review bots trusted by default (issue #213) so review feedback
+  // is acted on out of the box; empty allowlists otherwise leave the loop inert.
+  trustedBots: text("trusted_bots").notNull().default('["cursor[bot]","coderabbitai[bot]"]'),
   ignoredBots: text("ignored_bots")
     .notNull()
     .default('["dependabot[bot]","github-actions[bot]","codecov[bot]"]'),
