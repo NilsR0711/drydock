@@ -193,7 +193,8 @@ stateDiagram-v2
 with instructions**: from the needs-human screen or the job page, type how the agent should
 proceed and it re-queues with that guidance — resuming its stored session on its existing branch
 (falling back to a fresh run with the instruction in the prompt when no session can be resumed),
-with the instruction recorded on the job's timeline. Terminal states are `merged` and `aborted`.
+with the instruction recorded on the job's timeline. Terminal states are `merged`, `released`
+(an agent-driven release that finished — issue #256), and `aborted`.
 `waiting_limit` parks a job whose agent session hit the provider's usage/rate limit — Claude
 (Anthropic usage windows, API 429/529) and Codex (ChatGPT-plan limits, OpenAI 429/5xx) alike
 ([ADR&nbsp;030](docs/adr/030-provider-limit-auto-wait.md)): Drydock latches that provider, stops
