@@ -37,6 +37,25 @@ describe("parseLine", () => {
   it("throws on malformed JSON", () => {
     expect(() => parseLine("{not json")).toThrow();
   });
+
+  it("extracts rate-limit info from a rate_limit_event (issue #188)", () => {
+    const line = JSON.stringify({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed",
+        resetsAt: 1_781_754_000,
+        rateLimitType: "five_hour",
+      },
+      session_id: "s1",
+    });
+    const e = parseLine(line);
+    expect(e?.type).toBe("rate_limit_event");
+    expect(e?.rateLimitInfo).toMatchObject({
+      status: "allowed",
+      resetsAt: 1_781_754_000,
+      rateLimitType: "five_hour",
+    });
+  });
 });
 
 describe("StreamJsonParser against fixtures", () => {
@@ -276,6 +295,34 @@ describe("StreamJsonParser malformed input resilience (issue #46)", () => {
     const p = new StreamJsonParser();
     p.push("partial banner without newline");
     expect(() => p.flush()).not.toThrow();
+  });
+
+  it("retains the latest rate_limit_event info on the parser (issue #188)", () => {
+    const p = new StreamJsonParser();
+    p.push(
+      `${JSON.stringify({
+        type: "rate_limit_event",
+        rate_limit_info: { status: "allowed", resetsAt: 100, rateLimitType: "five_hour" },
+      })}\n`,
+    );
+    p.push(
+      `${JSON.stringify({
+        type: "rate_limit_event",
+        rate_limit_info: { status: "allowed_warning", resetsAt: 200, rateLimitType: "five_hour" },
+      })}\n`,
+    );
+    expect(p.rateLimit).toMatchObject({ status: "allowed_warning", resetsAt: 200 });
+  });
+
+  it("treats a rate_limit_event as a real event, not a parse error (issue #188)", () => {
+    const p = new StreamJsonParser();
+    const errors: ParseError[] = [];
+    p.onParseError = (e) => errors.push(e);
+    const events = p.push(
+      `${JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } })}\n`,
+    );
+    expect(errors).toHaveLength(0);
+    expect(events).toHaveLength(1);
   });
 
   it("parses a JSON object split across two chunks once complete", () => {
