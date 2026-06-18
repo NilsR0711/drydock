@@ -1,8 +1,10 @@
 process.env.DRYDOCK_DB = ":memory:";
 
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type DB, getDb } from "@/lib/db/client";
 import { issues, jobEvents, jobs, repos, settings } from "@/lib/db/schema";
@@ -100,6 +102,40 @@ describe("MCP tool registry", () => {
       const result = (await run("add_repo", { path: dir, name: "proj" }, db)) as { id: number };
       expect(result.id).toBeGreaterThan(0);
       expect(db.select().from(repos).all()).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("add_repo detects the clone's default branch when none is given (issue #210)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "drydock-mcp-branch-"));
+    // A real repo whose HEAD is on `master`, the exact case that used to fail
+    // the first job with "invalid ref: main".
+    execFileSync("git", ["init", "-q", dir]);
+    execFileSync("git", ["-C", dir, "symbolic-ref", "HEAD", "refs/heads/master"]);
+    execFileSync("git", ["-C", dir, "config", "user.email", "t@example.com"]);
+    execFileSync("git", ["-C", dir, "config", "user.name", "Tester"]);
+    execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "init"]);
+    try {
+      const result = (await run("add_repo", { path: dir, name: "proj" }, db)) as { id: number };
+      const row = db.select().from(repos).where(eq(repos.id, result.id)).get();
+      expect(row?.defaultBranch).toBe("master");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("add_repo stores an explicitly provided default branch (issue #210)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "drydock-mcp-explicit-"));
+    mkdirSync(join(dir, ".git"));
+    try {
+      const result = (await run(
+        "add_repo",
+        { path: dir, name: "proj", defaultBranch: "trunk" },
+        db,
+      )) as { id: number };
+      const row = db.select().from(repos).where(eq(repos.id, result.id)).get();
+      expect(row?.defaultBranch).toBe("trunk");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

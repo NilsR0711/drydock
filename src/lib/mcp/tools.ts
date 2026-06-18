@@ -1,6 +1,7 @@
 import { type ZodRawShape, z } from "zod";
 import type { DB } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
+import { resolveDefaultBranch } from "@/lib/git/default-branch";
 import {
   applyIssueLabels,
   dequeueIssue,
@@ -138,7 +139,14 @@ export const tools: ToolDef[] = [
     name: "add_repo",
     description: "Register a new repository by local path and display name.",
     inputSchema: addRepoShape,
-    handler: (args, { db }) => addRepo(parseArgs(addRepoShape, args), db),
+    handler: async (args, { db }) => {
+      const parsed = parseArgs(addRepoShape, args);
+      // Detect the clone's real default branch when the host omitted it, so a
+      // repo on `master` does not fail its first job with "invalid ref: main"
+      // (issue #210).
+      const defaultBranch = await resolveDefaultBranch(parsed);
+      return addRepo({ ...parsed, defaultBranch }, db);
+    },
   },
   {
     name: "sync_repo_issues",
