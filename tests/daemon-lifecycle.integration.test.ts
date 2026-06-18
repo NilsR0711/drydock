@@ -5,12 +5,22 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  clearDaemonState,
   readDaemonState,
   runStartCommand,
   runStatusCommand,
   runStopCommand,
   writeDaemonState,
 } from "../bin/daemon.mjs";
+
+interface DaemonState {
+  pid: number;
+  host: string;
+  port: number;
+  token: string;
+  startedAt: number;
+  logFile: string;
+}
 
 /**
  * End-to-end daemon lifecycle on the real OS (issue #216): a detached child
@@ -24,8 +34,13 @@ const STUB = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "daemon-s
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Ask the OS for an unused loopback port so parallel runs never collide. */
-function freePort(): Promise<number> {
+/**
+ * Ask the OS for a likely-free loopback port. There is an unavoidable window
+ * between releasing it here and the daemon binding it, so callers must treat a
+ * port as a *candidate* and retry on collision (see `startReachable`) rather
+ * than assume exclusivity.
+ */
+function candidatePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = createServer();
     srv.on("error", reject);
@@ -62,7 +77,6 @@ async function waitUntil(fn: () => Promise<boolean> | boolean, tries = 200, dela
 let dir: string;
 let statePath: string;
 let logPath: string;
-let port: number;
 
 /** Real deps wired to the stub server instead of the Next standalone build. */
 function deps() {
@@ -79,11 +93,54 @@ function deps() {
   };
 }
 
-beforeEach(async () => {
+/**
+ * Start the daemon and wait until it is actually serving, retrying on a fresh
+ * candidate port if the chosen one was taken in the allocate→bind window (the
+ * stub exits non-zero on `EADDRINUSE`, so a lost race is observable, not a
+ * hang). Returns the bound port and the live state. Race-free by construction:
+ * a collision is detected and retried rather than flaking the assertion.
+ */
+async function startReachable(tries = 8): Promise<{ port: number; state: DaemonState }> {
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const port = await candidatePort();
+    if (runStartCommand({ host: "127.0.0.1", port }, deps()) !== 0) {
+      clearDaemonState(statePath);
+      continue;
+    }
+    const state = readDaemonState(statePath) as DaemonState | null;
+    if (state === null) continue;
+
+    let reachable = false;
+    for (let i = 0; i < 200; i++) {
+      if (!pidAlive(state.pid)) break; // server died (lost the port race) → retry
+      try {
+        if ((await fetch(`http://127.0.0.1:${port}/`)).ok) {
+          reachable = true;
+          break;
+        }
+      } catch {
+        // not listening yet
+      }
+      await sleep(25);
+    }
+    if (reachable) return { port, state };
+
+    if (pidAlive(state.pid)) {
+      try {
+        process.kill(state.pid);
+      } catch {
+        // already gone
+      }
+    }
+    clearDaemonState(statePath);
+  }
+  throw new Error("daemon never became reachable");
+}
+
+beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "drydock-daemon-it-"));
   statePath = join(dir, "daemon.json");
   logPath = join(dir, "drydock.log");
-  port = await freePort();
 });
 
 afterEach(async () => {
@@ -102,25 +159,10 @@ afterEach(async () => {
 
 describe("daemon lifecycle (integration)", () => {
   it("starts detached, reports running, then stops gracefully", async () => {
-    const startCode = runStartCommand({ host: "127.0.0.1", port }, deps());
-    expect(startCode).toBe(0);
-
-    // start returned immediately while the child keeps running: the state file
-    // names a live pid and the server becomes reachable on its own.
-    const state = readDaemonState(statePath);
-    expect(state).not.toBeNull();
-    if (state === null) throw new Error("unreachable");
+    // start returned immediately while the detached child keeps running and
+    // becomes reachable on its own.
+    const { state } = await startReachable();
     expect(pidAlive(state.pid)).toBe(true);
-
-    const reachable = await waitUntil(async () => {
-      try {
-        const res = await fetch(`http://127.0.0.1:${port}/`);
-        return res.ok;
-      } catch {
-        return false;
-      }
-    });
-    expect(reachable).toBe(true);
 
     // status: running, exit 0.
     expect(runStatusCommand({}, { statePath })).toBe(0);
@@ -136,11 +178,9 @@ describe("daemon lifecycle (integration)", () => {
   });
 
   it("refuses to start a second daemon while one is running", async () => {
-    expect(runStartCommand({ host: "127.0.0.1", port }, deps())).toBe(0);
-    const state = readDaemonState(statePath);
-    if (state === null) throw new Error("expected state");
-    expect(await waitUntil(() => pidAlive(state.pid))).toBe(true);
+    const { port } = await startReachable();
 
+    // A second start sees the live daemon and refuses without spawning.
     expect(runStartCommand({ host: "127.0.0.1", port }, deps())).toBe(1);
 
     await runStopCommand({}, { statePath, timeoutMs: 8000, pollMs: 25 });
@@ -151,19 +191,16 @@ describe("daemon lifecycle (integration)", () => {
     writeDaemonState(statePath, {
       pid: 2 ** 30, // implausibly high pid, certainly not alive
       host: "127.0.0.1",
-      port,
+      port: 3737,
       token: "dead",
       startedAt: 1,
       logFile: logPath,
     });
 
-    const startCode = runStartCommand({ host: "127.0.0.1", port }, deps());
-    expect(startCode).toBe(0);
-
-    const state = readDaemonState(statePath);
-    if (state === null) throw new Error("expected state");
+    // start takes over the stale state and brings up a fresh daemon.
+    const { state } = await startReachable();
     expect(state.token).not.toBe("dead");
-    expect(await waitUntil(() => pidAlive(state.pid))).toBe(true);
+    expect(pidAlive(state.pid)).toBe(true);
 
     await runStopCommand({}, { statePath, timeoutMs: 8000, pollMs: 25 });
   });

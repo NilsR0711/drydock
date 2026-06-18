@@ -17,7 +17,14 @@ const token = process.env.DRYDOCK_CONTROL_TOKEN;
 
 const server = createServer((req, res) => {
   if (req.method === "POST" && req.url === "/api/control/shutdown") {
-    if (token && req.headers["x-drydock-control-token"] === token) {
+    // Mirror the real endpoint's contract (src/lib/orchestrator/control.ts):
+    // 404 when no token is configured (endpoint disabled), 403 on mismatch,
+    // 202 then drain on an exact match.
+    if (!token) {
+      res.writeHead(404).end("not found");
+      return;
+    }
+    if (req.headers["x-drydock-control-token"] === token) {
       res.writeHead(202).end("draining");
       // Exit after the response flushes, like the real graceful shutdown.
       setTimeout(() => process.exit(0), 10).unref();
@@ -27,6 +34,13 @@ const server = createServer((req, res) => {
     return;
   }
   res.writeHead(200).end("alive");
+});
+
+// Exit if the port is already taken so the test fails fast and visibly instead
+// of hanging on an unreachable server.
+server.on("error", (err) => {
+  console.error(`daemon-stub: ${err.message}`);
+  process.exit(1);
 });
 
 server.listen(port, host);
