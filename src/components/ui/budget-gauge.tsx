@@ -1,4 +1,3 @@
-import { cn } from "@/lib/utils";
 import { Badge } from "./badge";
 import { toneVar } from "./chart-utils";
 
@@ -117,10 +116,8 @@ export function BudgetMeter({ value, limit }: BudgetMeterProps) {
           </span>
         </span>
         <span
-          className={cn(
-            "text-xs font-medium",
-            unlimited ? "text-muted-foreground" : `text-${tone}`,
-          )}
+          className="text-xs font-medium"
+          style={{ color: unlimited ? "hsl(var(--muted-foreground))" : toneVar(tone) }}
         >
           {unlimited ? "Unlimited" : `${Math.round(ratio * 100)}%`}
         </span>
