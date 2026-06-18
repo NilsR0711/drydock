@@ -124,6 +124,32 @@ describe("runJob — agent-authored follow-up issues (issue #261)", () => {
     expect(captured.pr?.body).toContain("Closes #3");
   });
 
+  it("consumes FOLLOWUPS.md before the questions handoff commit, without filing", async () => {
+    // Both files present: the questions path commits partial work and returns
+    // early, so FOLLOWUPS.md must be read+removed before that commit (it must
+    // not leak into the preserved branch). The parked run files no issues.
+    const consumeFollowups = vi.fn((): FollowupIssue[] => [
+      { title: "feat: out of scope", body: "later" },
+    ]);
+    const { deps } = baseDeps({
+      consumeFollowups,
+      consumeQuestions: vi.fn(() => "Need a human decision before continuing."),
+      commentIssue: vi.fn(async () => {}),
+      markNeedsHuman: vi.fn(async () => {}),
+    });
+    const job = createJob({ repoId, issueNumber: 8 }, db);
+
+    const final = await runJob(job.id, deps as never);
+
+    // FOLLOWUPS.md consumed (and thus removed) on the parked path.
+    expect(consumeFollowups).toHaveBeenCalledWith("/wt");
+    // Parked for a human: no issues filed, no PR opened.
+    expect(deps.createIssue).not.toHaveBeenCalled();
+    expect(deps.createPr).not.toHaveBeenCalled();
+    expect(db.select().from(followupIssues).all()).toHaveLength(0);
+    expect(final.status).toBe("needs_human");
+  });
+
   it("still opens the PR when filing a follow-up fails (best-effort)", async () => {
     const consumeFollowups = vi.fn((): FollowupIssue[] => [
       { title: "feat: deferred work", body: "context" },

@@ -207,13 +207,25 @@ async function fileFollowups(
       numbers.push(existing);
       continue;
     }
+    // Keep forge filing and DB persistence in separate failure domains: once a
+    // real issue exists it must always be linked from the PR and recorded for
+    // dedupe, so a DB hiccup cannot silently lose an already-filed issue.
+    let ghIssueNumber: number;
     try {
-      const ghIssueNumber = await createIssue(title, body);
-      db.insert(followupIssues).values({ jobId, ghIssueNumber, title }).run();
-      filed.set(title, ghIssueNumber);
-      numbers.push(ghIssueNumber);
+      ghIssueNumber = await createIssue(title, body);
     } catch (err) {
       logError(`[run-job] follow-up issue filing failed for job ${jobId}: ${title}`, err);
+      continue;
+    }
+    numbers.push(ghIssueNumber);
+    filed.set(title, ghIssueNumber);
+    try {
+      db.insert(followupIssues).values({ jobId, ghIssueNumber, title }).run();
+    } catch (err) {
+      logError(
+        `[run-job] follow-up issue recording failed for job ${jobId}: #${ghIssueNumber}`,
+        err,
+      );
     }
   }
   return numbers;
@@ -819,6 +831,13 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // work it committed by pushing the branch, post the questions as an issue
     // comment, apply the needs-human label, and park the job in needs_human.
     // Consuming the file removes it so the scratch never lands in the branch.
+    //
+    // Agent-deferred follow-ups (issue #261): consume `.drydock/FOLLOWUPS.md`
+    // here too, before any commit path — the questions handoff below commits and
+    // returns early, so reading+removing it now keeps the scratch out of that
+    // partial-work commit. The parsed entries are only filed on the PR path; the
+    // questions path discards them (the parked run can re-emit them on resume).
+    const followups = consumeFollowups(wt.path);
     const questions = consumeQuestions(wt.path);
     if (questions) {
       if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
@@ -869,10 +888,6 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // working tree before `git add -A` stages it. Absent/unusable falls back to
     // the issue-based defaults below.
     const prMeta = consumePrMetadata(wt.path);
-    // Agent-deferred follow-ups (issue #261): read+remove `.drydock/FOLLOWUPS.md`
-    // here, alongside `.drydock/PR.md`, so the scratch is gone before `git add
-    // -A` stages it. The issues are filed only after the commit/push succeeds.
-    const followups = consumeFollowups(wt.path);
     const commitMessage = prMeta?.title ?? `Fix #${job.issueNumber}`;
     try {
       await worktrees.commitAndPush(wt, commitMessage);
