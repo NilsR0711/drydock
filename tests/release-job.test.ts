@@ -125,6 +125,22 @@ describe("runReleaseJob (issue #256)", () => {
     expect(notify).toHaveBeenCalledWith("release_published", expect.stringContaining("v1.2.0"));
   });
 
+  it("settles the run as errored when the job is aborted mid-session", async () => {
+    const job = releaseJobWithRun();
+    const deps = baseDeps({
+      runSession: vi.fn(async (j: Job) => {
+        // Simulate an out-of-band abort landing while the session ran.
+        db.update(jobs).set({ status: "aborted" }).where(eq(jobs.id, j.id)).run();
+        return { exitCode: 0, costUsd: 0, inputTokens: 0, outputTokens: 0 };
+      }),
+    });
+    const result = await runReleaseJob(job.id, deps as never);
+    expect(result.status).toBe("aborted");
+    // The run must not linger in `evaluating` (it would block the next release).
+    expect(findReleaseRunByJob(job.id, db)?.status).toBe("error");
+    expect(deps.worktrees.remove).toHaveBeenCalled();
+  });
+
   it("removes the worktree even when the session throws", async () => {
     const job = releaseJobWithRun();
     const deps = baseDeps({

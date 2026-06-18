@@ -138,11 +138,17 @@ export async function runReleaseJob(
 
     const session = await runSession(getJob(job.id, db) as Job, prompt, wt.path, true);
 
-    // An out-of-band abort (abort action, emergency stop) wins: never settle a
-    // job that was killed mid-session. Its run is left in `evaluating` so a
-    // requeue can re-run cleanly.
+    // An out-of-band kill (abort action, emergency stop, graceful shutdown) wins:
+    // never settle a job that was killed mid-session. A terminal `aborted` also
+    // settles the run as errored so it does not linger in `evaluating` and block
+    // the next release; `interrupted` is left in `evaluating` because the driver
+    // requeues it to re-run cleanly.
     const after = getJob(job.id, db) as Job;
-    if (after.status === "aborted" || after.status === "interrupted") return after;
+    if (after.status === "aborted") {
+      failRun("release aborted");
+      return after;
+    }
+    if (after.status === "interrupted") return after;
 
     // Map every failure to needs_human with a clear reason. A provider limit is
     // deliberately NOT auto-waited here: re-running a partly-done release
