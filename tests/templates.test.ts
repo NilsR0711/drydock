@@ -192,6 +192,90 @@ describe("default template offers the follow-up channel (issue #261)", () => {
   });
 });
 
+describe("best-in-class default prompts (issue #255)", () => {
+  describe("read repo context first", () => {
+    it("the main template tells the agent to read CLAUDE.md/AGENTS.md and match existing patterns", () => {
+      const t = DEFAULT_TEMPLATES.default;
+      expect(t).toMatch(/CLAUDE\.md/);
+      expect(t).toMatch(/AGENTS\.md/);
+      // It should steer the agent to follow the surrounding code's conventions.
+      expect(t).toMatch(/convention|existing pattern|surrounding (code|style)/i);
+    });
+
+    it("the limit-resume template also tells the agent to follow the repo's conventions", () => {
+      expect(DEFAULT_TEMPLATES["limit-resume"]).toMatch(
+        /convention|existing pattern|surrounding (code|style)/i,
+      );
+    });
+  });
+
+  describe("test-driven workflow", () => {
+    it("the main template instructs a failing-test-first, then green, then refactor loop", () => {
+      const t = DEFAULT_TEMPLATES.default;
+      expect(t).toMatch(/failing test/i);
+      expect(t).toMatch(/refactor/i);
+      // Bugs should be reproduced with a test before fixing.
+      expect(t).toMatch(/reproduce/i);
+    });
+
+    it("the limit-resume template keeps the test-first discipline", () => {
+      expect(DEFAULT_TEMPLATES["limit-resume"]).toMatch(/test/i);
+    });
+  });
+
+  describe("docs-aware", () => {
+    it("the main template tells the agent to update relevant docs when behaviour changes", () => {
+      const t = DEFAULT_TEMPLATES.default;
+      expect(t).toMatch(/doc/i);
+      // Only when there is something to update — not gratuitous doc churn.
+      expect(t).toMatch(/when there is something|when (the )?behaviour|where relevant/i);
+    });
+  });
+
+  describe("verify before finishing", () => {
+    for (const name of ["default", "limit-resume"] as const) {
+      it(`the ${name} template tells the agent to run tests, typecheck, lint, and build before finishing`, () => {
+        const t = DEFAULT_TEMPLATES[name];
+        expect(t).toMatch(/test/i);
+        expect(t).toMatch(/typecheck|type check/i);
+        expect(t).toMatch(/lint/i);
+        expect(t).toMatch(/build/i);
+        expect(t).toMatch(/verif/i);
+      });
+    }
+
+    it("the main template forbids finishing on a red signal", () => {
+      expect(DEFAULT_TEMPLATES.default).toMatch(/do not finish|never finish|not finish/i);
+    });
+  });
+
+  describe("safety", () => {
+    it("the main template forbids weakening auth, security, or tests to make something pass", () => {
+      const t = DEFAULT_TEMPLATES.default;
+      expect(t).toMatch(/weaken|disable|delete/i);
+      expect(t).toMatch(/security/i);
+      expect(t).toMatch(/minimal/i);
+      expect(t).toMatch(/reversible/i);
+    });
+  });
+
+  describe("ci-fix is no longer a thin one-liner", () => {
+    it("the ci-fix template forbids weakening or deleting tests to make CI pass", () => {
+      const t = DEFAULT_TEMPLATES[TEMPLATE_NAMES.ciFix];
+      expect(t).toMatch(/do not (delete|skip|weaken|disable)/i);
+      expect(t).toContain("$CI_LOG");
+    });
+  });
+
+  describe("plan template is convention- and verification-aware", () => {
+    it("the plan template tells the agent to account for tests and the repo's conventions", () => {
+      const t = DEFAULT_TEMPLATES.plan;
+      expect(t).toMatch(/test/i);
+      expect(t).toMatch(/convention|CLAUDE\.md|AGENTS\.md|existing pattern/i);
+    });
+  });
+});
+
 describe("resolveTemplateContent", () => {
   it("falls back to the code default when no row exists", () => {
     expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.main, db)).toBe(DEFAULT_TEMPLATES.default);
