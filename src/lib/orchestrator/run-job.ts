@@ -32,6 +32,7 @@ import {
   spawnAgentSession,
 } from "./agent-session";
 import { ciBabysitter, type ResumeOutcome, resumeFailureReason } from "./ci-babysitter";
+import { adoptWorktreeMemory } from "./claude-mem-adopt";
 import {
   consumeFollowups as defaultConsumeFollowups,
   type FollowupIssue,
@@ -149,6 +150,14 @@ export interface RunJobDeps {
    * a failure here never alters the job's settled outcome.
    */
   announceNeedsHuman?: (job: Job) => Promise<void>;
+  /**
+   * Trigger claude-mem worktree adoption before the worktree is removed (issue
+   * #274), consolidating the job's per-worktree memory into the parent project.
+   * Only invoked for repos that opted in via `adoptClaudeMem`. Injectable for
+   * tests; defaults to {@link adoptWorktreeMemory}. Best-effort — a failure here
+   * never blocks worktree cleanup or alters the job's settled outcome.
+   */
+  adoptClaudeMem?: (input: { branch: string; cwd: string }) => Promise<void>;
 }
 
 /** Keeps an unexpectedly verbose plan from flooding the work prompt. */
@@ -463,6 +472,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   const consumeFollowups = deps.consumeFollowups ?? defaultConsumeFollowups;
   const markNeedsHuman =
     deps.markNeedsHuman ?? ((issueNumber: number) => markIssueNeedsHuman(repo.id, issueNumber, db));
+  // claude-mem worktree adoption (issue #274): consolidate the job's per-worktree
+  // memory into the parent project before the worktree is removed.
+  const adoptClaudeMem = deps.adoptClaudeMem ?? adoptWorktreeMemory;
   // Resume a job's stored session on its own model and turn budget — the main
   // work resuming with a continuation prompt, not a cheap CI fix. Shared by the
   // limit-resume (issue #166) and human-guided resume (issue #257) paths.
@@ -1089,6 +1101,17 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // too — it is reclaimed on resume (prepare re-creates it) or once the job
     // reaches a terminal state.
     if (wt && !preserveWorktree) {
+      // Consolidate this job's per-worktree claude-mem memory into the parent
+      // project while the worktree still exists (issue #274). Opt-in and
+      // strictly best-effort: any failure is logged and must never block the
+      // cleanup below, same discipline as the other best-effort steps here.
+      if (repo.adoptClaudeMem) {
+        try {
+          await adoptClaudeMem({ branch: wt.branch, cwd: wt.path });
+        } catch (adoptErr) {
+          logError(`[run-job] claude-mem adoption failed for job ${job.id}`, adoptErr);
+        }
+      }
       try {
         await worktrees.remove(wt, repo.path);
       } catch (cleanupErr) {
