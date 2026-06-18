@@ -150,7 +150,11 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
           value={`$${todayUsd.toFixed(2)}`}
           tone="primary"
           active
-          sub={`of $${ws.repo.dailyCostLimitUsd} limit`}
+          sub={
+            ws.repo.dailyCostLimitUsd > 0
+              ? `of $${ws.repo.dailyCostLimitUsd} limit`
+              : "no daily limit"
+          }
         />
       </div>
 

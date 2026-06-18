@@ -93,8 +93,9 @@ export function RepoSettingsBar({
   }
 
   // Guard the money field like the sibling handlers below: clearing the input
-  // while retyping must not persist — Number("") is 0, and a $0 daily cap
-  // silently blocks every new job for the repo.
+  // while retyping must not persist — Number("") is 0, which would flip the repo
+  // to an unlimited daily budget (issue #234) on an empty field rather than on
+  // an intentional 0. A typed 0 persists and means "off / unlimited".
   function changeLimit(value: string) {
     setLimit(value);
     const limitUsd = Number(value);
@@ -197,7 +198,7 @@ export function RepoSettingsBar({
             label={
               <LabelWithHelp
                 text="Daily limit ($)"
-                help="Hard cap on agent spend per day for this repo. New jobs wait once the cap is hit."
+                help="Hard cap on agent spend per day for this repo. New jobs wait once the cap is hit. 0 = off (unlimited)."
               />
             }
             htmlFor="repo-daily-limit"

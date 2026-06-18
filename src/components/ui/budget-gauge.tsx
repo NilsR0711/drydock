@@ -21,6 +21,9 @@ export function budgetRatio(value: number, limit: number): number {
 /** 270° radial spend gauge: primary → warning → destructive as the limit nears. */
 export function BudgetGauge({ value, limit, size = 132, label = "Spend today" }: BudgetGaugeProps) {
   const ratio = budgetRatio(value, limit);
+  // A non-positive limit means the daily budget is off (issue #234): the gauge
+  // shows spend with an explicit "Unlimited" caption instead of "of $0 limit".
+  const unlimited = limit <= 0;
   const over = limit > 0 && value >= limit;
   const tone = over || ratio >= 0.95 ? "destructive" : ratio >= 0.8 ? "warning" : "primary";
   const color = toneVar(tone);
@@ -39,7 +42,11 @@ export function BudgetGauge({ value, limit, size = 132, label = "Spend today" }:
           viewBox={`0 0 ${size} ${size}`}
           style={{ transform: "rotate(135deg)" }}
           role="img"
-          aria-label={`${label}: $${value.toFixed(2)} of $${limit.toFixed(0)} limit`}
+          aria-label={
+            unlimited
+              ? `${label}: $${value.toFixed(2)}, no daily limit`
+              : `${label}: $${value.toFixed(2)} of $${limit.toFixed(0)} limit`
+          }
         >
           <circle
             cx={cx}
@@ -67,7 +74,7 @@ export function BudgetGauge({ value, limit, size = 132, label = "Spend today" }:
             ${value.toFixed(2)}
           </span>
           <span className="mt-1 text-xs text-muted-foreground tnum">
-            of ${limit.toFixed(0)} limit
+            {unlimited ? "Unlimited" : `of $${limit.toFixed(0)} limit`}
           </span>
         </div>
       </div>
@@ -95,6 +102,9 @@ export interface BudgetMeterProps {
 /** Compact linear budget meter for the per-repo cost panel. */
 export function BudgetMeter({ value, limit }: BudgetMeterProps) {
   const ratio = budgetRatio(value, limit);
+  // 0 = off / unlimited (issue #234): show spend with an explicit caption
+  // rather than a "/ $0.00" ceiling and a meaningless 0% / em-dash.
+  const unlimited = limit <= 0;
   const over = limit > 0 && value >= limit;
   const tone = over || ratio >= 0.95 ? "destructive" : ratio >= 0.8 ? "warning" : "primary";
   return (
@@ -102,10 +112,17 @@ export function BudgetMeter({ value, limit }: BudgetMeterProps) {
       <div className="flex items-baseline justify-between">
         <span className="tnum text-sm font-semibold">
           ${value.toFixed(2)}{" "}
-          <span className="font-normal text-muted-foreground">/ ${limit.toFixed(2)}</span>
+          <span className="font-normal text-muted-foreground">
+            {unlimited ? "spent" : `/ $${limit.toFixed(2)}`}
+          </span>
         </span>
-        <span className={cn("text-xs font-medium", `text-${tone}`)}>
-          {limit > 0 ? `${Math.round(ratio * 100)}%` : "—"}
+        <span
+          className={cn(
+            "text-xs font-medium",
+            unlimited ? "text-muted-foreground" : `text-${tone}`,
+          )}
+        >
+          {unlimited ? "Unlimited" : `${Math.round(ratio * 100)}%`}
         </span>
       </div>
       <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
