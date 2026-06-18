@@ -309,6 +309,9 @@ describe("WorktreeManager", () => {
       ["add", "-A"],
       ["status", "--porcelain"],
       ["commit", "-m"],
+      // Same attribution scrub as commitAndPush (issue #248): the range is
+      // scanned, but this mock reports an empty range so it stops at rev-list.
+      ["rev-list", "--reverse"],
       ["push", "-u"],
     ]);
     expect(calls.every((c) => c.cwd === wt.path)).toBe(true);
@@ -328,6 +331,9 @@ describe("WorktreeManager", () => {
       ["add", "-A"],
       ["status", "--porcelain"],
       ["rev-list", "--count"],
+      // Attribution scan over the agent's commits (issue #248); clean here.
+      ["rev-list", "--reverse"],
+      ["log", "-1"],
       ["push", "-u"],
     ]);
     expect(calls.some((c) => c.args[0] === "commit")).toBe(false);
