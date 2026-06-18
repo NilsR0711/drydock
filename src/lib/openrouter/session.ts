@@ -171,6 +171,17 @@ export async function runOpenRouterJobSession(
     deadlineTimer.unref?.();
   }
 
+  // Additive runs (resumes, side sessions) persist on top of the job's prior
+  // usage, so the streamed metric snapshot must include it too or the UI cards
+  // would regress to this invocation's totals mid-run (issue #242).
+  const prior =
+    deps.sideSession || deps.additive
+      ? (db.select().from(jobs).where(eq(jobs.id, job.id)).get() ?? null)
+      : null;
+  const priorInputTokens = prior?.totalInputTokens ?? 0;
+  const priorOutputTokens = prior?.totalOutputTokens ?? 0;
+  const priorCostUsd = prior?.costUsd ?? 0;
+
   let costUsd = 0;
   let inputTokens = 0;
   let outputTokens = 0;
@@ -244,10 +255,16 @@ export async function runOpenRouterJobSession(
         chunks.push({ kind: "tool_use", name: call.name, id: call.id, input });
       }
       if (chunks.length > 0) {
-        // Running usage so the job detail metric cards tick live (issue #242).
+        // Running cumulative usage so the job detail metric cards tick live
+        // without regressing for additive/side sessions (issue #242).
         broker.publish(job.id, {
           type: "assistant",
-          payload: { chunks, costUsd, inputTokens, outputTokens },
+          payload: {
+            chunks,
+            costUsd: priorCostUsd + costUsd,
+            inputTokens: priorInputTokens + inputTokens,
+            outputTokens: priorOutputTokens + outputTokens,
+          },
         });
       }
 

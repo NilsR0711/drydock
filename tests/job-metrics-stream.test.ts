@@ -1,7 +1,9 @@
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { codexProvider } from "@/lib/agents/codex";
 import type { AgentProvider } from "@/lib/agents/types";
 import { createDb, type DB } from "@/lib/db/client";
+import { jobs } from "@/lib/db/schema";
 import type { StreamCallbacks, StreamHandle, StreamRunner } from "@/lib/exec/stream-runner";
 import { spawnAgentSession } from "@/lib/orchestrator/agent-session";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
@@ -69,5 +71,34 @@ describe("live job metrics stream (issue #242)", () => {
     expect(assistant?.payload.outputTokens).toBe(3_400);
     // 3_400 output tokens × $0.001 = $3.40 running estimate (no result event yet).
     expect(assistant?.payload.costUsd).toBeCloseTo(3.4, 5);
+  });
+
+  it("streams cumulative totals for a side session so the cards never regress", async () => {
+    const job = createJob({ repoId, issueNumber: 243, agent: "codex" }, db);
+    // Prior persisted usage from the job's earlier session(s).
+    db.update(jobs)
+      .set({ totalInputTokens: 50_000, totalOutputTokens: 1_000, costUsd: 0.5 })
+      .where(eq(jobs.id, job.id))
+      .run();
+
+    const broker = new LogBroker(db);
+    await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker,
+      provider: pricedProvider,
+      runner: staticRunner(assistantUsage(120_000, 3_400)),
+      sideSession: true,
+    });
+
+    const assistant = broker
+      .replay(job.id)
+      .map((e) => ({ type: e.type, payload: JSON.parse(e.payload) as MetricsPayload }))
+      .find((e) => e.type === "assistant");
+
+    // Prior + this invocation: 50_000 + 120_000 in, 1_000 + 3_400 out,
+    // $0.50 + ($3.40 estimate) = $3.90 — strictly above the persisted baseline.
+    expect(assistant?.payload.inputTokens).toBe(170_000);
+    expect(assistant?.payload.outputTokens).toBe(4_400);
+    expect(assistant?.payload.costUsd).toBeCloseTo(3.9, 5);
   });
 });
