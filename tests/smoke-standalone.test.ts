@@ -7,6 +7,7 @@ import {
   isFatalServerError,
   isMainModule,
   parseSmokeArgs,
+  waitUntilServed,
 } from "../scripts/smoke-standalone.mjs";
 
 // Guards the fix for issue #209: the Next file tracer dropped
@@ -109,5 +110,102 @@ describe("isMainModule", () => {
 
   it("is true when the entry resolves to this module", () => {
     expect(isMainModule(self, self)).toBe(true);
+  });
+});
+
+describe("waitUntilServed", () => {
+  // Drives time forward only when the runner sleeps, so timeout is deterministic.
+  const fakeClock = () => {
+    let t = 0;
+    return {
+      now: () => t,
+      sleep: async (ms: number) => {
+        t += ms;
+      },
+    };
+  };
+  const alive = { isAlive: () => true, hasCrashed: () => false, pollIntervalMs: 100 };
+
+  it("keeps polling past transient non-200 startup statuses until 200", async () => {
+    const { now, sleep } = fakeClock();
+    const statuses = [503, 503, 200];
+    let calls = 0;
+    const fetchImpl = async () => ({ status: statuses[calls++] ?? 200 });
+
+    const result = await waitUntilServed("http://x", {
+      ...alive,
+      readyTimeoutMs: 10_000,
+      now,
+      sleep,
+      fetchImpl,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(calls).toBe(3);
+  });
+
+  it("reports the last observed status when readiness never reaches 200", async () => {
+    const { now, sleep } = fakeClock();
+    const fetchImpl = async () => ({ status: 503 });
+
+    const result = await waitUntilServed("http://x", {
+      ...alive,
+      readyTimeoutMs: 500,
+      now,
+      sleep,
+      fetchImpl,
+    });
+
+    expect(result).toEqual({ ok: false, reason: "status 503" });
+  });
+
+  it("times out when the server never answers a single request", async () => {
+    const { now, sleep } = fakeClock();
+    const fetchImpl = async () => {
+      throw new Error("ECONNREFUSED");
+    };
+
+    const result = await waitUntilServed("http://x", {
+      ...alive,
+      readyTimeoutMs: 500,
+      now,
+      sleep,
+      fetchImpl,
+    });
+
+    expect(result).toEqual({ ok: false, reason: "timeout" });
+  });
+
+  it("fails fast on a boot crash without probing", async () => {
+    let probed = false;
+    const result = await waitUntilServed("http://x", {
+      isAlive: () => true,
+      hasCrashed: () => true,
+      pollIntervalMs: 100,
+      readyTimeoutMs: 10_000,
+      now: () => 0,
+      sleep: async () => {},
+      fetchImpl: async () => {
+        probed = true;
+        return { status: 200 };
+      },
+    });
+
+    expect(result).toEqual({ ok: false, reason: "crash" });
+    expect(probed).toBe(false);
+  });
+
+  it("fails when the server process exits before serving", async () => {
+    const result = await waitUntilServed("http://x", {
+      isAlive: () => false,
+      hasCrashed: () => false,
+      pollIntervalMs: 100,
+      readyTimeoutMs: 10_000,
+      now: () => 0,
+      sleep: async () => {},
+      fetchImpl: async () => ({ status: 200 }),
+    });
+
+    expect(result).toEqual({ ok: false, reason: "exited" });
   });
 });

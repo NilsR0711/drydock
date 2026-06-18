@@ -120,21 +120,46 @@ export function isMainModule(modulePath, entryPath) {
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Poll the URL until it answers with HTTP 200, the server crashes, or we time out. */
-async function waitUntilServed(url, { readyTimeoutMs, isAlive, hasCrashed }) {
-  const deadline = Date.now() + readyTimeoutMs;
-  while (Date.now() < deadline) {
+/**
+ * Poll the URL until it answers with HTTP 200, the server crashes, or we time
+ * out. A non-200 is treated as "not ready yet" and re-probed — the server can
+ * briefly answer with a transient status while warming up — so the runner never
+ * fails on a first flaky probe. On timeout it reports the last status seen (or
+ * "timeout" if the server never answered at all). The clock, sleep, and fetch
+ * are injectable so the polling contract can be unit-tested deterministically.
+ *
+ * @param {string} url
+ * @param {{ readyTimeoutMs: number, isAlive: () => boolean, hasCrashed: () => boolean,
+ *   pollIntervalMs?: number, fetchImpl?: (url: string) => Promise<{ status: number }>,
+ *   now?: () => number, sleep?: (ms: number) => Promise<void> }} opts
+ */
+export async function waitUntilServed(
+  url,
+  {
+    readyTimeoutMs,
+    isAlive,
+    hasCrashed,
+    pollIntervalMs = POLL_INTERVAL_MS,
+    fetchImpl = fetch,
+    now = () => Date.now(),
+    sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  },
+) {
+  const deadline = now() + readyTimeoutMs;
+  let lastStatusReason;
+  while (now() < deadline) {
     if (hasCrashed()) return { ok: false, reason: "crash" };
     if (!isAlive()) return { ok: false, reason: "exited" };
     try {
-      const res = await fetch(url);
+      const res = await fetchImpl(url);
       if (res.status === 200) return { ok: true };
-      return { ok: false, reason: `status ${res.status}` };
+      lastStatusReason = `status ${res.status}`;
     } catch {
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      // Server not accepting connections yet — keep waiting.
     }
+    await sleep(pollIntervalMs);
   }
-  return { ok: false, reason: "timeout" };
+  return { ok: false, reason: lastStatusReason ?? "timeout" };
 }
 
 async function main(argv) {
