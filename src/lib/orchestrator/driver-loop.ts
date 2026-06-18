@@ -113,6 +113,12 @@ export function defaultDecompose(
   return decomposeRepo(repo, forge, candidates, db, { generate });
 }
 
+/** Shared GitHub-label metadata for the repo's needs-human escalation label. */
+const NEEDS_HUMAN_LABEL_DEF = {
+  color: "d73a4a",
+  description: "Drydock needs a human before automating this issue",
+} as const;
+
 // A failed attempt is a job that ended parked for a human or aborted; merged
 // jobs are successes and don't count toward maxAttempts.
 const FAILED_ATTEMPT_STATES = ["needs_human", "aborted"] as const;
@@ -159,15 +165,39 @@ async function autoEligible(
   if (!authorAllowed(cfg, gh.authorAssociation)) return false;
   if (failedAttempts(db, repo.id, gh.number) >= cfg.maxAttempts) {
     if (!labelNames.includes(repo.needsHumanLabel)) {
-      await forge.ensureLabel(repo.needsHumanLabel, {
-        color: "d73a4a",
-        description: "Drydock gave up after repeated failures; needs a human",
-      });
+      await forge.ensureLabel(repo.needsHumanLabel, NEEDS_HUMAN_LABEL_DEF);
       await forge.addLabels(gh.number, [repo.needsHumanLabel]);
     }
     return false;
   }
   return true;
+}
+
+/**
+ * Surface an auto-eligible issue that the review heuristic downgraded to
+ * `needs_review` (issue #240). That decision used to be a dead end — computed
+ * but never routed — so the issue was silently dropped on every tick with no
+ * label, comment, or UI feedback. Route it to the repo's needs-human label with
+ * the reasons as a comment, mirroring the maxAttempts escalation in
+ * {@link autoEligible}. Idempotent: once the label is present (re-read from the
+ * forge on the next tick) the routing is skipped, so the comment fires once.
+ */
+async function routeNeedsReview(
+  repo: Repo,
+  forge: ForgeClient,
+  gh: GhIssue,
+  labelNames: string[],
+  reasons: string[],
+): Promise<void> {
+  if (labelNames.includes(repo.needsHumanLabel)) return;
+  await forge.ensureLabel(repo.needsHumanLabel, NEEDS_HUMAN_LABEL_DEF);
+  await forge.addLabels(gh.number, [repo.needsHumanLabel]);
+  const why = reasons.length > 0 ? reasons.join("; ") : "flagged for human review";
+  await forge.commentIssue(
+    gh.number,
+    `⏸️ Held for human review before automated work — ${why}. ` +
+      `Remove the \`${repo.needsHumanLabel}\` label or use "Start now" to proceed.`,
+  );
 }
 
 // Every non-terminal state counts as "open" for issue-level dedupe, including
@@ -320,7 +350,20 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
             : false;
           if (!manual && !auto) continue; // backlog issues aren't scheduled
           const verdict = evaluateIssue({ number: gh.number, title: gh.title, labels: labelNames });
-          if (verdict.decision !== "approved") continue;
+          // A blocking label is an explicit, already-visible signal — skip on
+          // either path (the label itself is the feedback).
+          if (verdict.decision === "blocked") continue;
+          // The `needs_review` heuristic gates the AUTO path only. A human who
+          // manually queued an issue has expressed explicit intent — the same
+          // intent the "Start now" path acts on, which bypasses evaluateIssue
+          // entirely — so a manual queue overrides the heuristic (issue #240).
+          // On the auto path the verdict must be made observable rather than
+          // silently dropped: route it to needs-human with the reasons, then
+          // skip this tick.
+          if (verdict.decision === "needs_review" && !manual) {
+            await routeNeedsReview(repo, forge, gh, labelNames, verdict.reasons);
+            continue;
+          }
           if (hasOpenJob(db, repo.id, gh.number)) continue;
           if (auto && gh.author && cfg.priorityAuthors.includes(gh.author)) {
             boostPriority(db, repo.id, gh.number);
