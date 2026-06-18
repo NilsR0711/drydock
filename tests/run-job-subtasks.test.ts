@@ -46,6 +46,7 @@ function deps(over: Record<string, unknown> = {}) {
       return getJob(job.id, db) as Job;
     }),
     notify: vi.fn(async () => {}),
+    announceNeedsHuman: vi.fn(async () => {}),
     ...over,
   };
 }

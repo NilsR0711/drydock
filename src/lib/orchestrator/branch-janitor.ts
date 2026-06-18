@@ -6,6 +6,7 @@ import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient } from "@/lib/forge/types";
 import { logError } from "@/lib/log/logger";
 import { getJob, listJobs, recordEvent, transitionJob } from "./jobs";
+import { markIssueNeedsHuman } from "./needs-human";
 import { InvalidTransitionError } from "./state-machine";
 
 /**
@@ -158,6 +159,10 @@ async function escalateConflict(
     // job timeline — same pattern as the CI babysitter and limit-resume paths.
     recordEvent(job.id, "status", { reason: "merge_conflict", prNumber }, db);
     transitionJob(job.id, "needs_human", { errorMessage: reason }, db);
+    // Make the park visible on the issue (issue #250): needs-human label +
+    // drop the queue label. The richer rebase comment above stays as the
+    // reason, so this only manages labels. Best-effort and never throws.
+    await markIssueNeedsHuman(repo, job.issueNumber, forge, db);
   } catch (err) {
     // A racing transition between the freshness check and ours is benign.
     if (!(err instanceof InvalidTransitionError)) throw err;

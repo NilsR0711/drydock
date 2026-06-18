@@ -33,6 +33,7 @@ import {
 } from "./agent-session";
 import { ciBabysitter, type ResumeOutcome, resumeFailureReason } from "./ci-babysitter";
 import { getJob, recordEvent, transitionJob } from "./jobs";
+import { announceNeedsHuman as defaultAnnounceNeedsHuman } from "./needs-human";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
 import { runPrAuditPass } from "./pr-audit-driver";
 import { consumePrMetadata as defaultConsumePrMetadata, type PrMetadata } from "./pr-metadata";
@@ -96,6 +97,13 @@ export interface RunJobDeps {
    * prepareSandboxSession. Only invoked for CLI agents on opted-in repos.
    */
   prepareSandbox?: (input: PrepareSandboxInput) => Promise<PrepareSandboxResult>;
+  /**
+   * Make a parked job visible on its forge issue (issue #250): set the
+   * needs-human label, drop the queue label, and comment the reason.
+   * Injectable for tests; defaults to the forge-backed announcer. Best-effort —
+   * a failure here never alters the job's settled outcome.
+   */
+  announceNeedsHuman?: (job: Job) => Promise<void>;
 }
 
 /** Keeps an unexpectedly verbose plan from flooding the work prompt. */
@@ -216,6 +224,13 @@ export async function runJob(jobId: number, deps: RunJobDeps = {}): Promise<Job>
       `✅ Merged: ${result.repoId}#${result.issueNumber} (PR #${result.prNumber}).`,
     );
   } else if (result.status === "needs_human") {
+    // GitHub-side visibility for every needs_human outcome (issue #250),
+    // whether parked directly in runJobCore or escalated by the CI babysitter:
+    // both flow through this single return. Best-effort and self-contained, so
+    // a forge failure cannot turn a settled park into a thrown error.
+    const announce =
+      deps.announceNeedsHuman ?? ((job: Job) => defaultAnnounceNeedsHuman(job, { db }));
+    await announce(result);
     await send(
       "needs_human",
       `⚠️ Needs human: ${result.repoId}#${result.issueNumber} — ${result.errorMessage ?? "review required"}.`,

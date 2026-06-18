@@ -37,6 +37,9 @@ function janitorForge(over: Partial<ForgeClient> = {}): ForgeClient {
     prMergeState: vi.fn(async (): Promise<PrMergeState> => "clean"),
     updatePrBranch: vi.fn(async () => {}),
     commentIssue: vi.fn(async () => {}),
+    ensureLabel: vi.fn(async () => {}),
+    addLabels: vi.fn(async () => {}),
+    removeLabels: vi.fn(async () => {}),
     ...over,
   } as unknown as ForgeClient;
 }
@@ -182,6 +185,17 @@ describe("runBranchJanitorSweep — stale/conflicted PR refresh", () => {
     });
     await runBranchJanitorSweep({ db, forgeFor: () => forge });
     expect(getJob(job.id, db)?.status).toBe("needs_human");
+  });
+
+  it("sets the needs-human label and drops the queue label on a conflicted PR (issue #250)", async () => {
+    const repo = makeRepo();
+    openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    const forge = janitorForge({
+      prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
+    });
+    await runBranchJanitorSweep({ db, forgeFor: () => forge });
+    expect(forge.addLabels).toHaveBeenCalledWith(7, ["drydock:needs-human"]);
+    expect(forge.removeLabels).toHaveBeenCalledWith(7, ["drydock:queue"]);
   });
 
   it("leaves a clean PR untouched", async () => {
