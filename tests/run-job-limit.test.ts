@@ -61,6 +61,7 @@ function baseDeps(over: Record<string, unknown> = {}) {
     }),
     commentIssue: vi.fn(async () => {}),
     notify: vi.fn(async () => {}),
+    announceNeedsHuman: vi.fn(async () => {}),
     ...over,
   };
 }

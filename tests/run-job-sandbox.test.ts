@@ -35,6 +35,7 @@ function baseDeps(over: Record<string, unknown> = {}) {
       db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, job.id)).run();
       return getJob(job.id, db) as Job;
     }),
+    announceNeedsHuman: vi.fn(async () => {}),
     ...over,
   };
 }
