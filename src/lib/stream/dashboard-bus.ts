@@ -6,10 +6,25 @@
  * Kept separate from {@link LogBroker} because this carries no payload and
  * touches no storage — it is a pure fan-out, so calling it from the data layer
  * stays side-effect-free in tests (no listeners → no-op).
+ *
+ * The registry lives on `globalThis`, not in a module-local closure, because
+ * Next.js compiles Server Actions, Route Handlers, and instrumentation into
+ * separate bundle layers that each evaluate this module independently. A
+ * module-local Set would give the add-repo Server Action its own registry,
+ * disjoint from the one the dashboard SSE Route Handler subscribed to — so the
+ * emit would never reach the stream and the repo list/count would only refresh
+ * on a full reload (issue #232). A process-global Set is shared across every
+ * layer, matching how job-transition emits already reach the same stream.
  */
 type Listener = () => void;
 
-const listeners = new Set<Listener>();
+const GLOBAL_KEY = Symbol.for("drydock.dashboard-bus.listeners");
+
+type GlobalWithBus = typeof globalThis & { [GLOBAL_KEY]?: Set<Listener> };
+
+const globalWithBus = globalThis as GlobalWithBus;
+globalWithBus[GLOBAL_KEY] ??= new Set<Listener>();
+const listeners: Set<Listener> = globalWithBus[GLOBAL_KEY];
 
 /** Register a listener; returns an unsubscribe function. */
 export function onDashboardChange(listener: Listener): () => void {
