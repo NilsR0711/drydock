@@ -160,6 +160,12 @@ export const repos = sqliteTable("repos", {
     .default(false),
   sandboxCpus: text("sandbox_cpus"),
   sandboxMemory: text("sandbox_memory"),
+  // Opt-in claude-mem worktree adoption (issue #274, default off). When on, a
+  // settling job triggers claude-mem's `adopt` for its worktree right before
+  // Drydock removes it, consolidating the per-worktree memory into the parent
+  // project while the worktree still exists. Best-effort and depends on the
+  // external claude-mem plugin being installed, so it is off by default.
+  adoptClaudeMem: integer("adopt_claude_mem", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 
