@@ -345,9 +345,10 @@ pnpm mcp            # start the local stdio MCP server (see "MCP server")
 - **Tests never touch the network** — the `claude`/`gh`/`git` CLIs are injected as fakes.
 - **Architecture decisions** live in [`docs/adr/`](docs/adr) (index:
   [`docs/DECISIONS.md`](docs/DECISIONS.md)).
-- CI runs the test suite on ubuntu, macOS, and windows (so the cross-platform daemon
-  lifecycle is exercised on every target OS) across Node 20 & 22, with lint, typecheck, and
-  build on ubuntu; CodeQL scans the codebase; Dependabot keeps dependencies and actions current.
+- CI runs across an ubuntu/macOS/windows matrix so the cross-platform daemon lifecycle is
+  exercised on every target OS: ubuntu (Node 20 & 22) and macOS run the full suite, windows
+  runs the daemon lifecycle subset, with lint, typecheck, build, and the standalone smoke test
+  on ubuntu; CodeQL scans the codebase; Dependabot keeps dependencies and actions current.
 
 ## Operations
 

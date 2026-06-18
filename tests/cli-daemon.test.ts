@@ -60,21 +60,23 @@ afterEach(() => {
 });
 
 describe("resolveDaemonStatePath / resolveDaemonLogPath", () => {
+  // Build expectations with join() so the assertions hold under both POSIX and
+  // Windows path separators (these run on the cross-OS CI matrix, issue #216).
   it("default to files under ~/.drydock", () => {
     expect(resolveDaemonStatePath({ env: {}, home: "/home/jane" })).toBe(
-      "/home/jane/.drydock/daemon.json",
+      join("/home/jane", ".drydock", "daemon.json"),
     );
     expect(resolveDaemonLogPath({ env: {}, home: "/home/jane" })).toBe(
-      "/home/jane/.drydock/drydock.log",
+      join("/home/jane", ".drydock", "drydock.log"),
     );
   });
 
   it("honour DRYDOCK_DATA_DIR", () => {
     expect(resolveDaemonStatePath({ env: { DRYDOCK_DATA_DIR: "/data" }, home: "/home/jane" })).toBe(
-      "/data/daemon.json",
+      join("/data", "daemon.json"),
     );
     expect(resolveDaemonLogPath({ env: { DRYDOCK_DATA_DIR: "/data" }, home: "/home/jane" })).toBe(
-      "/data/drydock.log",
+      join("/data", "drydock.log"),
     );
   });
 });
