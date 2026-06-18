@@ -3,6 +3,7 @@
 import {
   Archive,
   Bell,
+  Container,
   Globe,
   OctagonAlert,
   PlugZap,
@@ -21,6 +22,7 @@ import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
@@ -347,6 +349,48 @@ export function SettingsForm({
               onChange={(e) => set("ghPath", e.target.value)}
               spellCheck={false}
             />
+          </Field>
+        </div>
+      </Card>
+
+      {/* Sandboxed execution (issue #182, ADR 033) */}
+      <Card pad="lg">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Container className="h-4 w-4" />
+          </span>
+          <div>
+            <h3 className="text-base font-semibold">Sandboxed execution</h3>
+            <p className="text-sm text-muted-foreground">
+              Defaults for repos that run the agent inside a container. Enable it per repo from the
+              repo's automation panel.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Default container image"
+            hint="Used when a sandboxed repo names no image and has no devcontainer.json. Must carry the agent CLI plus the repo's toolchain."
+          >
+            <Input
+              value={s.sandboxDefaultImage}
+              onChange={(e) => set("sandboxDefaultImage", e.target.value)}
+              spellCheck={false}
+              className="font-mono text-sm"
+            />
+          </Field>
+          <Field label="Container runtime" hint="“Auto” probes docker, then podman.">
+            <Select
+              value={s.containerRuntime}
+              onChange={(e) =>
+                set("containerRuntime", e.target.value as Settings["containerRuntime"])
+              }
+            >
+              <option value="auto">Auto-detect (docker → podman)</option>
+              <option value="docker">Docker</option>
+              <option value="podman">Podman</option>
+            </Select>
           </Field>
         </div>
       </Card>
