@@ -100,6 +100,8 @@ export function PromptEditor({
 
   const preview = renderTemplate(content, {
     ISSUE_NUM: 42,
+    ISSUE_TITLE: "Example issue title",
+    ISSUE_BODY: "Example issue body with the full context the agent needs.",
     BRANCH: "fix/issue-42",
     REPO_NAME: "acme",
     CI_LOG: "example CI failure output",
