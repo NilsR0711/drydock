@@ -33,6 +33,7 @@ const TEMPLATE_OPTIONS = [
   { value: TEMPLATE_NAMES.ciFix, label: "CI fix" },
   { value: TEMPLATE_NAMES.plan, label: "Plan" },
   { value: TEMPLATE_NAMES.limitResume, label: "Limit resume" },
+  { value: TEMPLATE_NAMES.humanResume, label: "Human resume" },
 ];
 
 function formatDate(unixSeconds: number) {

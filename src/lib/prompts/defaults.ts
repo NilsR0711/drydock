@@ -5,6 +5,9 @@ export const TEMPLATE_NAMES = {
   ciFix: "ci-fix",
   plan: "plan",
   limitResume: "limit-resume",
+  // Continuation prompt for a needs_human job an operator unblocked with typed
+  // guidance (issue #257); the human's instruction is injected via $INSTRUCTION.
+  humanResume: "human-resume",
   // The PR body structure, kept separate from the implement prompt so a repo can
   // reshape its PR descriptions without touching the rest of the prompt (issue
   // #252). Injected into the implement prompt via the $PR_FORMAT variable.
@@ -68,6 +71,27 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, string> = {
     "interrupted session are gone. Re-apply whatever is missing and finish implementing the issue.",
     "Keep the change focused. You may commit your work or leave it uncommitted — either is fine.",
     "Do not push or open a pull request yourself; Drydock commits, pushes, and opens the PR.",
+    "Before finishing, write `.drydock/PR.md`: first line a Conventional Commit subject (used as",
+    "the commit message and PR title), then a blank line, then a body in this format:",
+    "",
+    "$PR_FORMAT",
+    "",
+    "Drydock appends `Closes #$ISSUE_NUM` and removes the file — do not commit it.",
+  ].join("\n"),
+  // Continuation prompt for a session resumed with human guidance (issue #257):
+  // a needs_human job an operator unblocked by typing how to proceed. The
+  // conversation context survives via --resume and the prior commits are
+  // checked out on the same branch; the operator's instruction leads.
+  "human-resume": [
+    `Your previous session on issue #$ISSUE_NUM in "$REPO_NAME" was paused for a human to review.`,
+    `A human has looked at where you got stuck and given you this instruction:`,
+    "",
+    "$INSTRUCTION",
+    "",
+    `You are resuming on branch "$BRANCH" with your prior commits intact. Follow the instruction`,
+    "above to get unblocked and finish implementing the issue. Keep the change focused. You may",
+    "commit your work or leave it uncommitted — either is fine. Do not push or open a pull request",
+    "yourself; Drydock commits, pushes, and opens the PR.",
     "Before finishing, write `.drydock/PR.md`: first line a Conventional Commit subject (used as",
     "the commit message and PR title), then a blank line, then a body in this format:",
     "",
