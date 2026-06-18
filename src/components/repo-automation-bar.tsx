@@ -563,14 +563,30 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
                   <Input
                     value={sandboxCpus}
                     onChange={(e) => setSandboxCpus(e.target.value)}
-                    onBlur={() => persist({ sandboxCpus: sandboxCpus.trim() || null })}
+                    onBlur={() => {
+                      const v = sandboxCpus.trim();
+                      // Validate before persisting so a bad value surfaces here
+                      // rather than as an opaque container-start failure later.
+                      if (v && !/^\d+(\.\d+)?$/.test(v)) {
+                        error("Invalid CPU limit", "Use a positive number like 0.5, 1, or 2.");
+                        return;
+                      }
+                      persist({ sandboxCpus: v || null });
+                    }}
                     placeholder="cpus"
                     className="h-8 w-20 font-mono text-xs"
                   />
                   <Input
                     value={sandboxMemory}
                     onChange={(e) => setSandboxMemory(e.target.value)}
-                    onBlur={() => persist({ sandboxMemory: sandboxMemory.trim() || null })}
+                    onBlur={() => {
+                      const v = sandboxMemory.trim();
+                      if (v && !/^\d+(\.\d+)?\s*[bkmg]?$/i.test(v)) {
+                        error("Invalid memory limit", "Use a value like 512m, 2g, or 4096.");
+                        return;
+                      }
+                      persist({ sandboxMemory: v || null });
+                    }}
                     placeholder="memory"
                     className="h-8 w-24 font-mono text-xs"
                   />
