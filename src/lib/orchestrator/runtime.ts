@@ -3,6 +3,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
   writeSync,
@@ -188,14 +189,31 @@ export function acquireInstanceLock(): boolean {
  * Rewrite the lock's heartbeat timestamp, but only while this process is still
  * the recorded holder. Returns false (without touching the file) once another
  * instance has taken over, so a late heartbeat never clobbers the new owner.
+ *
+ * The new timestamp is staged in a temp file and swapped in with an atomic
+ * rename so a concurrent reader (acquire/health) never observes the lock
+ * mid-truncate and mistakes it for corrupt. Ownership is re-checked just before
+ * the swap to shrink the window in which a peer reclaimed an already-expired
+ * lock; any residue past that bound self-corrects within one more TTL.
  */
 export function refreshInstanceLock(): boolean {
   const path = lockPath();
   if (readLock(path).pid !== process.pid) return false;
+  const tmp = `${path}.${process.pid}.tmp`;
   try {
-    writeFileSync(path, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+    writeFileSync(tmp, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+    if (readLock(path).pid !== process.pid) {
+      unlinkSync(tmp);
+      return false;
+    }
+    renameSync(tmp, path);
     return true;
   } catch {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      // temp file never created or already gone
+    }
     return false;
   }
 }

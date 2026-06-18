@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,9 +12,11 @@ import {
 import { addRepo } from "@/lib/repos/service";
 
 // gracefulShutdown reads the default getDb() singleton, so point it at memory.
+let testHome: string;
 beforeEach(() => {
   process.env.DRYDOCK_DB = ":memory:";
-  process.env.DRYDOCK_HOME = mkdtempSync(join(tmpdir(), "ac-shutdown-"));
+  testHome = mkdtempSync(join(tmpdir(), "ac-shutdown-"));
+  process.env.DRYDOCK_HOME = testHome;
   vi.resetModules();
 });
 
@@ -113,4 +115,5 @@ afterEach(() => {
   delete process.env.DRYDOCK_DB;
   delete process.env.DRYDOCK_HOME;
   vi.resetModules();
+  rmSync(testHome, { recursive: true, force: true });
 });

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -26,6 +26,7 @@ beforeEach(() => {
 afterEach(() => {
   stopInstanceLockHeartbeat();
   delete process.env.DRYDOCK_HOME;
+  rmSync(home, { recursive: true, force: true });
 });
 
 const lockFile = () => join(home, "instance.lock");
@@ -132,6 +133,12 @@ describe("instance lock heartbeat", () => {
 
   it("refreshInstanceLock returns false when the lock file is gone", () => {
     expect(refreshInstanceLock()).toBe(false);
+  });
+
+  it("refreshInstanceLock leaves no temp file behind on the failure path", () => {
+    writeLockFile({ pid: process.ppid, ts: 1 });
+    expect(refreshInstanceLock()).toBe(false);
+    expect(existsSync(`${lockFile()}.${process.pid}.tmp`)).toBe(false);
   });
 
   it("startInstanceLockHeartbeat keeps the heartbeat fresh", async () => {
