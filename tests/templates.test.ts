@@ -226,7 +226,9 @@ describe("best-in-class default prompts (issue #255)", () => {
   describe("docs-aware", () => {
     it("the main template tells the agent to update relevant docs when behaviour changes", () => {
       const t = DEFAULT_TEMPLATES.default;
-      expect(t).toMatch(/doc/i);
+      // Target the explicit docs instruction — a bare /doc/i would also match
+      // unrelated substrings like ".drydock/...".
+      expect(t).toMatch(/update the docs|docs when (the )?behaviour|docs conventions/i);
       // Only when there is something to update — not gratuitous doc churn.
       expect(t).toMatch(/when there is something|when (the )?behaviour|where relevant/i);
     });
