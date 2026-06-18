@@ -99,18 +99,51 @@ describe("driveTick", () => {
     expect(started).toEqual([]);
   });
 
-  it("enqueues approved labelled issues and skips risky ones", async () => {
+  it("enqueues a manually queued approved issue", async () => {
     const started: number[] = [];
     const d = deps(started, {
       fetchIssues: vi.fn(async () => [
         { number: 1, title: "ok", labels: [{ name: "drydock:queue" }] },
-        { number: 2, title: "rm -rf /", labels: [{ name: "drydock:queue" }] },
       ]),
     });
     await driveTick(d as never);
     const seen = listJobsByStatus(["queued", "merged"], db);
     expect(seen.some((j) => j.issueNumber === 1)).toBe(true);
-    expect(seen.some((j) => j.issueNumber === 2)).toBe(false);
+  });
+
+  it("works a manually queued issue whose title matches a review pattern (issue #240)", async () => {
+    // A human who manually queues an issue has expressed explicit intent. The
+    // review heuristic must not silently drop it — the "Start now" path bypasses
+    // the gate entirely, so the manual-queue path has to be consistent.
+    const started: number[] = [];
+    const d = deps(started, {
+      fetchIssues: vi.fn(async () => [
+        {
+          number: 2,
+          title: "security(growth): make users.referral_code immutable",
+          labels: [{ name: "drydock:queue" }],
+        },
+        { number: 3, title: "rm -rf /tmp/cache", labels: [{ name: "drydock:queue" }] },
+      ]),
+    });
+    await driveTick(d as never);
+    const seen = listJobsByStatus(["queued", "merged"], db);
+    expect(seen.some((j) => j.issueNumber === 2)).toBe(true);
+    expect(seen.some((j) => j.issueNumber === 3)).toBe(true);
+  });
+
+  it("does not work a manually queued issue carrying a blocking label (issue #240)", async () => {
+    // Manual queue overrides the soft review heuristic but still honours a hard
+    // blocking label.
+    const started: number[] = [];
+    const d = deps(started, {
+      fetchIssues: vi.fn(async () => [
+        { number: 4, title: "ok", labels: [{ name: "drydock:queue" }, { name: "blocked" }] },
+      ]),
+    });
+    await driveTick(d as never);
+    const seen = listJobsByStatus(["queued", "merged"], db);
+    expect(seen.some((j) => j.issueNumber === 4)).toBe(false);
   });
 
   it("sequential repo starts only one in-flight job at a time", async () => {
@@ -319,6 +352,45 @@ describe("driveTick auto-processing", () => {
     );
     expect(forge.addLabels).toHaveBeenCalledWith(1, [r.needsHumanLabel]);
     expect(listJobsByStatus(["queued"], db).filter((j) => j.repoId === r.id)).toHaveLength(0);
+  });
+
+  it("routes an auto-eligible review-pattern issue to needs-human instead of silently dropping it (issue #240)", async () => {
+    const r = addRepo({ path: "/apr", name: "apr", autoProcessEnabled: true }, db);
+    const forge = fakeForge();
+    const issue = ghIssue({
+      number: 5,
+      title: "auth: rotate signing keys",
+      labels: [{ name: "ready" }],
+    });
+    await driveTick(
+      autoDeps([issue], {
+        fetchIssues: vi.fn(async () => [issue]),
+        forgeFor: () => forge,
+      }) as never,
+    );
+    expect(forge.addLabels).toHaveBeenCalledWith(5, [r.needsHumanLabel]);
+    expect(forge.commentIssue).toHaveBeenCalledWith(5, expect.stringContaining("review"));
+    expect(
+      listJobsByStatus(["queued", "working", "merged"], db).filter((j) => j.repoId === r.id),
+    ).toHaveLength(0);
+  });
+
+  it("does not re-label or re-comment when the needs-human label is already present (issue #240)", async () => {
+    const r = addRepo({ path: "/apr2", name: "apr2", autoProcessEnabled: true }, db);
+    const forge = fakeForge();
+    const issue = ghIssue({
+      number: 6,
+      title: "auth: rotate signing keys",
+      labels: [{ name: "ready" }, { name: r.needsHumanLabel }],
+    });
+    await driveTick(
+      autoDeps([issue], {
+        fetchIssues: vi.fn(async () => [issue]),
+        forgeFor: () => forge,
+      }) as never,
+    );
+    expect(forge.addLabels).not.toHaveBeenCalled();
+    expect(forge.commentIssue).not.toHaveBeenCalled();
   });
 
   it("runs auto-triage for repos that enabled it", async () => {
