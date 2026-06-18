@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  ArrowDownToLine,
+  ArrowUpToLine,
   CircleCheck,
   Copy,
   CornerDownRight,
@@ -15,7 +15,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Virtuoso } from "react-virtuoso";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
@@ -124,6 +124,32 @@ export function isTerminalLogEvent(type: string, payload: unknown): boolean {
   if (type !== "status") return false;
   const to = field(payload, "to");
   return to !== undefined && STREAM_END_STATES.has(to);
+}
+
+/**
+ * Display order for the stream: newest event first (reverse-chronological).
+ * Events arrive oldest-first (appended as they stream); the viewer shows the
+ * latest agent activity at the top so it's visible without scrolling. Ordering
+ * follows arrival position — not `id` or `ts` — so live events stamped
+ * client-side stay correctly ordered even under clock skew.
+ */
+export function toDisplayOrder(lines: LogLine[]): LogLine[] {
+  return [...lines].reverse();
+}
+
+/**
+ * Serialize the log for the clipboard, always in chronological order
+ * (oldest → newest) so a copied log reads top-down in time, independent of the
+ * reverse-chronological on-screen display order (issue #243).
+ */
+export function formatLogForClipboard(lines: LogLine[]): string {
+  return lines
+    .map((l) => {
+      const clock = l.ts ? `[${fmtClock(l.ts)}] ` : "";
+      const body = typeof l.payload === "string" ? l.payload : JSON.stringify(l.payload);
+      return `${clock}${l.type}\t${body}`;
+    })
+    .join("\n");
 }
 
 /** Pretty-print a single event payload, shaped per event type. */
@@ -282,9 +308,11 @@ function LogRow({ line, showClock }: { line: LogLine; showClock: boolean }) {
 
 /**
  * Live log viewer. Subscribes to the SSE endpoint and renders events in a
- * virtualized list (react-virtuoso) so long runs stay smooth. The toolbar
- * exposes a per-event-type filter, an autoscroll toggle (controls Virtuoso's
- * followOutput), and a copy-to-clipboard action.
+ * virtualized list (react-virtuoso) so long runs stay smooth. Events are shown
+ * newest-first (reverse-chronological), so the latest agent activity stays at
+ * the top without scrolling. The toolbar exposes a per-event-type filter, an
+ * autoscroll toggle (pins the view to the top as new events arrive), and a
+ * copy-to-clipboard action (which keeps chronological order).
  */
 export function LogViewer({
   jobId,
@@ -311,6 +339,7 @@ export function LogViewer({
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const [showFilter, setShowFilter] = useState(false);
   const seen = useRef(new Set<number>(initial.map((l) => l.id)));
+  const virtuoso = useRef<VirtuosoHandle>(null);
   const hydrated = useHydrated();
   const { success, error } = useToast();
 
@@ -341,8 +370,17 @@ export function LogViewer({
   }, [jobId, active, complete]);
 
   const visible = useMemo(() => lines.filter((l) => !hidden.has(l.type)), [lines, hidden]);
+  const displayed = useMemo(() => toDisplayOrder(visible), [visible]);
   const running = !complete;
   const hiddenCount = hidden.size;
+
+  // With newest-on-top, "follow" means staying pinned to the top: scroll there
+  // whenever autoscroll is on and a new event arrives (visible.length grows) or
+  // the toggle is switched back on.
+  useEffect(() => {
+    if (!autoscroll || visible.length === 0) return;
+    virtuoso.current?.scrollToIndex({ index: 0, behavior: "smooth" });
+  }, [autoscroll, visible.length]);
 
   function toggleType(t: string) {
     setHidden((prev) => {
@@ -354,13 +392,7 @@ export function LogViewer({
   }
 
   function copy() {
-    const text = lines
-      .map((l) => {
-        const clock = l.ts ? `[${fmtClock(l.ts)}] ` : "";
-        const body = typeof l.payload === "string" ? l.payload : JSON.stringify(l.payload);
-        return `${clock}${l.type}\t${body}`;
-      })
-      .join("\n");
+    const text = formatLogForClipboard(lines);
     const clip = navigator.clipboard;
     if (!clip) {
       error("Copy failed", "The clipboard is unavailable in this context.");
@@ -404,7 +436,7 @@ export function LogViewer({
             )}
             aria-pressed={autoscroll}
           >
-            <ArrowDownToLine className="h-3.5 w-3.5" /> Autoscroll
+            <ArrowUpToLine className="h-3.5 w-3.5" /> Autoscroll
           </button>
           <button
             type="button"
@@ -448,11 +480,14 @@ export function LogViewer({
         className="h-[460px] bg-background/40 px-1 py-1 font-mono text-xs"
       >
         <Virtuoso
-          data={visible}
-          followOutput={autoscroll ? "smooth" : false}
+          ref={virtuoso}
+          data={displayed}
+          initialTopMostItemIndex={0}
           itemContent={(_i, line) => <LogRow line={line} showClock={hydrated} />}
           components={{
-            Footer: () =>
+            // Newest events appear at the top, so the streaming indicator lives
+            // in the header — right where the next event will land.
+            Header: () =>
               running ? (
                 <div className="flex items-center gap-2.5 px-2.5 py-1.5 text-muted-foreground">
                   <span className="w-[42px]" />
