@@ -280,6 +280,17 @@ describe("WorktreeManager", () => {
     expect(stripAiAttribution(msg)).toBe(msg);
   });
 
+  it("stripAiAttribution returns empty when the message is only attribution (issue #269)", () => {
+    // The pure helper does not invent a subject; the empty result is the signal
+    // the commit call sites guard against before handing it to `git commit -m`.
+    const msg = [
+      "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+      "",
+      "Co-Authored-By: Claude <noreply@anthropic.com>",
+    ].join("\n");
+    expect(stripAiAttribution(msg)).toBe("");
+  });
+
   it("commitAndPush rewrites agent commits that carry AI attribution (issue #248)", async () => {
     // The agent committed its own work and left a `Co-Authored-By: Claude`
     // trailer. Drydock must rewrite the offending commit's message before push.
@@ -311,6 +322,50 @@ describe("WorktreeManager", () => {
     expect(calls.filter((c) => c.args.includes("--amend"))).toHaveLength(1);
     // Push happens last.
     expect(calls.at(-1)?.args.slice(0, 2)).toEqual(["push", "-u"]);
+  });
+
+  it("commitAndPush falls back to a default subject when the message is all attribution (issue #269)", async () => {
+    // An agent's commit message may consist solely of AI-attribution lines.
+    // Stripping leaves an empty string, and `git commit -m ""` fails — so the
+    // commit must fall back to a neutral Conventional-Commits subject instead.
+    const calls: { args: string[] }[] = [];
+    const run: CommandRunner = async (_cmd, args) => {
+      calls.push({ args });
+      // Dirty tree so we commit the staged edits ourselves; no base so the
+      // attribution history-scan short-circuits straight to push.
+      const stdout = args[0] === "status" ? " M file.ts\n" : "";
+      return { stdout, stderr: "", exitCode: 0 } satisfies CommandResult;
+    };
+    const m = new WorktreeManager(run);
+    const wt = { path: "/wt", branch: "drydock/issue-1-job-1" } as Worktree;
+    const allAttribution = [
+      "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+      "",
+      "Co-Authored-By: Claude <noreply@anthropic.com>",
+    ].join("\n");
+    await m.commitAndPush(wt, allAttribution);
+    const commit = calls.find((c) => c.args[0] === "commit");
+    expect(commit?.args).toEqual(["commit", "-m", "chore: update"]);
+  });
+
+  it("commitAndPush amends an all-attribution agent commit to a default subject (issue #269)", async () => {
+    // The agent committed work whose entire message is an attribution block.
+    // The history rewrite would otherwise `git commit --amend -m ""` and fail;
+    // it must substitute the neutral fallback subject instead.
+    const calls: { args: string[] }[] = [];
+    const run: CommandRunner = async (_cmd, args) => {
+      calls.push({ args });
+      const ok = (stdout: string): CommandResult => ({ stdout, stderr: "", exitCode: 0 });
+      if (args[0] === "rev-list" && args.includes("--count")) return ok("1\n");
+      if (args[0] === "rev-list" && args.includes("--reverse")) return ok("sha1\n");
+      if (args[0] === "log") return ok("Co-Authored-By: Claude <noreply@anthropic.com>\n");
+      return ok("");
+    };
+    const m = new WorktreeManager(run);
+    const wt = { path: "/wt", branch: "drydock/issue-1-job-1", base: "base000" };
+    await m.commitAndPush(wt, "fix #5");
+    const amend = calls.find((c) => c.args[0] === "commit" && c.args.includes("--amend"));
+    expect(amend?.args[amend.args.length - 1]).toBe("chore: update");
   });
 
   it("commitAndPushForHuman commits dirty edits and pushes, returning true (issue #249)", async () => {

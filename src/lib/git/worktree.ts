@@ -65,6 +65,25 @@ export function stripAiAttribution(message: string): string {
     .replace(/\s+$/, "");
 }
 
+/**
+ * Subject substituted when stripping AI attribution leaves nothing behind
+ * (issue #269): an agent may emit a commit whose body is *only* attribution
+ * lines, so `stripAiAttribution` returns "". `git commit -m ""` and
+ * `git commit --amend -m ""` both fail, so the two call sites that feed a
+ * stripped message to git fall back to this neutral Conventional-Commits
+ * subject rather than abort the push.
+ */
+const STRIPPED_MESSAGE_FALLBACK = "chore: update";
+
+/**
+ * Guard an already-stripped commit message against being empty: return it
+ * unchanged unless it is blank, in which case substitute the fallback subject
+ * so `git commit` never sees an empty `-m` (issue #269).
+ */
+function nonEmptyCommitMessage(cleaned: string): string {
+  return cleaned.trim() === "" ? STRIPPED_MESSAGE_FALLBACK : cleaned;
+}
+
 export class WorktreeError extends Error {}
 
 /**
@@ -233,7 +252,7 @@ export class WorktreeManager {
     if (dirty) {
       // Uncommitted edits: commit them ourselves under the given message,
       // scrubbed of any AI attribution the message may carry (issue #248).
-      await this.git(["commit", "-m", stripAiAttribution(message)], wt.path);
+      await this.git(["commit", "-m", nonEmptyCommitMessage(stripAiAttribution(message))], wt.path);
       return true;
     }
     // Clean tree: push only if the agent committed its own work on top of the
@@ -305,7 +324,7 @@ export class WorktreeManager {
     for (const commit of commits) {
       await this.git(["cherry-pick", commit.sha], wt.path);
       if (commit.cleaned !== commit.original) {
-        await this.git(["commit", "--amend", "-m", commit.cleaned], wt.path);
+        await this.git(["commit", "--amend", "-m", nonEmptyCommitMessage(commit.cleaned)], wt.path);
       }
     }
   }
