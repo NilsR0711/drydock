@@ -67,19 +67,33 @@ describe("WorktreeManager", () => {
       ["worktree", "prune"],
       ["branch", "-D", "drydock/issue-13-job-42"],
       ["worktree", "add", "-b", "drydock/issue-13-job-42", wt.path, "main"],
+      ["rev-parse", "drydock/issue-13-job-42"],
     ]);
   });
 
   it("prepare succeeds on a fresh job even though the stale-cleanup calls fail", async () => {
     // First attempt of a job: there is nothing to remove, so the best-effort
-    // cleanup git calls exit non-zero. Only a failing `worktree add` is fatal.
+    // cleanup git calls exit non-zero. Only a failing `worktree add` is fatal;
+    // the post-add `rev-parse` that records the base must still succeed.
     const run: CommandRunner = async (_cmd, args) => {
-      const isAdd = args.includes("add");
-      return { stdout: "", stderr: isAdd ? "" : "not found", exitCode: isAdd ? 0 : 1 };
+      const ok = args.includes("add") || args.includes("rev-parse");
+      return { stdout: "", stderr: ok ? "" : "not found", exitCode: ok ? 0 : 1 };
     };
     await expect(new WorktreeManager(run).prepare(repo, 1, 1)).resolves.toMatchObject({
       branch: "drydock/issue-1-job-1",
     });
+  });
+
+  it("prepare records the base commit the worktree was cut from (issue #206)", async () => {
+    // commitAndPush compares HEAD against this base to tell an agent that
+    // committed its own work apart from a genuine no-op run.
+    const run: CommandRunner = async (_cmd, args) => ({
+      stdout: args.includes("rev-parse") ? "deadbeefcafe\n" : "",
+      stderr: "",
+      exitCode: 0,
+    });
+    const wt = await new WorktreeManager(run).prepare(repo, 42, 13);
+    expect(wt.base).toBe("deadbeefcafe");
   });
 
   it("prepareForBranch fetches and checks out an existing branch", async () => {
@@ -119,20 +133,46 @@ describe("WorktreeManager", () => {
     expect(calls.every((c) => c.cwd === wt.path)).toBe(true);
   });
 
-  it("commitAndPush throws EmptyCommitError and skips commit/push when nothing is staged (issue #50)", async () => {
+  it("commitAndPush throws EmptyCommitError and skips commit/push when nothing changed (issue #50)", async () => {
     const calls: { args: string[] }[] = [];
     const run: CommandRunner = async (_cmd, args) => {
       calls.push({ args });
-      // A clean working tree: `git status --porcelain` returns no entries.
-      return { stdout: "", stderr: "", exitCode: 0 } satisfies CommandResult;
+      // A clean working tree (`git status --porcelain` empty) AND no commits on
+      // top of the base (`git rev-list --count` reports 0): a genuine no-op run.
+      const stdout = args[0] === "rev-list" ? "0\n" : "";
+      return { stdout, stderr: "", exitCode: 0 } satisfies CommandResult;
     };
     const m = new WorktreeManager(run);
-    const wt = { path: "/wt", branch: "drydock/issue-1-job-1" };
+    const wt = { path: "/wt", branch: "drydock/issue-1-job-1", base: "base000" };
     await expect(m.commitAndPush(wt, "fix #5")).rejects.toBeInstanceOf(EmptyCommitError);
     expect(calls.map((c) => c.args.slice(0, 2))).toEqual([
       ["add", "-A"],
       ["status", "--porcelain"],
+      ["rev-list", "--count"],
     ]);
+  });
+
+  it("commitAndPush pushes the agent's own commits when the tree is clean (issue #206)", async () => {
+    // The agent committed its finished work itself, leaving the working tree
+    // clean. Drydock must push those commits, not discard them as "no changes".
+    const calls: { args: string[] }[] = [];
+    const run: CommandRunner = async (_cmd, args) => {
+      calls.push({ args });
+      // Clean tree, but HEAD is one commit ahead of the recorded base.
+      const stdout = args[0] === "rev-list" ? "1\n" : "";
+      return { stdout, stderr: "", exitCode: 0 } satisfies CommandResult;
+    };
+    const m = new WorktreeManager(run);
+    const wt = { path: "/wt", branch: "drydock/issue-1-job-1", base: "base000" };
+    await expect(m.commitAndPush(wt, "fix #5")).resolves.toBeUndefined();
+    expect(calls.map((c) => c.args.slice(0, 2))).toEqual([
+      ["add", "-A"],
+      ["status", "--porcelain"],
+      ["rev-list", "--count"],
+      ["push", "-u"],
+    ]);
+    // It must reuse the agent's commit, not stack an empty one on top.
+    expect(calls.some((c) => c.args[0] === "commit")).toBe(false);
   });
 
   it("remove force-removes the worktree and prunes", async () => {
