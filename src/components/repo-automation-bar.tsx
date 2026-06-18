@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Brain,
   Container,
   GitPullRequestArrow,
   HeartPulse,
@@ -165,6 +166,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [sandboxNetwork, setSandboxNetwork] = useState(repo.sandboxAllowNetwork);
   const [sandboxCpus, setSandboxCpus] = useState(repo.sandboxCpus ?? "");
   const [sandboxMemory, setSandboxMemory] = useState(repo.sandboxMemory ?? "");
+  const [adoptClaudeMem, setAdoptClaudeMem] = useState(repo.adoptClaudeMem);
   const [agentInstructions, setAgentInstructions] = useState(repo.agentInstructions ?? "");
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -605,6 +607,21 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
                 <HelpTip content="Off (default) runs the container with --network none. Turn on only if the toolchain must fetch dependencies during the run." />
               </div>
             </AutoToggle>
+          </Fieldset>
+          <Fieldset
+            icon={Brain}
+            legend="Memory"
+            description="Carry agent memory back to the parent project."
+          >
+            <AutoToggle
+              label="Adopt claude-mem memory on cleanup"
+              checked={adoptClaudeMem}
+              onChange={(v) => {
+                setAdoptClaudeMem(v);
+                persist({ adoptClaudeMem: v });
+              }}
+              help="Requires the claude-mem plugin. Before a job's throwaway worktree is removed, runs claude-mem's adoption so a merged job's memory is consolidated into the parent project instead of being stranded in a per-worktree bucket. Best-effort: skipped silently if claude-mem is not installed."
+            />
           </Fieldset>
           <Fieldset
             icon={MessageSquare}
