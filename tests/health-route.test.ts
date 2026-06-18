@@ -36,7 +36,10 @@ describe("GET /api/health", () => {
     expect(body.uptimeSeconds).toBeGreaterThanOrEqual(0);
     expect(body.driver.lastTickAt).not.toBeNull();
     expect(body.queue.queued).toBe(0);
-    expect(body.budget.dailyLimitUsd).toBeGreaterThan(0);
+    // 0 = unlimited, the autonomous default (issue #254); the field is still a
+    // non-negative number in the documented shape.
+    expect(typeof body.budget.dailyLimitUsd).toBe("number");
+    expect(body.budget.dailyLimitUsd).toBeGreaterThanOrEqual(0);
   });
 
   it("counts seeded jobs in the queue map", async () => {

@@ -60,7 +60,10 @@ describe("planPromptSection", () => {
 
 describe("runJob — plan-first stage (issue #160)", () => {
   it("does not run the plan stage when planFirst is off", async () => {
-    const repoId = addRepo({ path: "/repo", name: "acme" }, db).id;
+    const repoId = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/repo", name: "acme" },
+      db,
+    ).id;
     const runPlan = vi.fn();
     const deps = baseDeps({ runPlan, commentIssue: vi.fn() });
     const job = createJob({ repoId, issueNumber: 1 }, db);
@@ -70,7 +73,10 @@ describe("runJob — plan-first stage (issue #160)", () => {
   });
 
   it("runs the plan before the session, embeds it in the prompt, and comments it", async () => {
-    const repoId = addRepo({ path: "/repo", name: "acme", planFirst: true }, db).id;
+    const repoId = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/repo", name: "acme", planFirst: true },
+      db,
+    ).id;
     const calls: string[] = [];
     const runPlan = vi.fn(async (_job: Job, _prompt: string, _cwd: string) => {
       calls.push("plan");
@@ -103,7 +109,10 @@ describe("runJob — plan-first stage (issue #160)", () => {
   });
 
   it("falls back to the single-stage run when the plan stage fails", async () => {
-    const repoId = addRepo({ path: "/repo", name: "acme", planFirst: true }, db).id;
+    const repoId = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/repo", name: "acme", planFirst: true },
+      db,
+    ).id;
     const runPlan = vi.fn(async () => ({ text: "", exitCode: 1 }));
     const commentIssue = vi.fn();
     const deps = baseDeps({ runPlan, commentIssue });
@@ -118,7 +127,10 @@ describe("runJob — plan-first stage (issue #160)", () => {
   });
 
   it("falls back when the plan runner throws", async () => {
-    const repoId = addRepo({ path: "/repo", name: "acme", planFirst: true }, db).id;
+    const repoId = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/repo", name: "acme", planFirst: true },
+      db,
+    ).id;
     const runPlan = vi.fn(async () => {
       throw new Error("plan boom");
     });
@@ -129,7 +141,10 @@ describe("runJob — plan-first stage (issue #160)", () => {
   });
 
   it("still implements with the plan when posting the comment fails", async () => {
-    const repoId = addRepo({ path: "/repo", name: "acme", planFirst: true }, db).id;
+    const repoId = addRepo(
+      { verifyPr: false, autoPrAudit: false, path: "/repo", name: "acme", planFirst: true },
+      db,
+    ).id;
     const runPlan = vi.fn(async () => ({ text: "1. Edit a.ts", exitCode: 0 }));
     const commentIssue = vi.fn(async () => {
       throw new Error("forge down");

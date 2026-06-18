@@ -42,6 +42,9 @@ function deps(over: Record<string, unknown> = {}) {
       verify: vi.fn(async () => {
         order.push("verify");
       }),
+      // PR audit defaults on now (issue #254); stub it so the best-effort pass
+      // doesn't spawn a real `gh` while these tests focus on verification order.
+      audit: vi.fn(async () => {}),
       runBabysitter: vi.fn(async (job: Job) => {
         order.push("babysitter");
         db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, job.id)).run();

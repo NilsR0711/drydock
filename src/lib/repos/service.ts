@@ -45,21 +45,25 @@ export const repoInputSchema = z.object({
     })
     .nullish(),
   apiToken: z.string().nullish(),
-  // 0 = off / unlimited daily budget for this repo (issue #234).
-  dailyCostLimitUsd: z.number().nonnegative().default(10),
+  // 0 = off / unlimited daily budget for this repo (issue #234). Defaults to 0
+  // so a freshly added repo is fully autonomous out of the box (issue #254).
+  dailyCostLimitUsd: z.number().nonnegative().default(0),
   adrGating: z.boolean().default(false),
   sequential: z.boolean().default(true),
-  autoTriageEnabled: z.boolean().default(false),
-  autoProcessEnabled: z.boolean().default(false),
-  autoHealCi: z.boolean().default(false),
+  // Fully-autonomous defaults (issue #254): the whole queue -> implement ->
+  // commit -> PR -> CI heal -> review feedback -> merge pipeline runs with no
+  // manual toggles. Every flag stays overridable per repo and in Settings.
+  autoTriageEnabled: z.boolean().default(true),
+  autoProcessEnabled: z.boolean().default(true),
+  autoHealCi: z.boolean().default(true),
   // Defaults ON for autonomous operation (issue #213); opt-out per repo. Paired
   // with the trustedBots defaults below, since the loop is inert without them.
   autoReviewFeedback: z.boolean().default(true),
-  autoResolveMergeConflicts: z.boolean().default(false),
+  autoResolveMergeConflicts: z.boolean().default(true),
   includeProgressReplies: z.boolean().default(false),
-  autoDecompose: z.boolean().default(false),
+  autoDecompose: z.boolean().default(true),
   planFirst: z.boolean().default(false),
-  verifyPr: z.boolean().default(false),
+  verifyPr: z.boolean().default(true),
   autoHealDeployments: z.boolean().default(false),
   releaseEnabled: z.boolean().default(false),
   deploymentPlatform: z.enum(["vercel", "railway"]).nullish(),
@@ -97,9 +101,10 @@ export const repoInputSchema = z.object({
   // Per-repo inbound webhook secret (issue #61). Non-empty enables webhook-driven
   // sync; null/empty disables it and leaves polling as the sole sync path.
   webhookSecret: z.string().nullish(),
-  // Opt-in AI PR audit (issue #168). Agent/model null inherits the repo's
-  // agent/defaultModel; the output language is a simple or BCP 47 code.
-  autoPrAudit: z.boolean().default(false),
+  // AI PR audit (issue #168), defaulted ON for autonomous review (issue #254).
+  // Agent/model null inherits the repo's agent/defaultModel; the output language
+  // is a simple or BCP 47 code.
+  autoPrAudit: z.boolean().default(true),
   prAuditAgent: z.enum(["claude", "codex"]).nullish(),
   prAuditModel: z.string().min(1).refine(isKnownModelId, { message: "unknown model id" }).nullish(),
   prAuditLanguage: z

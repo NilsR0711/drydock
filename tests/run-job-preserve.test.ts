@@ -16,7 +16,16 @@ let db: DB;
 let repoId: number;
 beforeEach(() => {
   db = createDb(":memory:");
-  repoId = addRepo({ path: "/repo", name: "acme", defaultModel: "claude-opus-4-7" }, db).id;
+  repoId = addRepo(
+    {
+      verifyPr: false,
+      autoPrAudit: false,
+      path: "/repo",
+      name: "acme",
+      defaultModel: "claude-opus-4-7",
+    },
+    db,
+  ).id;
 });
 
 function fakeWorktrees(removed: { v: boolean }, over: Record<string, unknown> = {}) {

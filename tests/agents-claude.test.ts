@@ -75,6 +75,30 @@ describe("claudeProvider", () => {
     expect(plain).not.toContain("--dangerously-skip-permissions");
   });
 
+  it("omits --max-turns when the budget is 0 (unlimited, issue #254)", () => {
+    // 0 = no cap: the flag must be dropped entirely, not passed as
+    // `--max-turns 0` (which the CLI would read as a zero-turn budget).
+    const start = claudeProvider.buildStartArgs({
+      prompt: "do it",
+      model: "claude-opus-4-8",
+      maxTurns: 0,
+    });
+    expect(start).not.toContain("--max-turns");
+    expect(start).not.toContain("0");
+    expect(start).toContain("-p");
+    expect(start).toContain("acceptEdits");
+
+    const resume = claudeProvider.buildResumeArgs({
+      prompt: "fix ci",
+      sessionId: "sess-xyz",
+      model: claudeProvider.resumeModel,
+      maxTurns: 0,
+    });
+    expect(resume).not.toContain("--max-turns");
+    expect(resume).toContain("--resume");
+    expect(resume).toContain("sess-xyz");
+  });
+
   it("builds a plain one-shot invocation for a text prompt (issue #49)", () => {
     const args = claudeProvider.buildOneShotArgs({
       prompt: "split this issue",

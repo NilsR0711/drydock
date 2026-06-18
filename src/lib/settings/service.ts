@@ -17,15 +17,23 @@ export const settingsSchema = z.object({
   draining: z.boolean().default(false),
   // Daily USD budget gating new runs (SPEC §6.1). 0 is off (unlimited) — the
   // loop then stops only at the per-job cap, provider usage-limit auto-wait, and
-  // pause/drain (issue #234). Defaults to a safe $10 ceiling. A per-repo daily
-  // limit applies the same 0 = off semantics independently.
-  dailyCostLimitUsd: z.number().nonnegative().default(10),
+  // pause/drain (issue #234). Defaults to 0 (unlimited) so a fresh install is
+  // fully autonomous out of the box (issue #254); set a positive ceiling here or
+  // per-repo to cap spend. A per-repo daily limit applies the same 0 = off
+  // semantics independently.
+  dailyCostLimitUsd: z.number().nonnegative().default(0),
   pollIntervalSec: z.number().int().positive().default(30),
-  maxTurns: z.number().int().positive().default(40),
+  // Per-job turn budget (issue #254). 0 is off (unlimited): the runner drops the
+  // CLI `--max-turns` flag and the OpenRouter loop skips its turn check, so a
+  // long task is bounded only by maxJobMinutes / the per-job cost cap. Defaults
+  // high (200) so normal tasks finish — the live test job hit the old 40-turn
+  // wall on an ordinary issue. The value seeds each new job's budget.
+  maxTurns: z.number().int().nonnegative().default(200),
   // Hard wall-clock timeout per agent session in minutes (issue #47). A hung
   // agent (network stall, MCP deadlock, stdin prompt) is aborted after this so
-  // it never holds a job slot forever. A per-repo override may shorten/extend it.
-  maxJobMinutes: z.number().int().positive().default(30),
+  // it never holds a job slot forever. Defaults to 120 so long autonomous tasks
+  // finish (issue #254). A per-repo override may shorten/extend it.
+  maxJobMinutes: z.number().int().positive().default(120),
   // Hard wall-clock budget for CI to start and settle after a PR is opened
   // (issue #52). If required checks sit pending/queued past this, the babysitter
   // stops polling and escalates the job to needs_human instead of looping

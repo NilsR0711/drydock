@@ -122,7 +122,8 @@ const updateSettingsShape = {
   dailyCostLimitUsd: z.number().nonnegative().optional(),
   pollIntervalSec: z.number().int().positive().optional(),
   maxParallelJobs: z.number().int().positive().optional(),
-  maxTurns: z.number().int().positive().optional(),
+  // 0 = unlimited turn budget (issue #254); a positive value caps it.
+  maxTurns: z.number().int().nonnegative().optional(),
   defaultModel: z
     .string()
     .min(1)

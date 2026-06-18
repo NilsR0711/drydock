@@ -77,9 +77,9 @@ describe("repos service", () => {
     expect(repo.defaultModel).toBe("claude-opus-4-8");
   });
 
-  it("new repo gets the default daily cost limit", () => {
+  it("new repo has no daily cost limit by default (unlimited, issue #254)", () => {
     const repo = addRepo({ path: "/r", name: "r" }, db);
-    expect(repo.dailyCostLimitUsd).toBe(10);
+    expect(repo.dailyCostLimitUsd).toBe(0);
   });
 
   it("updateRepo can change the daily cost limit", () => {
@@ -175,12 +175,20 @@ describe("repos service", () => {
     expect(updated.defaultModel).toBe("claude-haiku-4-5");
   });
 
-  it("defaults automation to off with safe label/author defaults", () => {
+  it("defaults the full autonomous pipeline ON with safe label/author defaults (issue #254)", () => {
     const repo = addRepo({ path: "/auto", name: "auto" }, db);
-    expect(repo.autoTriageEnabled).toBe(false);
-    expect(repo.autoProcessEnabled).toBe(false);
-    expect(repo.autoHealCi).toBe(false);
-    expect(repoAutomation(repo).autoHealCi).toBe(false);
+    // Fully autonomous out of the box: queue -> implement -> commit -> PR ->
+    // CI heal -> review feedback -> merge with no manual toggles.
+    expect(repo.autoTriageEnabled).toBe(true);
+    expect(repo.autoProcessEnabled).toBe(true);
+    expect(repo.autoHealCi).toBe(true);
+    expect(repoAutomation(repo).autoHealCi).toBe(true);
+    expect(repo.autoResolveMergeConflicts).toBe(true);
+    expect(repo.autoDecompose).toBe(true);
+    expect(repo.verifyPr).toBe(true);
+    // Safe-by-default gates stay conservative: author association and label
+    // gating are unchanged, and releases remain manual (hard to reverse).
+    expect(repo.releaseEnabled).toBe(false);
     expect(repo.maxAttempts).toBe(3);
     expect(repo.minAuthorAssociation).toBe("approved");
     const cfg = repoAutomation(repo);
@@ -188,6 +196,30 @@ describe("repos service", () => {
     expect(cfg.blockingLabels).toContain("blocked");
     expect(cfg.autoLabelWhitelist).toContain("bug");
     expect(cfg.priorityAuthors).toEqual([]);
+  });
+
+  it("lets a repo opt out of any autonomous default (issue #254)", () => {
+    const repo = addRepo({ path: "/optout", name: "optout" }, db);
+    const off = updateRepo(
+      repo.id,
+      {
+        autoProcessEnabled: false,
+        autoHealCi: false,
+        verifyPr: false,
+        autoDecompose: false,
+        autoResolveMergeConflicts: false,
+        autoPrAudit: false,
+        dailyCostLimitUsd: 10,
+      },
+      db,
+    );
+    expect(off.autoProcessEnabled).toBe(false);
+    expect(off.autoHealCi).toBe(false);
+    expect(off.verifyPr).toBe(false);
+    expect(off.autoDecompose).toBe(false);
+    expect(off.autoResolveMergeConflicts).toBe(false);
+    expect(off.autoPrAudit).toBe(false);
+    expect(off.dailyCostLimitUsd).toBe(10);
   });
 
   it("defaults model escalation on retry to off and lets a repo opt in (issue #179)", () => {
@@ -326,12 +358,14 @@ describe("listReposWithStats", () => {
 });
 
 describe("PR audit settings (issue #168)", () => {
-  it("defaults to off with inherited agent/model and English output", () => {
+  it("defaults the audit ON with inherited agent/model and English output (issue #254)", () => {
     const repo = addRepo({ path: "/tmp/foo", name: "foo" }, db);
-    expect(repo.autoPrAudit).toBe(false);
+    expect(repo.autoPrAudit).toBe(true);
     expect(repo.prAuditAgent).toBeNull();
     expect(repo.prAuditModel).toBeNull();
     expect(repo.prAuditLanguage).toBe("en");
+    // Posting the audit onto the PR itself stays opt-in (the issue comment is
+    // the default surface); only the audit run is enabled by default.
     expect(repo.prAuditPostOnPr).toBe(false);
   });
 

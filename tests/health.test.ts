@@ -45,7 +45,8 @@ describe("getHealth", () => {
       paused: false,
       lastTickAt: new Date(NOW - 1000).toISOString(),
     });
-    expect(body.budget).toEqual({ todayUsd: 0, dailyLimitUsd: 10 });
+    // 0 = no daily ceiling, the autonomous default (issue #254).
+    expect(body.budget).toEqual({ todayUsd: 0, dailyLimitUsd: 0 });
   });
 
   it("counts jobs by state with every state present in the map", () => {

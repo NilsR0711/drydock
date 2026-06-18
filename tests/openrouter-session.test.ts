@@ -276,6 +276,28 @@ describe("runOpenRouterJobSession (issue #169)", () => {
     expect(res.exitCode).not.toBe(0);
     expect(seq.bodies()).toHaveLength(3);
   });
+
+  it("treats a turn budget of 0 as unlimited instead of exhausting at turn 0 (issue #254)", () => {
+    // With maxTurns = 0 the loop must NOT stop at the very first turn; it runs
+    // tool calls until the model naturally finishes (doneStream → exit 0).
+    return (async () => {
+      const seq = sequenceFetch([
+        toolCallStream("run_command", { command: "true" }),
+        toolCallStream("run_command", { command: "true" }),
+        doneStream("all done", 0.002),
+      ]);
+      const job = makeJob();
+      const res = await runOpenRouterJobSession(job, "p", "/tmp/wt", {
+        db,
+        broker: new LogBroker(db),
+        maxTurns: 0,
+        fetchImpl: seq.fetch,
+        toolExecutor: okExecutor() as never,
+      });
+      expect(res.exitCode).toBe(0);
+      expect(seq.bodies()).toHaveLength(3);
+    })();
+  });
 });
 
 describe("agent-session dispatch for http providers (issue #169)", () => {

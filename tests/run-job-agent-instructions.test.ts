@@ -65,7 +65,7 @@ describe("runJob with per-repo agent instructions", () => {
   });
 
   it("leaves the prompt unchanged when no instructions are configured", async () => {
-    const repo = addRepo({ path: "/r", name: "r" }, db);
+    const repo = addRepo({ verifyPr: false, autoPrAudit: false, path: "/r", name: "r" }, db);
     syncIssuesFromGh(repo.id, [{ number: 1, title: "Task", labels: [] }], db);
 
     const d = deps();

@@ -44,6 +44,11 @@ function baseDeps(removed: { v: boolean }, over: Record<string, unknown> = {}) {
       return getJob(job.id, db) as Job;
     }),
     announceNeedsHuman: vi.fn(async () => {}),
+    // Post-PR verification and AI PR audit default on now (issue #254); these
+    // tests assert the core lifecycle, so stub both best-effort passes to no-ops
+    // instead of letting them spawn a real `gh`.
+    verify: vi.fn(async () => {}),
+    audit: vi.fn(async () => {}),
     ...over,
   };
 }
