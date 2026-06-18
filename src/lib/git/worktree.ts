@@ -7,6 +7,14 @@ import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
 export interface Worktree {
   path: string;
   branch: string;
+  /**
+   * Commit SHA the worktree was cut from. commitAndPush compares HEAD against
+   * it to tell an agent that committed its own finished work (clean tree, HEAD
+   * ahead of base) apart from a genuine no-op run (issue #206). Always set by
+   * the prepare* factories; optional only so test fixtures that mock
+   * commitAndPush need not supply it.
+   */
+  base?: string;
 }
 
 /** Root for app-owned worktrees; override with DRYDOCK_HOME. */
@@ -77,7 +85,7 @@ export class WorktreeManager {
   async prepare(repo: Repo, jobId: number, issueNumber = 0): Promise<Worktree> {
     const branch = `drydock/issue-${issueNumber}-job-${jobId}`;
     const path = join(repoWorktreesDir(repo.name), `job-${jobId}`);
-    await this.withRepoLock(repo.path, async () => {
+    const base = await this.withRepoLock(repo.path, async () => {
       // Branch and path derive solely from the job id, so a retry of the same
       // job (operator requeue, crash recovery) collides with whatever attempt
       // one left behind: remove() never ran, and the reaper skips non-terminal
@@ -93,8 +101,9 @@ export class WorktreeManager {
       await this.git(["-C", repo.path, "worktree", "prune"]).catch(() => undefined);
       await this.git(["-C", repo.path, "branch", "-D", branch]).catch(() => undefined);
       await this.git(["-C", repo.path, "worktree", "add", "-b", branch, path, repo.defaultBranch]);
+      return this.resolveBase(repo.path, branch);
     });
-    return { path, branch };
+    return { path, branch, base };
   }
 
   /**
@@ -105,11 +114,12 @@ export class WorktreeManager {
    */
   async prepareForBranch(repo: Repo, branch: string, key: string): Promise<Worktree> {
     const path = join(repoWorktreesDir(repo.name), `fb-${sanitize(key)}`);
-    await this.withRepoLock(repo.path, async () => {
+    const base = await this.withRepoLock(repo.path, async () => {
       await this.git(["-C", repo.path, "fetch", "origin", branch]);
       await this.git(["-C", repo.path, "worktree", "add", path, branch]);
+      return this.resolveBase(repo.path, branch);
     });
-    return { path, branch };
+    return { path, branch, base };
   }
 
   /**
@@ -119,20 +129,41 @@ export class WorktreeManager {
    */
   async prepareForNewBranch(repo: Repo, branch: string, key: string): Promise<Worktree> {
     const path = join(repoWorktreesDir(repo.name), `dh-${sanitize(key)}`);
-    await this.withRepoLock(repo.path, () =>
-      this.git(["-C", repo.path, "worktree", "add", "-b", branch, path, repo.defaultBranch]),
-    );
-    return { path, branch };
+    const base = await this.withRepoLock(repo.path, async () => {
+      await this.git(["-C", repo.path, "worktree", "add", "-b", branch, path, repo.defaultBranch]);
+      return this.resolveBase(repo.path, branch);
+    });
+    return { path, branch, base };
+  }
+
+  /** Resolve a branch tip to a commit SHA, recording a worktree's base. */
+  private async resolveBase(repoPath: string, branch: string): Promise<string> {
+    return (await this.git(["-C", repoPath, "rev-parse", branch])).trim();
+  }
+
+  /** Whether HEAD carries commits the agent made on top of the worktree base. */
+  private async hasNewCommits(wt: Worktree): Promise<boolean> {
+    if (!wt.base) return false;
+    const count = (await this.git(["rev-list", "--count", `${wt.base}..HEAD`], wt.path)).trim();
+    return Number.parseInt(count || "0", 10) > 0;
   }
 
   async commitAndPush(wt: Worktree, message: string): Promise<void> {
     await this.git(["add", "-A"], wt.path);
-    // A no-op run leaves an empty staging area; committing would exit non-zero
-    // with a confusing git error. Detect it up front and signal it distinctly
-    // (issue #50) so callers can report a clear "no changes" outcome.
-    const staged = await this.git(["status", "--porcelain"], wt.path);
-    if (staged.trim() === "") throw new EmptyCommitError();
-    await this.git(["commit", "-m", message], wt.path);
+    const dirty = (await this.git(["status", "--porcelain"], wt.path)).trim() !== "";
+    if (dirty) {
+      // Uncommitted edits: commit them ourselves under the job's message.
+      await this.git(["commit", "-m", message], wt.path);
+    } else if (!(await this.hasNewCommits(wt))) {
+      // Clean tree AND no commits beyond the base: a genuine no-op run.
+      // Committing would exit non-zero with a confusing git error; signal it
+      // distinctly (issue #50) so callers report a clear "no changes" outcome.
+      throw new EmptyCommitError();
+    }
+    // Push whatever the branch holds — the commit we just made, or the commits
+    // the agent made itself. A senior-engineer-style agent often commits its
+    // own finished work; discarding it as "no changes" lost correct results
+    // (issue #206).
     await this.git(["push", "-u", "origin", wt.branch], wt.path);
   }
 

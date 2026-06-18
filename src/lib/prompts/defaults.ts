@@ -21,7 +21,9 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, string> = {
     "Issue body:",
     "$ISSUE_BODY",
     "",
-    "Keep the change focused and commit-ready. Do not push or open a PR yourself.",
+    "Keep the change focused. You may commit your work or leave it uncommitted —",
+    "either is fine. Do not push or open a pull request yourself; Drydock commits",
+    "any remaining changes, pushes the branch, and opens the PR.",
   ].join("\n"),
   "ci-fix": "CI failed. Fix the failure and keep changes minimal.\n\nFailed CI log:\n$CI_LOG",
   plan: [
@@ -44,6 +46,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, string> = {
     `Your previous session on issue #$ISSUE_NUM in "$REPO_NAME" was interrupted by a usage limit.`,
     `You are resuming in a fresh checkout of branch "$BRANCH"; any uncommitted changes from the`,
     "interrupted session are gone. Re-apply whatever is missing and finish implementing the issue.",
-    "Keep the change focused and commit-ready. Do not push or open a PR yourself.",
+    "Keep the change focused. You may commit your work or leave it uncommitted — either is fine.",
+    "Do not push or open a pull request yourself; Drydock commits, pushes, and opens the PR.",
   ].join("\n"),
 };

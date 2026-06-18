@@ -75,6 +75,21 @@ describe("default templates embed the issue context (issue #205)", () => {
   });
 });
 
+describe("default templates are unambiguous about committing (issue #206)", () => {
+  it("the main template drops the ambiguous 'commit-ready' wording", () => {
+    expect(DEFAULT_TEMPLATES.default).not.toMatch(/commit-ready/i);
+  });
+
+  it("the limit-resume template drops the ambiguous 'commit-ready' wording", () => {
+    expect(DEFAULT_TEMPLATES["limit-resume"]).not.toMatch(/commit-ready/i);
+  });
+
+  it("the main and limit-resume templates still forbid pushing and opening a PR", () => {
+    expect(DEFAULT_TEMPLATES.default).toMatch(/do not push or open a pull request/i);
+    expect(DEFAULT_TEMPLATES["limit-resume"]).toMatch(/do not push or open a pull request/i);
+  });
+});
+
 describe("resolveTemplateContent", () => {
   it("falls back to the code default when no row exists", () => {
     expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.main, db)).toBe(DEFAULT_TEMPLATES.default);
