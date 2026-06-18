@@ -163,9 +163,15 @@ const UNKNOWN_VIEW: CodexUsageView = {
   capturedAt: null,
 };
 
-/** Whether a snapshot is too old to trust: its short window elapsed, or ancient. */
+/** The reported window's reset that anchors freshness/countdown (primary, else secondary). */
+function resetAnchor(snapshot: CodexUsageSnapshot): number | undefined {
+  return snapshot.primary?.resetsAt ?? snapshot.secondary?.resetsAt;
+}
+
+/** Whether a snapshot is too old to trust: its window elapsed, or it's ancient. */
 function isStale(snapshot: CodexUsageSnapshot, now: number): boolean {
-  if (snapshot.primary?.resetsAt !== undefined && snapshot.primary.resetsAt <= now) return true;
+  const reset = resetAnchor(snapshot);
+  if (reset !== undefined && reset <= now) return true;
   return now - snapshot.capturedAt > FRESH_TTL_SEC;
 }
 
@@ -217,7 +223,7 @@ export function buildCodexUsageView(input: {
       primary: fresh.primary ?? null,
       secondary: fresh.secondary ?? null,
       blocked: false,
-      resetsAt: fresh.primary?.resetsAt ?? null,
+      resetsAt: resetAnchor(fresh) ?? null,
       capturedAt: fresh.capturedAt,
     };
   }

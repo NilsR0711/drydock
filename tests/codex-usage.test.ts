@@ -130,4 +130,21 @@ describe("buildCodexUsageView", () => {
     });
     expect(view.state).toBe("unknown");
   });
+
+  it("uses the secondary reset for the headline countdown when only secondary is reported", () => {
+    const view = buildCodexUsageView({
+      snapshot: { capturedAt: NOW, secondary: { usedPercent: 30, resetsAt: NOW + 3 * 24 * HOUR } },
+      now: NOW,
+    });
+    expect(view.state).toBe("ok");
+    expect(view.resetsAt).toBe(NOW + 3 * 24 * HOUR);
+  });
+
+  it("degrades a secondary-only snapshot to unknown once its window has elapsed", () => {
+    const view = buildCodexUsageView({
+      snapshot: { capturedAt: NOW, secondary: { usedPercent: 80, resetsAt: NOW - 1 } },
+      now: NOW,
+    });
+    expect(view.state).toBe("unknown");
+  });
 });
