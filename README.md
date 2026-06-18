@@ -320,11 +320,12 @@ src/
    ├─ db/                # Drizzle schema, queries, migrations
    ├─ adr/ · prompts/    # ADR watcher/review, prompt templates
    ├─ mcp/               # stdio MCP server: tool registry + wiring
-   ├─ cli.ts             # `pnpm mcp` dispatcher (dev MCP entrypoint)
+   ├─ cli.ts             # MCP CLI dispatcher (shared by `pnpm mcp` and `drydock mcp`)
    └─ repos/ · settings/ # repo & settings services
-bin/drydock.mjs          # published `drydock` launcher (boots the standalone server)
-scripts/drydock.ts       # dev MCP entrypoint (pnpm mcp)
+bin/drydock.mjs          # published `drydock` launcher (boots the standalone server / MCP server)
+scripts/drydock.ts       # MCP entrypoint (bundled for `drydock mcp`; tsx for `pnpm mcp`)
 scripts/package-standalone.mjs  # finishes the standalone bundle for npm
+scripts/package-mcp.mjs  # bundles the stdio MCP server into the distribution
 docs/adr/                # architecture decision records (index: docs/DECISIONS.md)
 tests/                   # Vitest suite — fully offline
 ```
@@ -408,19 +409,24 @@ Drydock can be driven by any [MCP](https://modelcontextprotocol.io) host (Claude
 higher-level agent, …) over a **local stdio** server — no HTTP. stdio is a process-local
 transport, so the server is reachable only by the host that launches it on the same machine.
 
-Start it with `pnpm mcp` (or `drydock mcp` if the package is linked). For an MCP host, point its
-config at the entrypoint, e.g.:
+Start it with `drydock mcp` (an installed or `npx` package — the MCP server ships bundled in the
+distribution) or `pnpm mcp` (a source checkout). For an MCP host, point its config at whichever
+matches your install:
 
 ```json
 {
   "mcpServers": {
     "drydock": {
-      "command": "npx",
-      "args": ["tsx", "/absolute/path/to/drydock/scripts/drydock.ts", "mcp"]
+      "command": "drydock",
+      "args": ["mcp"]
     }
   }
 }
 ```
+
+Without a global install, use `"command": "npx"` with `"args": ["-y", "@nilsr0711/drydock",
+"mcp"]`; from a source checkout, run the entrypoint through tsx instead — `"command": "npx"` with
+`"args": ["tsx", "/absolute/path/to/drydock/scripts/drydock.ts", "mcp"]`.
 
 **Tools** (all route through the same service layer as the dashboard):
 

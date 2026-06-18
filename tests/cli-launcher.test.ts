@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   assertSafeHost,
+  childExitCode,
   compareVersions,
   detectInstallKind,
   isLoopbackHost,
@@ -14,6 +15,7 @@ import {
   resolveDataDir,
   resolveDbPath,
   resolveLatestVersion,
+  resolveMcpEntry,
   updateCommand,
 } from "../bin/drydock.mjs";
 
@@ -69,7 +71,19 @@ describe("parseArgs", () => {
   });
 
   it("rejects an unexpected positional argument", () => {
-    expect(() => parseArgs(["mcp"])).toThrow(/mcp/);
+    expect(() => parseArgs(["bogus"])).toThrow(/bogus/);
+  });
+
+  it("recognises the `mcp` subcommand", () => {
+    expect(parseArgs(["mcp"])).toEqual({ mode: "mcp" });
+  });
+
+  it("rejects extra arguments after `mcp`", () => {
+    expect(() => parseArgs(["mcp", "extra"])).toThrow(/extra/);
+  });
+
+  it("lets --help take precedence over `mcp`", () => {
+    expect(parseArgs(["mcp", "--help"])).toEqual({ mode: "help" });
   });
 
   it("recognises the `update` subcommand", () => {
@@ -344,6 +358,31 @@ describe("resolveDbPath", () => {
     expect(resolveDbPath({ env: { DRYDOCK_DB: "/tmp/custom.db" }, home: "/home/jane" })).toBe(
       "/tmp/custom.db",
     );
+  });
+});
+
+describe("resolveMcpEntry", () => {
+  it("points at the bundled MCP server beside the standalone runtime", () => {
+    expect(resolveMcpEntry("/opt/drydock")).toBe(
+      join("/opt/drydock", ".next", "standalone", "mcp-server.cjs"),
+    );
+  });
+});
+
+describe("childExitCode", () => {
+  it("forwards a normal exit code unchanged", () => {
+    expect(childExitCode(0, null)).toBe(0);
+    expect(childExitCode(2, null)).toBe(2);
+  });
+
+  it("maps any signal termination to the POSIX 128 + signo convention", () => {
+    expect(childExitCode(null, "SIGINT")).toBe(130);
+    expect(childExitCode(null, "SIGTERM")).toBe(143);
+    expect(childExitCode(null, "SIGKILL")).toBe(137);
+  });
+
+  it("falls back to 1 when no signal is reported", () => {
+    expect(childExitCode(null, null)).toBe(1);
   });
 });
 
