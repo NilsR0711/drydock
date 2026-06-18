@@ -15,6 +15,10 @@ export const settingsSchema = z.object({
   // in-memory shutdown flag. The in-process flag in orchestrator/runtime.ts
   // remains for transient graceful-shutdown draining only.
   draining: z.boolean().default(false),
+  // Daily USD budget gating new runs (SPEC §6.1). 0 is off (unlimited) — the
+  // loop then stops only at the per-job cap, provider usage-limit auto-wait, and
+  // pause/drain (issue #234). Defaults to a safe $10 ceiling. A per-repo daily
+  // limit applies the same 0 = off semantics independently.
   dailyCostLimitUsd: z.number().nonnegative().default(10),
   pollIntervalSec: z.number().int().positive().default(30),
   maxTurns: z.number().int().positive().default(40),
@@ -145,7 +149,12 @@ export function jobsAllowed(db: DB = getDb()): GateResult {
   // new work from starting against dead credentials; in-flight jobs finish.
   // The next healthy probe clears the persisted failures and re-opens the gate.
   if (getCredentialFailures(db).length > 0) return { allowed: false, reason: "auth" };
-  if (todayCost(db) >= s.dailyCostLimitUsd) return { allowed: false, reason: "cost_limit" };
+  // A daily budget of 0 means "off / unlimited" (issue #234), mirroring the
+  // per-job cost cap: only the per-job cap, provider usage-limit auto-wait, and
+  // pause/drain remain as stops. A positive budget still gates new runs.
+  if (s.dailyCostLimitUsd > 0 && todayCost(db) >= s.dailyCostLimitUsd) {
+    return { allowed: false, reason: "cost_limit" };
+  }
   return { allowed: true };
 }
 
@@ -153,7 +162,8 @@ export function jobsAllowed(db: DB = getDb()): GateResult {
 export function repoJobsAllowed(repoId: number, db: DB = getDb()): GateResult {
   const repo = db.select().from(repos).where(eq(repos.id, repoId)).get();
   if (!repo) return { allowed: false, reason: "repo_cost_limit" };
-  if (todayCost(db, repoId) >= repo.dailyCostLimitUsd) {
+  // 0 = off / unlimited for the repo's daily budget too (issue #234).
+  if (repo.dailyCostLimitUsd > 0 && todayCost(db, repoId) >= repo.dailyCostLimitUsd) {
     return { allowed: false, reason: "repo_cost_limit" };
   }
   return { allowed: true };

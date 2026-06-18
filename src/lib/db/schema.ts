@@ -14,6 +14,8 @@ export const repos = sqliteTable("repos", {
   platform: text("platform").notNull().default("github"),
   apiBaseUrl: text("api_base_url"),
   apiToken: text("api_token"),
+  // Per-repo daily USD budget. 0 is off (unlimited), like the global default
+  // and the per-job cap (issue #234).
   dailyCostLimitUsd: real("daily_cost_limit_usd").notNull().default(10),
   adrGating: integer("adr_gating", { mode: "boolean" }).notNull().default(false),
   sequential: integer("sequential", { mode: "boolean" }).notNull().default(true),
