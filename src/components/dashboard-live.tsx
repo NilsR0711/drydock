@@ -57,11 +57,16 @@ export function DashboardLive({
   // Combined spend today against the SUM of each repo's configured daily limit
   // (matching the tooltip); fall back to the schema default for unset limits and
   // always keep the ceiling above today's spend so the gauge stays meaningful.
-  const limit = Math.max(
-    repos.reduce((sum, r) => sum + (r.dailyLimitUsd ?? DEFAULT_DAILY_LIMIT), 0),
-    summary.spendToday,
-    DEFAULT_DAILY_LIMIT,
-  );
+  // If any repo has its daily budget turned off (0 = unlimited, issue #234), the
+  // combined ceiling is effectively unlimited — pass 0 so the gauge says so.
+  const anyUnlimited = repos.some((r) => (r.dailyLimitUsd ?? DEFAULT_DAILY_LIMIT) <= 0);
+  const limit = anyUnlimited
+    ? 0
+    : Math.max(
+        repos.reduce((sum, r) => sum + (r.dailyLimitUsd ?? DEFAULT_DAILY_LIMIT), 0),
+        summary.spendToday,
+        DEFAULT_DAILY_LIMIT,
+      );
 
   // Real 7-day spend trend from the server, with the live value as the last
   // point; fall back to a today-only series if no history was provided.

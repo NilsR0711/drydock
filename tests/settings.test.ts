@@ -182,6 +182,20 @@ describe("jobsAllowed gate", () => {
     expect(jobsAllowed(db).allowed).toBe(true);
   });
 
+  it("treats a daily cost limit of 0 as unlimited (issue #234)", () => {
+    saveSettings({ dailyCostLimitUsd: 0 }, db);
+    db.insert(jobs)
+      .values({
+        repoId,
+        issueNumber: 1,
+        status: "merged",
+        startedAt: Math.floor(Date.now() / 1000),
+        costUsd: 999,
+      })
+      .run();
+    expect(jobsAllowed(db).allowed).toBe(true);
+  });
+
   it("blocks with reason auth while credential failures are persisted (issue #177)", () => {
     saveCredentialStatus(
       {
@@ -236,6 +250,19 @@ describe("repoJobsAllowed gate", () => {
 
   it("allows below the repo limit", () => {
     const repo = addRepo({ path: "/r6", name: "r6", dailyCostLimitUsd: 5 }, db);
+    expect(repoJobsAllowed(repo.id, db).allowed).toBe(true);
+  });
+
+  it("treats a repo daily cost limit of 0 as unlimited (issue #234)", () => {
+    const repo = addRepo({ path: "/r7", name: "r7", dailyCostLimitUsd: 0 }, db);
+    db.insert(jobs)
+      .values({
+        repoId: repo.id,
+        issueNumber: 1,
+        startedAt: Math.floor(Date.now() / 1000),
+        costUsd: 999,
+      })
+      .run();
     expect(repoJobsAllowed(repo.id, db).allowed).toBe(true);
   });
 });

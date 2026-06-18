@@ -45,6 +45,7 @@ export const repoInputSchema = z.object({
     })
     .nullish(),
   apiToken: z.string().nullish(),
+  // 0 = off / unlimited daily budget for this repo (issue #234).
   dailyCostLimitUsd: z.number().nonnegative().default(10),
   adrGating: z.boolean().default(false),
   sequential: z.boolean().default(true),

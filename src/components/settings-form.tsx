@@ -254,9 +254,13 @@ export function SettingsForm({
                 onChange={(e) => set("maxParallelJobs", Number(e.target.value))}
               />
             </Field>
-            <Field label="Daily cost limit (USD)" hint="Stops new runs once reached today.">
+            <Field
+              label="Daily cost limit (USD)"
+              hint="Stops new runs once reached today. 0 disables the daily budget (unlimited)."
+            >
               <Input
                 type="number"
+                min="0"
                 step="0.5"
                 value={s.dailyCostLimitUsd}
                 onChange={(e) => set("dailyCostLimitUsd", Number(e.target.value))}
