@@ -690,7 +690,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
           ISSUE_NUM: job.issueNumber,
           BRANCH: wt.branch,
           REPO_NAME: repo.name,
-          INSTRUCTION: humanInstruction as string,
+          // Cap as the fresh-run fallback does: a pathologically long instruction
+          // must not bloat the resume prompt and fail the run.
+          INSTRUCTION: capPromptText(humanInstruction as string, HUMAN_INSTRUCTION_MAX_CHARS),
           // Keep the resumed run's PR body in the repo's shape too (issue #252).
           PR_FORMAT: resolveTemplateContent(repo.id, TEMPLATE_NAMES.prFormat, db),
         },
