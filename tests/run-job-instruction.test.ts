@@ -43,8 +43,9 @@ function baseDeps(over: Record<string, unknown> = {}) {
     db,
     worktrees: {
       prepare: vi.fn(async () => wt),
-      prepareForBranch: vi.fn(async () => wt),
+      prepareResume: vi.fn(async () => wt),
       commitAndPush: vi.fn(async () => {}),
+      commitAndPushForHuman: vi.fn(async () => true),
       remove: vi.fn(async () => {}),
     },
     runSession: vi.fn(async (job: Job, _prompt: string, _cwd: string) => {
@@ -86,10 +87,10 @@ describe("runJob human-guided resume (issue #257)", () => {
     await runJob(job.id, deps as never);
 
     // The job continues on its existing branch (checked out), not a new one.
-    expect(deps.worktrees.prepareForBranch).toHaveBeenCalledWith(
+    expect(deps.worktrees.prepareResume).toHaveBeenCalledWith(
       expect.anything(),
+      expect.any(Number),
       PRESERVED_BRANCH,
-      expect.any(String),
     );
     expect(deps.worktrees.prepare).not.toHaveBeenCalled();
     // The resume runner is used, not a fresh implement session.
@@ -132,10 +133,10 @@ describe("runJob human-guided resume (issue #257)", () => {
     expect(prompt).toContain("prefer the v2 API");
     // Even on the fresh-run fallback the preserved branch is reused, so the run
     // builds on the prior commits rather than a blank branch.
-    expect(deps.worktrees.prepareForBranch).toHaveBeenCalledWith(
+    expect(deps.worktrees.prepareResume).toHaveBeenCalledWith(
       expect.anything(),
+      expect.any(Number),
       PRESERVED_BRANCH,
-      expect.any(String),
     );
     expect(deps.worktrees.prepare).not.toHaveBeenCalled();
   });

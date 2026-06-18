@@ -31,6 +31,40 @@ export function repoWorktreesDir(repoName: string): string {
   return join(worktreeHome(), "worktrees", sanitize(repoName));
 }
 
+/**
+ * Coding assistants Drydock may spawn (or that a contributor might use) which
+ * stamp their own attribution into commit messages. Kept broad on purpose: the
+ * policy is "no tool/model attribution" (issue #248), not "no Claude", so a
+ * Codex/OpenAI run must be scrubbed just like a Claude one.
+ */
+const AI_ASSISTANT_NAMES = "claude|anthropic|codex|openai|chatgpt|copilot|gemini|cursor|devin";
+
+/**
+ * Lines an AI assistant adds to its own commit messages by default. Repo policy
+ * forbids AI attribution (issue #248), but an agent may still emit a trailer
+ * despite the prompt, so commits are scrubbed before push as defense in depth.
+ * Matched case-insensitively against trimmed lines; a human `Co-Authored-By`
+ * trailer (one that names no known assistant) is deliberately left intact, as is
+ * a non-AI "Generated with …" line (e.g. a build tool).
+ */
+const AI_ATTRIBUTION_LINE = new RegExp(
+  `^(?:co-authored-by:.*\\b(?:${AI_ASSISTANT_NAMES})\\b|🤖?\\s*generated (?:with|by)\\b.*\\b(?:${AI_ASSISTANT_NAMES})\\b)`,
+  "i",
+);
+
+/**
+ * Strip AI-attribution trailers from a commit message, returning the cleaned
+ * message with trailing blank lines collapsed. Pure and side-effect free so it
+ * can guard both Drydock's own commit and an agent's committed history.
+ */
+export function stripAiAttribution(message: string): string {
+  const kept = message.split("\n").filter((line) => !AI_ATTRIBUTION_LINE.test(line.trim()));
+  return kept
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/\s+$/, "");
+}
+
 export class WorktreeError extends Error {}
 
 /**
@@ -123,6 +157,37 @@ export class WorktreeManager {
   }
 
   /**
+   * Re-check out a parked job's preserved branch to resume its prior work (issue
+   * #257). Unlike `prepare` (fresh branch off the default) this restores the
+   * branch the job pushed when it parked (issue #249) so the resumed run builds
+   * on the agent's existing commits.
+   *
+   * The parked attempt may have left its worktree behind (issue #249 skips the
+   * finally cleanup) with the branch still checked out, so the stale worktree +
+   * local branch ref are cleared first — otherwise `worktree add` dies on
+   * "branch already checked out"/"already exists". The branch is then fetched
+   * and force-created from `origin/<branch>` at the canonical job path, making
+   * the restore robust whether or not the local worktree survived.
+   */
+  async prepareResume(repo: Repo, jobId: number, branch: string): Promise<Worktree> {
+    const path = join(repoWorktreesDir(repo.name), `job-${jobId}`);
+    const base = await this.withRepoLock(repo.path, async () => {
+      await this.git(["-C", repo.path, "worktree", "remove", "--force", path]).catch(
+        () => undefined,
+      );
+      rmSync(path, { recursive: true, force: true });
+      await this.git(["-C", repo.path, "worktree", "prune"]).catch(() => undefined);
+      // Drop the local ref so `worktree add -B` re-creates it from origin; the
+      // worktree remove above freed it, so this no longer fails on a checkout.
+      await this.git(["-C", repo.path, "branch", "-D", branch]).catch(() => undefined);
+      await this.git(["-C", repo.path, "fetch", "origin", branch]);
+      await this.git(["-C", repo.path, "worktree", "add", "-B", branch, path, `origin/${branch}`]);
+      return this.resolveBase(repo.path, branch);
+    });
+    return { path, branch, base };
+  }
+
+  /**
    * Add a worktree on a *new* branch cut from the repo's default branch (issue
    * #20). Used to open a follow-up fix PR for a failed post-merge deployment,
    * which must start from the merged mainline rather than a job branch.
@@ -148,23 +213,93 @@ export class WorktreeManager {
     return Number.parseInt(count || "0", 10) > 0;
   }
 
-  async commitAndPush(wt: Worktree, message: string): Promise<void> {
+  /**
+   * Stage everything and ensure the branch carries work to push: commit any
+   * uncommitted edits under `message`, and report whether there is anything to
+   * push at all. Returns false only for a genuine no-op (clean tree AND no
+   * commits beyond the base). Shared by commitAndPush and commitAndPushForHuman.
+   */
+  private async stageForPush(wt: Worktree, message: string): Promise<boolean> {
     await this.git(["add", "-A"], wt.path);
     const dirty = (await this.git(["status", "--porcelain"], wt.path)).trim() !== "";
     if (dirty) {
-      // Uncommitted edits: commit them ourselves under the job's message.
-      await this.git(["commit", "-m", message], wt.path);
-    } else if (!(await this.hasNewCommits(wt))) {
+      // Uncommitted edits: commit them ourselves under the given message,
+      // scrubbed of any AI attribution the message may carry (issue #248).
+      await this.git(["commit", "-m", stripAiAttribution(message)], wt.path);
+      return true;
+    }
+    // Clean tree: push only if the agent committed its own work on top of the
+    // base. No such commits means a genuine no-op run.
+    return this.hasNewCommits(wt);
+  }
+
+  async commitAndPush(wt: Worktree, message: string): Promise<void> {
+    if (!(await this.stageForPush(wt, message))) {
       // Clean tree AND no commits beyond the base: a genuine no-op run.
       // Committing would exit non-zero with a confusing git error; signal it
       // distinctly (issue #50) so callers report a clear "no changes" outcome.
       throw new EmptyCommitError();
     }
+    // Defense in depth (issue #248): an agent may commit its own work with an AI
+    // attribution trailer despite the prompt forbidding it. Rewrite the commits
+    // on top of the base to strip those trailers before they ever leave the box.
+    await this.stripAttributionFromHistory(wt);
     // Push whatever the branch holds — the commit we just made, or the commits
     // the agent made itself. A senior-engineer-style agent often commits its
     // own finished work; discarding it as "no changes" lost correct results
     // (issue #206).
     await this.git(["push", "-u", "origin", wt.branch], wt.path);
+  }
+
+  /**
+   * Commit and push a parked job's work so a human (or a later resume) can pick
+   * up from real commits instead of starting over (issue #249). Returns whether
+   * anything was preserved: false for a genuine no-op, so the caller can still
+   * clean the worktree up. Unlike commitAndPush this never throws
+   * EmptyCommitError — parking a no-op run is an expected, non-exceptional path.
+   */
+  async commitAndPushForHuman(wt: Worktree, message: string): Promise<boolean> {
+    if (!(await this.stageForPush(wt, message))) return false;
+    // A branch handed to a human must carry the same attribution guarantee as a
+    // PR branch (issue #248): scrub any trailer before it leaves the box.
+    await this.stripAttributionFromHistory(wt);
+    await this.git(["push", "-u", "origin", wt.branch], wt.path);
+    return true;
+  }
+
+  /**
+   * Scrub AI-attribution trailers from the commits the worktree added on top of
+   * its base. The range `base..HEAD` is local-only (never yet pushed), so the
+   * replay keeps every caller's push fast-forward. Commits with clean messages
+   * are replayed verbatim; only attributed ones are amended.
+   */
+  private async stripAttributionFromHistory(wt: Worktree): Promise<void> {
+    if (!wt.base) return;
+    const out = (await this.git(["rev-list", "--reverse", `${wt.base}..HEAD`], wt.path)).trim();
+    if (!out) return;
+    const shas = out.split("\n");
+
+    const commits: { sha: string; original: string; cleaned: string }[] = [];
+    let needsRewrite = false;
+    for (const sha of shas) {
+      const original = (await this.git(["log", "-1", "--format=%B", sha], wt.path)).replace(
+        /\s+$/,
+        "",
+      );
+      const cleaned = stripAiAttribution(original);
+      commits.push({ sha, original, cleaned });
+      if (cleaned !== original) needsRewrite = true;
+    }
+    if (!needsRewrite) return;
+
+    // Replay the range from the base, rewriting only the offending messages.
+    await this.git(["reset", "--hard", wt.base], wt.path);
+    for (const commit of commits) {
+      await this.git(["cherry-pick", commit.sha], wt.path);
+      if (commit.cleaned !== commit.original) {
+        await this.git(["commit", "--amend", "-m", commit.cleaned], wt.path);
+      }
+    }
   }
 
   async remove(wt: Worktree, repoPath: string): Promise<void> {

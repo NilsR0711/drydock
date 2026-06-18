@@ -414,6 +414,21 @@ export function SettingsForm({
         </div>
 
         <div className="flex flex-col gap-6">
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">Needs-human sound</p>
+              <p className="text-xs text-muted-foreground">
+                Play a short sound in an open dashboard tab the moment a job parks and needs you.
+                Honors your browser's autoplay policy — it sounds after your first interaction.
+              </p>
+            </div>
+            <Switch
+              checked={s.needsHumanSoundEnabled}
+              onChange={(v) => set("needsHumanSoundEnabled", v)}
+              aria-label="Needs-human sound"
+            />
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Telegram bot token" hint="Leave empty to disable Telegram.">
               <Input
