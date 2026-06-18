@@ -110,11 +110,12 @@ function TagField({
 }
 
 /**
- * Opt-in automation controls for a repo, grouped into labelled stages. Every
- * stage is off by default and consumes paid agent usage; Drydock auto-merges a
- * PR only once its configured gates pass, and merging a PR with no automated
- * checks at all is a separate, explicit opt-in. List fields persist on blur;
- * toggles/selects persist immediately.
+ * Automation controls for a repo, grouped into labelled stages. Most stages are
+ * off by default; PR review-feedback is on by default (opt-out, issue #213).
+ * Each consumes paid agent usage; Drydock auto-merges a PR only once its
+ * configured gates pass, and merging a PR with no automated checks at all is a
+ * separate, explicit opt-in. List fields persist on blur; toggles/selects
+ * persist immediately.
  */
 export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoTriage, setAutoTriage] = useState(repo.autoTriageEnabled);
@@ -178,10 +179,10 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <Alert tone="info" icon={ShieldCheck} title="Opt-in & bounded">
-        Every stage is off by default and consumes paid agent usage. Drydock auto-merges a PR only
-        once its configured gates pass — and merging a PR with no automated checks at all requires
-        the explicit opt-in below.
+      <Alert tone="info" icon={ShieldCheck} title="Bounded & configurable">
+        Most stages are off by default and consume paid agent usage; PR review-feedback is on by
+        default and can be turned off below. Drydock auto-merges a PR only once its configured gates
+        pass — and merging a PR with no automated checks at all requires the explicit opt-in below.
       </Alert>
 
       <div className="grid gap-4 lg:grid-cols-2">
