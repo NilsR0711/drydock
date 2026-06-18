@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, type LucideIcon } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import type { Tone } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -14,7 +14,7 @@ const TONE_CHIP: Record<Tone, string> = {
 };
 
 export interface SectionProps {
-  icon?: LucideIcon;
+  icon?: ReactNode;
   title: ReactNode;
   description?: ReactNode;
   defaultOpen?: boolean;
@@ -26,7 +26,7 @@ export interface SectionProps {
 }
 
 export function Section({
-  icon: Icon,
+  icon,
   title,
   description,
   defaultOpen = true,
@@ -40,14 +40,14 @@ export function Section({
   const bodyId = useId();
   const toggle = () => setOpen((o) => !o);
 
-  const chip = Icon && (
+  const chip = icon && (
     <span
       className={cn(
         "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
         TONE_CHIP[tone],
       )}
     >
-      <Icon className="h-4 w-4" />
+      {icon}
     </span>
   );
   const heading = (
