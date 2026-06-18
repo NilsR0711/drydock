@@ -172,6 +172,12 @@ export const jobs = sqliteTable(
     repoId: integer("repo_id")
       .notNull()
       .references(() => repos.id, { onDelete: "cascade" }),
+    // Discriminates the job's flow (issue #256): "issue" runs the
+    // implement→PR→CI→merge pipeline; "release" runs an agent-driven release in
+    // its own runner. Release jobs carry the sentinel issueNumber 0 — `kind` is
+    // the source of truth, so issueNumber stays NOT NULL (no nullable blast
+    // radius across the issue-flow code).
+    kind: text("kind").notNull().default("issue"),
     issueNumber: integer("issue_number").notNull(),
     status: text("status").notNull().default("queued"),
     branch: text("branch"),
@@ -217,7 +223,9 @@ export const jobs = sqliteTable(
     // uniqueness is scoped to live (non-terminal) jobs via a partial index.
     dedupeActiveUnique: uniqueIndex("jobs_dedupe_active_unique")
       .on(t.dedupeKey)
-      .where(sql`${t.dedupeKey} is not null and ${t.status} not in ('merged', 'aborted')`),
+      .where(
+        sql`${t.dedupeKey} is not null and ${t.status} not in ('merged', 'released', 'aborted')`,
+      ),
   }),
 );
 
@@ -472,8 +480,14 @@ export const releaseRuns = sqliteTable(
     repoId: integer("repo_id")
       .notNull()
       .references(() => repos.id, { onDelete: "cascade" }),
-    // "auto" (triggered by a merged PR) or "manual" (operator-forced publish).
+    // "auto" (triggered by a merged PR) or "manual" (operator-forced publish),
+    // both deterministic; or "agent" (issue #256), an agent-driven release run
+    // backed by a job whose live log streams the agent's release steps.
     mode: text("mode").notNull().default("auto"),
+    // The job that executes an agent-driven release (mode "agent", issue #256);
+    // null for deterministic auto/manual runs. Lets the panel deep-link to the
+    // job's live log.
+    jobId: integer("job_id").references(() => jobs.id, { onDelete: "set null" }),
     // The merged PR and its merge commit SHA that triggered an auto run; both
     // null for a manual run. The SHA dedupes auto runs (one run per merge).
     triggerPrNumber: integer("trigger_pr_number"),

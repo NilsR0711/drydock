@@ -4,6 +4,7 @@ import {
   canTransition,
   InvalidTransitionError,
   isJobStatus,
+  TERMINAL_STATES,
 } from "@/lib/orchestrator/state-machine";
 
 describe("state machine", () => {
@@ -44,6 +45,21 @@ describe("state machine", () => {
     expect(canTransition("waiting_limit", "merged")).toBe(false);
     expect(canTransition("merged", "waiting_limit")).toBe(false);
     expect(canTransition("queued", "waiting_limit")).toBe(false);
+  });
+
+  it("lets an agent release job finish directly from working (issue #256)", () => {
+    // A release job has no PR/CI, so it reaches its terminal success state
+    // straight from working — without weakening the issue-job invariant that
+    // merged is only reachable via ci_running.
+    expect(canTransition("working", "released")).toBe(true);
+    expect(canTransition("working", "merged")).toBe(false);
+  });
+
+  it("treats released as a terminal state", () => {
+    expect(canTransition("released", "working")).toBe(false);
+    expect(canTransition("released", "queued")).toBe(false);
+    expect(TERMINAL_STATES).toContain("released");
+    expect(isJobStatus("released")).toBe(true);
   });
 
   it("throws on invalid transition", () => {

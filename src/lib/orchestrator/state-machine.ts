@@ -6,6 +6,11 @@ export const JOB_STATES = [
   "retrying",
   "waiting_limit",
   "merged",
+  // Terminal success of an agent-driven release job (issue #256). A release has
+  // no PR/CI, so it is its own terminal state rather than reusing `merged`
+  // (which would weaken the issue-job invariant that merged is only reachable
+  // via ci_running, and would pollute PR-merge analytics).
+  "released",
   "needs_human",
   "aborted",
   "interrupted",
@@ -16,7 +21,9 @@ export type JobStatus = (typeof JOB_STATES)[number];
 /** Allowed forward transitions per SPEC §3. Terminal states have no successors. */
 const TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   queued: ["working", "aborted", "interrupted"],
-  working: ["ci_running", "waiting_limit", "needs_human", "aborted", "interrupted"],
+  // `released` is the agent-release terminal success (issue #256); reachable
+  // only from working because a release job never opens a PR or runs CI.
+  working: ["ci_running", "waiting_limit", "released", "needs_human", "aborted", "interrupted"],
   ci_running: ["ci_failed", "merged", "needs_human", "aborted", "interrupted"],
   ci_failed: ["retrying", "needs_human", "aborted", "interrupted"],
   retrying: ["ci_running", "needs_human", "aborted", "interrupted"],
@@ -25,12 +32,13 @@ const TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   // still requeue or abort it by hand.
   waiting_limit: ["queued", "needs_human", "aborted", "interrupted"],
   merged: [],
+  released: [],
   needs_human: ["queued", "aborted"],
   aborted: [],
   interrupted: ["queued", "aborted"],
 };
 
-export const TERMINAL_STATES: readonly JobStatus[] = ["merged", "aborted"];
+export const TERMINAL_STATES: readonly JobStatus[] = ["merged", "released", "aborted"];
 
 export function isJobStatus(s: string): s is JobStatus {
   return (JOB_STATES as readonly string[]).includes(s);

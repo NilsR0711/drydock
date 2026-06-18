@@ -11,6 +11,8 @@ export function createJob(
     model?: string;
     agent?: string;
     maxTurns?: number;
+    /** "issue" (default) or "release" — the job's flow discriminator (issue #256). */
+    kind?: "issue" | "release";
     /** Optional dedupe key; uniqueness is enforced across live jobs (issue #23). */
     dedupeKey?: string;
   },
@@ -21,6 +23,7 @@ export function createJob(
     .values({
       repoId: input.repoId,
       issueNumber: input.issueNumber,
+      kind: input.kind ?? "issue",
       status: "queued",
       model: input.model,
       agent: input.agent ?? "claude",
@@ -62,7 +65,7 @@ export function transitionJob(
     const now = Math.floor(Date.now() / 1000);
     const extra: Partial<Job> = {};
     if (to === "working" && !job.startedAt) extra.startedAt = now;
-    if (["merged", "needs_human", "aborted"].includes(to)) extra.finishedAt = now;
+    if (["merged", "released", "needs_human", "aborted"].includes(to)) extra.finishedAt = now;
     const row = tx
       .update(jobs)
       .set({ ...extra, ...patch, status: to })
