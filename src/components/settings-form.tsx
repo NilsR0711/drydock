@@ -266,9 +266,10 @@ export function SettingsForm({
                 onChange={(e) => set("dailyCostLimitUsd", Number(e.target.value))}
               />
             </Field>
-            <Field label="Max turns" hint="Hard cap on agent turns per job.">
+            <Field label="Max turns" hint="Hard cap on agent turns per job. 0 = unlimited.">
               <Input
                 type="number"
+                min="0"
                 value={s.maxTurns}
                 onChange={(e) => set("maxTurns", Number(e.target.value))}
               />
