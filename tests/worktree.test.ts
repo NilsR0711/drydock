@@ -1,10 +1,17 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Repo } from "@/lib/db/schema";
 import type { CommandResult, CommandRunner } from "@/lib/exec/runner";
-import { EmptyCommitError, WorktreeManager, worktreeHome } from "@/lib/git/worktree";
+import { spawnRunner } from "@/lib/exec/runner";
+import {
+  EmptyCommitError,
+  stripAiAttribution,
+  type Worktree,
+  WorktreeManager,
+  worktreeHome,
+} from "@/lib/git/worktree";
 
 const repo = { id: 7, path: "/repos/acme", name: "acme", defaultBranch: "main" } as Repo;
 
@@ -148,6 +155,8 @@ describe("WorktreeManager", () => {
     const wt = await m.prepare(repo, 1, 5);
     calls.length = 0;
     await m.commitAndPush(wt, "fix #5");
+    // prepare()'s mocked rev-parse yields an empty base here, so the attribution
+    // scan short-circuits (it has no range to replay) and we go straight to push.
     expect(calls.map((c) => c.args.slice(0, 2))).toEqual([
       ["add", "-A"],
       ["status", "--porcelain"],
@@ -182,10 +191,16 @@ describe("WorktreeManager", () => {
     const calls: { args: string[] }[] = [];
     const run: CommandRunner = async (_cmd, args) => {
       calls.push({ args });
-      // Clean tree, but HEAD is one commit ahead of the recorded base.
-      const stdout = args[0] === "rev-list" ? "1\n" : "";
-      return { stdout, stderr: "", exitCode: 0 } satisfies CommandResult;
+      // Clean tree, HEAD one commit ahead of base (rev-list --count → 1), and the
+      // agent's commit message carries no AI attribution (git log → clean subject).
+      if (args[0] === "rev-list" && args.includes("--count")) return ok("1\n");
+      if (args[0] === "rev-list" && args.includes("--reverse")) return ok("agentsha\n");
+      if (args[0] === "log") return ok("feat: real work the agent committed\n");
+      return ok("");
     };
+    function ok(stdout: string): CommandResult {
+      return { stdout, stderr: "", exitCode: 0 };
+    }
     const m = new WorktreeManager(run);
     const wt = { path: "/wt", branch: "drydock/issue-1-job-1", base: "base000" };
     await expect(m.commitAndPush(wt, "fix #5")).resolves.toBeUndefined();
@@ -193,10 +208,76 @@ describe("WorktreeManager", () => {
       ["add", "-A"],
       ["status", "--porcelain"],
       ["rev-list", "--count"],
+      ["rev-list", "--reverse"],
+      ["log", "-1"],
       ["push", "-u"],
     ]);
-    // It must reuse the agent's commit, not stack an empty one on top.
+    // It must reuse the agent's commit, not stack an empty one on top, and a
+    // clean message means no history rewrite (no reset/cherry-pick).
     expect(calls.some((c) => c.args[0] === "commit")).toBe(false);
+    expect(calls.some((c) => c.args[0] === "reset")).toBe(false);
+    expect(calls.some((c) => c.args[0] === "cherry-pick")).toBe(false);
+  });
+
+  it("stripAiAttribution drops Claude trailers but keeps the real message", () => {
+    const msg = [
+      "feat(api): add pagination",
+      "",
+      "Implements cursor-based paging.",
+      "",
+      "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+      "",
+      "Co-Authored-By: Claude <noreply@anthropic.com>",
+    ].join("\n");
+    const out = stripAiAttribution(msg);
+    expect(out).toBe(
+      ["feat(api): add pagination", "", "Implements cursor-based paging."].join("\n"),
+    );
+    expect(out).not.toMatch(/claude/i);
+    expect(out).not.toMatch(/co-authored-by/i);
+  });
+
+  it("stripAiAttribution keeps a human co-author trailer", () => {
+    const msg = "fix: bug\n\nCo-Authored-By: Jane Dev <jane@example.com>";
+    expect(stripAiAttribution(msg)).toBe(msg);
+  });
+
+  it("stripAiAttribution leaves a clean message untouched", () => {
+    const msg = "refactor(core): extract helper\n\nNo trailers here.";
+    expect(stripAiAttribution(msg)).toBe(msg);
+  });
+
+  it("commitAndPush rewrites agent commits that carry AI attribution (issue #248)", async () => {
+    // The agent committed its own work and left a `Co-Authored-By: Claude`
+    // trailer. Drydock must rewrite the offending commit's message before push.
+    const calls: { args: string[] }[] = [];
+    const run: CommandRunner = async (_cmd, args) => {
+      calls.push({ args });
+      const ok = (stdout: string): CommandResult => ({ stdout, stderr: "", exitCode: 0 });
+      if (args[0] === "rev-list" && args.includes("--count")) return ok("2\n");
+      if (args[0] === "rev-list" && args.includes("--reverse")) return ok("sha1\nsha2\n");
+      if (args[0] === "log" && args.includes("sha1")) {
+        return ok("feat: one\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n");
+      }
+      if (args[0] === "log" && args.includes("sha2")) return ok("fix: two\n");
+      return ok("");
+    };
+    const m = new WorktreeManager(run);
+    const wt = { path: "/wt", branch: "drydock/issue-1-job-1", base: "base000" };
+    await m.commitAndPush(wt, "fix #5");
+
+    // Range is replayed from base: reset, then cherry-pick each commit; only the
+    // attributed one is amended with the cleaned message.
+    expect(calls.some((c) => c.args[0] === "reset" && c.args.includes("base000"))).toBe(true);
+    const cherryPicks = calls.filter((c) => c.args[0] === "cherry-pick").map((c) => c.args[1]);
+    expect(cherryPicks).toEqual(["sha1", "sha2"]);
+    const amend = calls.find((c) => c.args[0] === "commit" && c.args.includes("--amend"));
+    expect(amend).toBeDefined();
+    expect(amend?.args[amend.args.length - 1]).toBe("feat: one");
+    // Exactly one amend — the clean commit is replayed as-is.
+    expect(calls.filter((c) => c.args.includes("--amend"))).toHaveLength(1);
+    // Push happens last.
+    expect(calls.at(-1)?.args.slice(0, 2)).toEqual(["push", "-u"]);
   });
 
   it("commitAndPushForHuman commits dirty edits and pushes, returning true (issue #249)", async () => {
@@ -292,6 +373,62 @@ describe("WorktreeManager", () => {
     release();
     await Promise.all([p1, p2]);
     expect(order).toEqual(["a-start", "a-end", "b"]);
+  });
+
+  it("scrubs AI attribution from a real agent commit before push (issue #248)", async () => {
+    // End-to-end against real git: an agent commits its own work carrying the
+    // default Claude trailers; commitAndPush must rewrite the branch so the
+    // pushed history is attribution-free, while preserving the real subject.
+    const root = mkdtempSync(join(tmpdir(), "drydock-attr-"));
+    const git = async (args: string[], cwd: string) => {
+      const r = await spawnRunner("git", args, cwd);
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+      return r.stdout;
+    };
+    try {
+      const origin = join(root, "origin.git");
+      const work = join(root, "work");
+      await git(["init", "--bare", "-b", "main", origin], root);
+      await git(["init", "-b", "main", work], root);
+      await git(["config", "user.email", "dev@example.com"], work);
+      await git(["config", "user.name", "Dev"], work);
+      await git(["remote", "add", "origin", origin], work);
+      writeFileSync(join(work, "README.md"), "base\n");
+      await git(["add", "-A"], work);
+      await git(["commit", "-m", "chore: init"], work);
+      const base = (await git(["rev-parse", "HEAD"], work)).trim();
+
+      await git(["checkout", "-b", "drydock/issue-1-job-1"], work);
+      writeFileSync(join(work, "a.txt"), "a\n");
+      await git(["add", "-A"], work);
+      await git(
+        [
+          "commit",
+          "-m",
+          "feat: add a\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
+        ],
+        work,
+      );
+      writeFileSync(join(work, "b.txt"), "b\n");
+      await git(["add", "-A"], work);
+      await git(["commit", "-m", "fix: add b"], work);
+
+      const wt: Worktree = { path: work, branch: "drydock/issue-1-job-1", base };
+      await new WorktreeManager(spawnRunner).commitAndPush(wt, "fix #1");
+
+      const log = await git(["log", "--format=%B", `${base}..HEAD`], work);
+      expect(log).not.toMatch(/co-authored-by/i);
+      expect(log).not.toMatch(/generated with/i);
+      expect(log).not.toMatch(/claude/i);
+      // The real subjects survive the rewrite.
+      expect(log).toMatch(/feat: add a/);
+      expect(log).toMatch(/fix: add b/);
+      // The branch reached the remote.
+      const remote = await git(["log", "origin/drydock/issue-1-job-1", "--format=%s"], work);
+      expect(remote).toMatch(/feat: add a/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("worktreeHome honours DRYDOCK_HOME", () => {
