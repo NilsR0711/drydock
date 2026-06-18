@@ -114,3 +114,8 @@ branches in the session code.
 - Network-off by default may break toolchains that fetch during tests; those
   repos opt into network access explicitly.
 - Off by default: with `sandbox: none`, behavior is identical to before #182.
+
+### Deliberate boundaries (first cut)
+
+- **Only the implement and CI-fix/limit resume sessions are containerized.** These are the runs that write code and execute the repo's build/test scripts — the injection surface this ADR targets. The read-only one-shot passes (plan, verify, PR audit, decomposition) are *not* sandboxed here: decomposition and PR-question run at the driver-sweep level with no worktree to mount, and verify/audit run on a captured diff. Extending the sandbox to the worktree-backed one-shots (the plan stage) is a clean follow-up; it is intentionally out of scope for this first cut and called out so the boundary is not mistaken for total.
+- **File ownership on Linux + rootful Docker.** A container running as root writes worktree files owned by root, which the host orchestrator user then cannot remove (worktree cleanup logs the failure but does not crash). Naively adding `--user <uid>:<gid>` would fix ownership but break the read-only auth mount (mode-600 config becomes unreadable to a different in-container identity) and the image's HOME/toolchain assumptions, so it is deliberately not forced. The recommended setups avoid the issue entirely: **rootless Podman** (maps the container root to the host user, so files are host-owned) or **Docker Desktop** (handles UID mapping in its VM); a devcontainer that defines a non-root user matching the host also works. This is documented rather than papered over.
