@@ -11,6 +11,8 @@ import {
   bulkQueueIssues,
   dequeueIssue,
   listIssues,
+  markIssueNeedsHuman,
+  NEEDS_HUMAN_LABEL,
   queueIssue,
   syncRepoIssues,
 } from "@/lib/issues/service";
@@ -256,6 +258,50 @@ describe("issue queue service (forge orchestration)", () => {
       );
       await expect(queueIssue(repoId, 3, { agent: "gemini" })).rejects.toThrow(/unknown agent/i);
       expect(gh.addLabels).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("markIssueNeedsHuman (issue #251)", () => {
+    it("ensures + adds the needs-human label and drops the queue label on the forge", async () => {
+      const repoId = seedRepo();
+      getDb()
+        .insert(issues)
+        .values({ repoId, number: 3, title: "seed", labels: '["drydock:queue"]', priority: 0 })
+        .run();
+
+      await markIssueNeedsHuman(repoId, 3);
+
+      expect(gh.ensureLabel).toHaveBeenCalledWith(NEEDS_HUMAN_LABEL, expect.any(Object));
+      expect(gh.addLabels).toHaveBeenCalledWith(3, [NEEDS_HUMAN_LABEL]);
+      expect(gh.removeLabels).toHaveBeenCalledWith(3, ["drydock:queue"]);
+      const ensureOrder = gh.ensureLabel.mock.invocationCallOrder[0] ?? 0;
+      const addOrder = gh.addLabels.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY;
+      expect(ensureOrder).toBeLessThan(addOrder);
+    });
+
+    it("mirrors the label change into the local cache", async () => {
+      const repoId = seedRepo();
+      getDb()
+        .insert(issues)
+        .values({
+          repoId,
+          number: 3,
+          title: "seed",
+          labels: '["drydock:queue","bug"]',
+          priority: 0,
+        })
+        .run();
+
+      await markIssueNeedsHuman(repoId, 3);
+
+      const cached = JSON.parse(listIssues(repoId).find((i) => i.number === 3)?.labels ?? "[]");
+      expect(cached).toContain(NEEDS_HUMAN_LABEL);
+      expect(cached).toContain("bug");
+      expect(cached).not.toContain("drydock:queue");
+    });
+
+    it("throws for an unknown repo", async () => {
+      await expect(markIssueNeedsHuman(999, 1)).rejects.toThrow(/repo 999 not found/);
     });
   });
 });

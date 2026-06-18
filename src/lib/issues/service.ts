@@ -12,6 +12,18 @@ const QUEUE_LABEL_OPTS = {
   description: "Queued for processing by Drydock",
 } as const;
 
+/**
+ * Label Drydock applies when it parks a job for a human decision (issue #251).
+ * The evaluator already treats it as a block label, so a re-synced issue stays
+ * out of the auto-process queue until a human clears it.
+ */
+export const NEEDS_HUMAN_LABEL = "needs-human";
+
+const NEEDS_HUMAN_LABEL_OPTS = {
+  color: "d93f0b",
+  description: "Drydock parked this issue for a human decision",
+} as const;
+
 function requireRepo(repoId: number, db: DB) {
   const repo = getRepo(repoId, db);
   if (!repo) throw new Error(`repo ${repoId} not found`);
@@ -190,6 +202,25 @@ export async function dequeueIssue(
   // A dequeued issue keeps no override; the next queue operation sets its own.
   setIssueOverrides(repoId, issueNumber, {}, db);
   return listIssues(repoId, db);
+}
+
+/**
+ * Mark an issue as needing a human decision (issue #251): ensure + add the
+ * `needs-human` label, drop the queue label so a re-sync won't re-enqueue it,
+ * and mirror both changes in the local cache. Forge-first so GitHub is the
+ * authoritative state; the local mirror keeps the dashboard in step.
+ */
+export async function markIssueNeedsHuman(
+  repoId: number,
+  issueNumber: number,
+  db: DB = getDb(),
+): Promise<void> {
+  const repo = requireRepo(repoId, db);
+  const gh = getForge(repo);
+  await gh.ensureLabel(NEEDS_HUMAN_LABEL, NEEDS_HUMAN_LABEL_OPTS);
+  await gh.addLabels(issueNumber, [NEEDS_HUMAN_LABEL]);
+  await gh.removeLabels(issueNumber, [repo.queueLabel]);
+  mirrorLabelsLocal(repoId, issueNumber, [NEEDS_HUMAN_LABEL], [repo.queueLabel], db);
 }
 
 /**
