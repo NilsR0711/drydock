@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.1.7](https://github.com/NilsR0711/drydock/compare/v0.1.6...v0.1.7) (2026-06-18)
+
+
+### Features
+
+* **analytics:** slice outcomes by model, agent, and prompt version ([#178](https://github.com/NilsR0711/drydock/issues/178)) ([4cdfa72](https://github.com/NilsR0711/drydock/commit/4cdfa726f69ecb8796e22d6eacadd682da02914c))
+* **cli:** run Drydock as a background daemon (start/stop/status/restart) ([#228](https://github.com/NilsR0711/drydock/issues/228)) ([2666de5](https://github.com/NilsR0711/drydock/commit/2666de53eb2991b7f4795c8fa2e19897c3cb6796))
+* **dashboard:** proactive Codex OAuth usage gauge ([#189](https://github.com/NilsR0711/drydock/issues/189)) ([#227](https://github.com/NilsR0711/drydock/issues/227)) ([4b5ab77](https://github.com/NilsR0711/drydock/commit/4b5ab772b4b6ba050fecde6ae8ee67d10b8e5bb0))
+* opt-in sandboxed agent execution (Docker/Podman isolation) ([#182](https://github.com/NilsR0711/drydock/issues/182)) ([#226](https://github.com/NilsR0711/drydock/issues/226)) ([fbe6a17](https://github.com/NilsR0711/drydock/commit/fbe6a171116fa88de0ad1d65823fc01750cb3008))
+* **orchestrator:** generate meaningful PR title, body, and commit from agent-authored .drydock/PR.md ([#212](https://github.com/NilsR0711/drydock/issues/212)) ([#222](https://github.com/NilsR0711/drydock/issues/222)) ([d4af43a](https://github.com/NilsR0711/drydock/commit/d4af43afd1857d8577703281b54daac32388a2a2))
+* proactive Claude OAuth usage indicator in the dashboard ([#188](https://github.com/NilsR0711/drydock/issues/188)) ([#225](https://github.com/NilsR0711/drydock/issues/225)) ([a94abc1](https://github.com/NilsR0711/drydock/commit/a94abc1fbfcc4966cd38ef9ad3aa9f5b94492742))
+* **repos:** default review feedback ON for autonomous operation ([#213](https://github.com/NilsR0711/drydock/issues/213)) ([#221](https://github.com/NilsR0711/drydock/issues/221)) ([94053c2](https://github.com/NilsR0711/drydock/commit/94053c26155378a011a5a503d21306995ef483a6))
+
+
+### Bug Fixes
+
+* **build:** boot the standalone server (trace metadata runtime + smoke test) ([#209](https://github.com/NilsR0711/drydock/issues/209)) ([#223](https://github.com/NilsR0711/drydock/issues/223)) ([3273bde](https://github.com/NilsR0711/drydock/commit/3273bdea78219374e0f5b50d613c3013417f9686))
+* **ci:** drop registry-url so npm uses OIDC trusted publishing ([#198](https://github.com/NilsR0711/drydock/issues/198)) ([6d5cc7b](https://github.com/NilsR0711/drydock/commit/6d5cc7b8c43d41949f16ff5006241ed74df057b3))
+* **dev:** run the dev server on webpack with a capped heap ([#215](https://github.com/NilsR0711/drydock/issues/215)) ([0a6ebb3](https://github.com/NilsR0711/drydock/commit/0a6ebb33f113e370bdfa20681dee094773949a6c)), closes [#204](https://github.com/NilsR0711/drydock/issues/204)
+* **orchestrator:** allow opt-in auto-merge for repos with no CI checks ([#207](https://github.com/NilsR0711/drydock/issues/207)) ([#219](https://github.com/NilsR0711/drydock/issues/219)) ([17e738f](https://github.com/NilsR0711/drydock/commit/17e738ff362ee0b687831b2e011a0bd9b0442574))
+* **orchestrator:** embed issue title and body in the implement prompt ([#205](https://github.com/NilsR0711/drydock/issues/205)) ([1585291](https://github.com/NilsR0711/drydock/commit/158529184e9d4bafff92882fde213196ca3cc2c5))
+* **orchestrator:** reclaim stale instance.lock after crash / pid reuse ([#220](https://github.com/NilsR0711/drydock/issues/220)) ([dd06b64](https://github.com/NilsR0711/drydock/commit/dd06b6454ea0b0f5bac691b2161a50b81ac8fdc8))
+* **repos:** detect default branch on add instead of hardcoding "main" ([#210](https://github.com/NilsR0711/drydock/issues/210)) ([#224](https://github.com/NilsR0711/drydock/issues/224)) ([0b2d9e6](https://github.com/NilsR0711/drydock/commit/0b2d9e628d63cb94d4a5b7074188a3d4fa206e1b))
+* **ui:** render Section icon as ReactNode to fix RSC crash on /repos/[id] ([#214](https://github.com/NilsR0711/drydock/issues/214)) ([0e99504](https://github.com/NilsR0711/drydock/commit/0e995042688a850f00bd01302e8470c845af8917)), closes [#208](https://github.com/NilsR0711/drydock/issues/208)
+* **worktree:** preserve agent work when the agent commits ("Agent produced no changes") ([#218](https://github.com/NilsR0711/drydock/issues/218)) ([371c43c](https://github.com/NilsR0711/drydock/commit/371c43ce2de1014deaf7bd1fe4773563ec1b3ce7))
+
 ## [0.1.6](https://github.com/NilsR0711/drydock/compare/v0.1.5...v0.1.6) (2026-06-11)
 
 
