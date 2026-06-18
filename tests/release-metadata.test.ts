@@ -32,7 +32,7 @@ describe("parseReleaseMetadata", () => {
     expect(parseReleaseMetadata("   \n\n")).toBeNull();
   });
 
-  it("returns null when only a tag line is present (no title)", () => {
+  it("falls back to the tag as the title when only a tag line is present", () => {
     expect(parseReleaseMetadata("Tag: v1.0.0")).toEqual({
       tag: "v1.0.0",
       title: "v1.0.0",

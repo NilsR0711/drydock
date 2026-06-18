@@ -597,6 +597,7 @@ export async function resumeAgentSession(
         sessionId,
         model,
         maxTurns,
+        bypassPermissions: deps.bypassPermissions,
       })
     : null;
   // Fallback: agents that can't resume retry from scratch with the fix prompt.
@@ -606,6 +607,7 @@ export async function resumeAgentSession(
       prompt,
       model,
       maxTurns,
+      bypassPermissions: deps.bypassPermissions,
     });
 
   // Tail of stderr, retained for provider-limit classification (issue #166).

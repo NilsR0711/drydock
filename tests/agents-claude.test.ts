@@ -56,6 +56,25 @@ describe("claudeProvider", () => {
     expect(args).toContain("claude-haiku-4-5");
   });
 
+  it("keeps full shell access on resume when bypassPermissions is set (issue #256)", () => {
+    const args = claudeProvider.buildResumeArgs({
+      prompt: "continue",
+      sessionId: "sess-abc",
+      model: claudeProvider.resumeModel,
+      maxTurns: 15,
+      bypassPermissions: true,
+    });
+    expect(args).toContain("--dangerously-skip-permissions");
+    // A normal resume (no flag) carries no permission flag at all.
+    const plain = claudeProvider.buildResumeArgs({
+      prompt: "continue",
+      sessionId: "sess-abc",
+      model: claudeProvider.resumeModel,
+      maxTurns: 15,
+    });
+    expect(plain).not.toContain("--dangerously-skip-permissions");
+  });
+
   it("builds a plain one-shot invocation for a text prompt (issue #49)", () => {
     const args = claudeProvider.buildOneShotArgs({
       prompt: "split this issue",

@@ -39,13 +39,16 @@ export const claudeProvider: AgentProvider = {
     "--verbose",
   ],
 
-  buildResumeArgs: ({ prompt, sessionId, model, maxTurns }) => [
+  buildResumeArgs: ({ prompt, sessionId, model, maxTurns, bypassPermissions }) => [
     "-p",
     prompt,
     "--resume",
     sessionId,
     "--max-turns",
     String(maxTurns),
+    // Symmetric with buildStartArgs (issue #256): a resumed release session keeps
+    // its full shell access. Off for the CI-fix/limit resumes that never set it.
+    ...(bypassPermissions ? ["--dangerously-skip-permissions"] : []),
     "--model",
     model,
     "--output-format",
