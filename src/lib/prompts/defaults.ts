@@ -24,6 +24,12 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, string> = {
     "Keep the change focused. You may commit your work or leave it uncommitted —",
     "either is fine. Do not push or open a pull request yourself; Drydock commits",
     "any remaining changes, pushes the branch, and opens the PR.",
+    "",
+    "Before you finish, write a file `.drydock/PR.md` describing the change for the",
+    "pull request. The first line is a Conventional Commit subject (used as the",
+    "commit message and PR title), then a blank line, then a structured body with",
+    "sections: Problem, Solution, Tests, Risks. Drydock reads this file, appends",
+    "`Closes #$ISSUE_NUM` to the body, and removes the file — do not commit it.",
   ].join("\n"),
   "ci-fix": "CI failed. Fix the failure and keep changes minimal.\n\nFailed CI log:\n$CI_LOG",
   plan: [
@@ -48,5 +54,9 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, string> = {
     "interrupted session are gone. Re-apply whatever is missing and finish implementing the issue.",
     "Keep the change focused. You may commit your work or leave it uncommitted — either is fine.",
     "Do not push or open a pull request yourself; Drydock commits, pushes, and opens the PR.",
+    "Before finishing, write `.drydock/PR.md`: first line a Conventional Commit subject (used as",
+    "the commit message and PR title), then a blank line, then a body with Problem, Solution,",
+    "Tests, and Risks sections. Drydock appends `Closes #$ISSUE_NUM` and removes the file — do",
+    "not commit it.",
   ].join("\n"),
 };
