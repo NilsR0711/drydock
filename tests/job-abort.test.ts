@@ -89,6 +89,27 @@ describe("abortAllJobs", () => {
   });
 });
 
+describe("cross-layer registry sharing (issue #232 pattern)", () => {
+  it("finds a handle registered by a separately-evaluated module instance", async () => {
+    // Next.js compiles Server Actions and the orchestrator into separate bundle
+    // layers that evaluate this module independently. `vi.resetModules()` plus a
+    // fresh dynamic import reproduces that: a second module instance whose own
+    // closures are brand new. The abort registry must still be shared (it lives
+    // on globalThis), or the Stop action's `abortJob` would never see the handle
+    // the orchestrator layer registered — the job would flip to aborted while
+    // its subprocess kept running.
+    const orchestratorLayer = await import("@/lib/orchestrator/singleton");
+    const abort = vi.fn();
+    orchestratorLayer.registerAbort(777, abort);
+
+    vi.resetModules();
+    const actionLayer = await import("@/lib/orchestrator/singleton");
+
+    expect(actionLayer.abortJob(777)).toBe(true);
+    expect(abort).toHaveBeenCalledWith(5000);
+  });
+});
+
 describe("reconcileExternalAborts", () => {
   it("kills only handles whose job row was flipped to aborted by another process", () => {
     const db = createDb(":memory:");

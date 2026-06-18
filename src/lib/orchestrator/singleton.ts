@@ -23,8 +23,26 @@ import { reapOrphanedWorktrees } from "./worktree-reaper";
  */
 let started = false;
 
-/** Registry of running subprocess abort callbacks, keyed by job id. */
-const abortHandles = new Map<number, (graceMs?: number) => void>();
+/**
+ * Registry of running subprocess abort callbacks, keyed by job id.
+ *
+ * Lives on `globalThis`, not in a module-local closure, for the same reason as
+ * the dashboard bus (issue #232): Next.js compiles Server Actions, Route
+ * Handlers, and instrumentation into separate bundle layers that each evaluate
+ * this module independently. `registerAbort` runs in the orchestrator layer
+ * that spawned the agent; the Stop/Abort Server Action runs in another. A
+ * module-local Map would give the action its own empty registry, so `abortJob`
+ * would find no handle and only flip the DB row to `aborted` — leaving the
+ * agent subprocess running until the much-later driver-tick reconcile (and
+ * never, if this process does not hold the driver lock). A process-global Map
+ * is shared across every layer, so the action kills the subprocess directly.
+ */
+type AbortHandle = (graceMs?: number) => void;
+const ABORT_HANDLES_KEY = Symbol.for("drydock.orchestrator.abort-handles");
+type GlobalWithAbort = typeof globalThis & { [ABORT_HANDLES_KEY]?: Map<number, AbortHandle> };
+const globalWithAbort = globalThis as GlobalWithAbort;
+globalWithAbort[ABORT_HANDLES_KEY] ??= new Map<number, AbortHandle>();
+const abortHandles: Map<number, AbortHandle> = globalWithAbort[ABORT_HANDLES_KEY];
 
 export function registerAbort(jobId: number, abort: (graceMs?: number) => void): void {
   abortHandles.set(jobId, abort);
