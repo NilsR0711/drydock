@@ -153,6 +153,16 @@ describe("default templates request PR metadata (issue #212)", () => {
   });
 });
 
+describe("default template offers the ask-a-human channel (issue #251)", () => {
+  it("the main template tells the agent to write .drydock/QUESTIONS.md when blocked", () => {
+    expect(DEFAULT_TEMPLATES.default).toContain(".drydock/QUESTIONS.md");
+  });
+
+  it("scopes the ask-a-human channel to genuine human-only decisions", () => {
+    expect(DEFAULT_TEMPLATES.default).toMatch(/only if/i);
+  });
+});
+
 describe("resolveTemplateContent", () => {
   it("falls back to the code default when no row exists", () => {
     expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.main, db)).toBe(DEFAULT_TEMPLATES.default);
