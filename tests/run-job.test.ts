@@ -22,6 +22,7 @@ function fakeWorktrees(removed: { v: boolean }) {
   return {
     prepare: vi.fn(async () => wt),
     commitAndPush: vi.fn(async () => {}),
+    commitAndPushForHuman: vi.fn(async () => false),
     remove: vi.fn(async () => {
       removed.v = true;
     }),

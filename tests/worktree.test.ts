@@ -199,6 +199,64 @@ describe("WorktreeManager", () => {
     expect(calls.some((c) => c.args[0] === "commit")).toBe(false);
   });
 
+  it("commitAndPushForHuman commits dirty edits and pushes, returning true (issue #249)", async () => {
+    const calls: { args: string[]; cwd?: string }[] = [];
+    const run: CommandRunner = async (_cmd, args, cwd) => {
+      calls.push({ args, cwd });
+      const stdout = args[0] === "status" ? " M file.ts\n" : "";
+      return { stdout, stderr: "", exitCode: 0 } satisfies CommandResult;
+    };
+    const m = new WorktreeManager(run);
+    const wt = { path: "/wt", branch: "drydock/issue-1-job-1", base: "base000" };
+    await expect(m.commitAndPushForHuman(wt, "wip: park")).resolves.toBe(true);
+    expect(calls.map((c) => c.args.slice(0, 2))).toEqual([
+      ["add", "-A"],
+      ["status", "--porcelain"],
+      ["commit", "-m"],
+      ["push", "-u"],
+    ]);
+    expect(calls.every((c) => c.cwd === wt.path)).toBe(true);
+  });
+
+  it("commitAndPushForHuman pushes the agent's own commits on a clean tree, returning true (issue #249)", async () => {
+    const calls: { args: string[] }[] = [];
+    const run: CommandRunner = async (_cmd, args) => {
+      calls.push({ args });
+      const stdout = args[0] === "rev-list" ? "1\n" : "";
+      return { stdout, stderr: "", exitCode: 0 } satisfies CommandResult;
+    };
+    const m = new WorktreeManager(run);
+    const wt = { path: "/wt", branch: "drydock/issue-1-job-1", base: "base000" };
+    await expect(m.commitAndPushForHuman(wt, "wip: park")).resolves.toBe(true);
+    expect(calls.map((c) => c.args.slice(0, 2))).toEqual([
+      ["add", "-A"],
+      ["status", "--porcelain"],
+      ["rev-list", "--count"],
+      ["push", "-u"],
+    ]);
+    expect(calls.some((c) => c.args[0] === "commit")).toBe(false);
+  });
+
+  it("commitAndPushForHuman returns false and skips push for a genuine no-op (issue #249)", async () => {
+    // Unlike commitAndPush it must NOT throw — parking a no-op run is a normal
+    // outcome whose caller still cleans the worktree up.
+    const calls: { args: string[] }[] = [];
+    const run: CommandRunner = async (_cmd, args) => {
+      calls.push({ args });
+      const stdout = args[0] === "rev-list" ? "0\n" : "";
+      return { stdout, stderr: "", exitCode: 0 } satisfies CommandResult;
+    };
+    const m = new WorktreeManager(run);
+    const wt = { path: "/wt", branch: "drydock/issue-1-job-1", base: "base000" };
+    await expect(m.commitAndPushForHuman(wt, "wip: park")).resolves.toBe(false);
+    expect(calls.map((c) => c.args.slice(0, 2))).toEqual([
+      ["add", "-A"],
+      ["status", "--porcelain"],
+      ["rev-list", "--count"],
+    ]);
+    expect(calls.some((c) => c.args[0] === "push")).toBe(false);
+  });
+
   it("remove force-removes the worktree and prunes", async () => {
     const { calls, run } = recordingRunner();
     const m = new WorktreeManager(run);
