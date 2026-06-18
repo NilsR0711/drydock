@@ -11,9 +11,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  * `vi.resetModules()` between imports gives a fresh module evaluation, standing
  * in for those distinct bundle layers within a single test process.
  */
+const LISTENERS_KEY = Symbol.for("drydock.dashboard-bus.listeners");
+
 describe("dashboard-bus cross-bundle sharing (issue #232)", () => {
   afterEach(() => {
     vi.resetModules();
+    // resetModules clears the module cache but leaves the process-global Set in
+    // place; drop it too so each test starts from a clean registry and never
+    // inherits a listener leaked by a sibling test.
+    delete (globalThis as Record<symbol, unknown>)[LISTENERS_KEY];
   });
 
   it("delivers an emit from one module instance to a listener on another", async () => {

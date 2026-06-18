@@ -1,5 +1,6 @@
 process.env.DRYDOCK_DB = ":memory:";
 
+import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GET } from "@/app/api/sse/dashboard/route";
 import { getDb } from "@/lib/db/client";
@@ -8,8 +9,7 @@ import { addRepo } from "@/lib/repos/service";
 import { emitDashboardChange } from "@/lib/stream/dashboard-bus";
 
 function get(signal?: AbortSignal): Promise<Response> {
-  const req = new Request("http://127.0.0.1/api/sse/dashboard", { signal });
-  return GET(req as never);
+  return GET(new NextRequest("http://127.0.0.1/api/sse/dashboard", { signal }));
 }
 
 type Reader = ReadableStreamDefaultReader<Uint8Array>;
@@ -52,6 +52,7 @@ describe("GET /api/sse/dashboard", () => {
     const reader = res.body?.getReader();
     if (!reader) throw new Error("response has no body");
     const text = await readBlocks(reader, 1);
+    reader.releaseLock();
     ac.abort();
     const snaps = snapshotsFrom(text);
     expect(snaps[0]?.repos.map((r) => r.name)).toEqual(["alpha"]);
@@ -70,6 +71,7 @@ describe("GET /api/sse/dashboard", () => {
     emitDashboardChange();
 
     const text = await readBlocks(reader, 1);
+    reader.releaseLock();
     ac.abort();
     const snaps = snapshotsFrom(text);
     const last = snaps.at(-1);
