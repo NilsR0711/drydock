@@ -4,7 +4,7 @@ import { createDb, type DB } from "@/lib/db/client";
 import { dashboardSnapshot, dashboardSummary, getClaudeUsageView } from "@/lib/db/queries";
 import { jobs } from "@/lib/db/schema";
 import { latchProviderLimit } from "@/lib/orchestrator/provider-limit";
-import { saveProviderUsage } from "@/lib/orchestrator/provider-usage";
+import { recordCodexUsage, saveProviderUsage } from "@/lib/orchestrator/provider-usage";
 import { addRepo } from "@/lib/repos/service";
 
 let db: DB;
@@ -143,6 +143,14 @@ describe("dashboardSnapshot", () => {
 
   it("includes a Claude usage view, unknown when nothing is recorded (issue #188)", () => {
     expect(dashboardSnapshot(db).claudeUsage.state).toBe("unknown");
+  });
+
+  it("includes a Codex usage view, unknown until a reading exists (issue #189)", () => {
+    expect(dashboardSnapshot(db).codexUsage.state).toBe("unknown");
+    recordCodexUsage({ primary: { usedPercent: 80, resetsInSeconds: 3600 } }, db);
+    const usage = dashboardSnapshot(db).codexUsage;
+    expect(usage.state).toBe("warn");
+    expect(usage.usedPercent).toBe(80);
   });
 });
 

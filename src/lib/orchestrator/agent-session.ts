@@ -11,7 +11,7 @@ import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates"
 import { getBroker, type LogBroker } from "@/lib/stream/broker";
 import { transitionJob } from "./jobs";
 import { agentLimitBlocked } from "./provider-limit";
-import { saveProviderUsage } from "./provider-usage";
+import { recordCodexUsage, saveProviderUsage } from "./provider-usage";
 import { clearAbort, registerAbort } from "./singleton";
 
 export interface AgentSessionDeps {
@@ -172,15 +172,19 @@ function classifySessionFailure(
 }
 
 /**
- * Opportunistic forward-looking usage capture (issue #188): persist the live
- * subscription-window snapshot the CLI streamed (claude's `rate_limit_event`),
- * so the dashboard can warn before a quota is exhausted. Captured from the run
- * Drydock already performs — no extra API call. Agents whose CLI emits no such
- * event leave `parser.rateLimit` undefined and record nothing.
+ * Opportunistic forward-looking usage capture (issues #188/#189): persist the
+ * live quota state the CLI streamed, so the dashboard can warn before a quota
+ * is exhausted. Captured from the run Drydock already performs — no extra API
+ * call. Claude exposes a qualitative `rate_limit_event` (`parser.rateLimit`);
+ * Codex exposes structured `rate_limits` windows via `provider.captureUsage`.
+ * Agents whose CLI emits neither record nothing.
  */
 function captureProviderUsage(provider: AgentProvider, parser: StreamParser, db: DB): void {
-  const reading = readingFromRateLimit(parser.rateLimit, Math.floor(Date.now() / 1000));
-  if (reading) saveProviderUsage(provider.id, reading, db);
+  const now = Math.floor(Date.now() / 1000);
+  const claudeReading = readingFromRateLimit(parser.rateLimit, now);
+  if (claudeReading) saveProviderUsage(provider.id, claudeReading, db);
+  const codexReading = provider.captureUsage?.(parser);
+  if (codexReading) recordCodexUsage(codexReading, db, now);
 }
 
 interface CostGuard {
