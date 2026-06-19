@@ -56,6 +56,15 @@ export const settingsSchema = z.object({
   // Auto-wait on Codex usage limits (issue #167, ADR 030): the same park-and-
   // resume treatment for OpenAI/ChatGPT-plan limits hit by the Codex CLI.
   codexLimitAutoWait: z.boolean().default(true),
+  // Auto-resume a job that exhausts its positive turn budget (issue #277). The
+  // CLI aborts with an `error_max_turns` result and no provider-limit signal;
+  // when on, Drydock resumes the stored session to continue the work (a bounded
+  // number of times) instead of parking it in needs_human as "exited non-zero".
+  // On by default per the autonomous model — a turn wall is recoverable, not an
+  // operator decision. Off restores the plain escalation (with the clear
+  // turn-budget reason either way). Only fires when a positive turn budget is
+  // set; the default unlimited budget (0) never hits the wall.
+  maxTurnsAutoResume: z.boolean().default(true),
   // Global kill-switch for opt-in release management (issue #59, ADR 028). Off by
   // default; both this and a repo's own `releaseEnabled` must be on for the
   // release pipeline to run for that repo. Cutting a public release is hard to

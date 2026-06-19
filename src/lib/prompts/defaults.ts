@@ -5,6 +5,10 @@ export const TEMPLATE_NAMES = {
   ciFix: "ci-fix",
   plan: "plan",
   limitResume: "limit-resume",
+  // Continuation prompt for a session resumed after exhausting its turn budget
+  // (issue #277): unlike the limit-resume path, the worktree is kept intact, so
+  // the prior session's uncommitted work is still present.
+  turnResume: "turn-resume",
   // Continuation prompt for a needs_human job an operator unblocked with typed
   // guidance (issue #257); the human's instruction is injected via $INSTRUCTION.
   humanResume: "human-resume",
@@ -133,6 +137,31 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, string> = {
     "`Generated with Claude Code` line, and no mention of the tool or model in the message.",
     "Do not push or open a pull request yourself; Drydock pushes and opens the PR, committing",
     "anything you leave uncommitted.",
+    "Before finishing, write `.drydock/PR.md`: first line a Conventional Commit subject (used as",
+    "the commit message and PR title), then a blank line, then a body in this format:",
+    "",
+    "$PR_FORMAT",
+    "",
+    "Drydock appends `Closes #$ISSUE_NUM` and removes the file — do not commit it.",
+  ].join("\n"),
+  // Continuation prompt for a session resumed after hitting its turn budget
+  // (issue #277): the conversation context survives via --resume AND the worktree
+  // is kept, so any uncommitted edits are still in place. The agent simply
+  // continues where it left off rather than re-applying lost work.
+  "turn-resume": [
+    `Your previous session on issue #$ISSUE_NUM in "$REPO_NAME" was paused because it reached its`,
+    `turn budget. You are resuming on branch "$BRANCH" with your conversation context and any`,
+    "uncommitted edits from the interrupted session still in place — just continue from where you",
+    "left off and finish implementing the issue. Follow the repo's conventions (`CLAUDE.md`/",
+    "`AGENTS.md`, neighbouring code) and keep working test-first: a failing test that captures the",
+    "requirement, then the code to make it green. Before you finish, verify: run the repo's tests,",
+    "typecheck, lint, and build, and do not finish on a red signal. Never weaken or delete a test",
+    "to make the suite pass. Keep the change focused. Split your work into focused, thematic",
+    "commits, each with a clear Conventional Commit subject (`type(scope): summary`) grouped by",
+    "concern — not one mega-commit. Never add AI attribution to a commit: no `Co-Authored-By`",
+    "trailer naming an assistant, no `Generated with Claude Code` line, and no mention of the tool",
+    "or model in the message. Do not push or open a pull request yourself; Drydock pushes and opens",
+    "the PR, committing anything you leave uncommitted.",
     "Before finishing, write `.drydock/PR.md`: first line a Conventional Commit subject (used as",
     "the commit message and PR title), then a blank line, then a body in this format:",
     "",
