@@ -175,6 +175,9 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [sandboxMemory, setSandboxMemory] = useState(repo.sandboxMemory ?? "");
   const [adoptClaudeMem, setAdoptClaudeMem] = useState(repo.adoptClaudeMem);
   const [bypassPermissions, setBypassPermissions] = useState(repo.bypassPermissions);
+  const [allowedCommands, setAllowedCommands] = useState(
+    parseList(repo.allowedCommands).join(", "),
+  );
   const [agentInstructions, setAgentInstructions] = useState(repo.agentInstructions ?? "");
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -667,6 +670,15 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
                 enable it for repos you trust.
               </Alert>
             </AutoToggle>
+            <div className="mt-3 border-t border-border pt-3">
+              <TagField
+                label="Pre-approved commands (allowlist)"
+                value={allowedCommands}
+                onChange={setAllowedCommands}
+                onBlur={() => persist({ allowedCommands: splitInput(allowedCommands) })}
+                help="A safer middle ground than full bypass above. Each command is pre-approved for headless Bash via Claude Code's --allowedTools (e.g. git, xcodebuild, xcrun, swift), while everything else stays in the default edits-only mode. Leave empty for no headless Bash. Caveats: Bash(git:*) allows ALL git subcommands (including git push --force), and chained commands (xcodebuild && foo) may still be blocked. Ignored when full bypass above is on."
+              />
+            </div>
           </Fieldset>
           <Fieldset
             icon={Brain}
