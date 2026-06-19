@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.1.10](https://github.com/NilsR0711/drydock/compare/v0.1.9...v0.1.10) (2026-06-19)
+
+
+### Features
+
+* babysit arbitrary PRs added by URL ([#293](https://github.com/NilsR0711/drydock/issues/293)) ([#309](https://github.com/NilsR0711/drydock/issues/309)) ([6e9ff13](https://github.com/NilsR0711/drydock/commit/6e9ff13bf3311cafa04a01872743b96b997bb181))
+* expose PR Q&A over MCP/API (ask_pr_question tool) ([#296](https://github.com/NilsR0711/drydock/issues/296)) ([fc9794e](https://github.com/NilsR0711/drydock/commit/fc9794e374735ac58fd22c4c8cd813fa59deefe4))
+* global server logs page (filter, search, live tail, retention) ([#306](https://github.com/NilsR0711/drydock/issues/306)) ([bd88504](https://github.com/NilsR0711/drydock/commit/bd88504c85119980dd71e47a18e65cea4315e1e8)), closes [#294](https://github.com/NilsR0711/drydock/issues/294)
+* **jobs:** live-update the job history page ([#282](https://github.com/NilsR0711/drydock/issues/282)) ([#290](https://github.com/NilsR0711/drydock/issues/290)) ([91d6b27](https://github.com/NilsR0711/drydock/commit/91d6b27c4a2fca084b277b982202721214c7b07c))
+* native macOS menu-bar shell (Tauri) + HTTP control endpoints ([#308](https://github.com/NilsR0711/drydock/issues/308)) ([4773b52](https://github.com/NilsR0711/drydock/commit/4773b52d60ebcf1ab35f864f3fbe7be42207eb0b))
+* **repos:** per-repo toggle to run agent jobs with --dangerously-skip-permissions ([#297](https://github.com/NilsR0711/drydock/issues/297)) ([a3759d6](https://github.com/NilsR0711/drydock/commit/a3759d66326c91ef4de63719e898477d2d4f54b4)), closes [#283](https://github.com/NilsR0711/drydock/issues/283)
+
+
+### Bug Fixes
+
+* **fs:** stat resolved realpath to close symlink TOCTOU in directory browse ([#303](https://github.com/NilsR0711/drydock/issues/303)) ([24e7bae](https://github.com/NilsR0711/drydock/commit/24e7baec19a3563c0b706ab295f29fd063e94f38))
+* **orchestrator:** auto-resolve-merge-conflicts flag is a no-op; conflicted PRs always park instead of auto-rebasing ([#298](https://github.com/NilsR0711/drydock/issues/298)) ([3728800](https://github.com/NilsR0711/drydock/commit/3728800db3923f75560f7fb005529b45ed1e3a7c))
+* **orchestrator:** decouple issue decomposition from the driver tick critical path ([#284](https://github.com/NilsR0711/drydock/issues/284)) ([#299](https://github.com/NilsR0711/drydock/issues/299)) ([edc843f](https://github.com/NilsR0711/drydock/commit/edc843f100738e75556ff519210b3fbae5805fc1))
+* **orchestrator:** don't re-enqueue an already-merged/closed issue ([#288](https://github.com/NilsR0711/drydock/issues/288)) ([cf224f3](https://github.com/NilsR0711/drydock/commit/cf224f323bbfebaefa5e0e783ad4047dcdd0345d))
+* **repos:** default auto-triage/process/decompose OFF (opt-in) ([#307](https://github.com/NilsR0711/drydock/issues/307)) ([2c983ba](https://github.com/NilsR0711/drydock/commit/2c983ba1c7c3b0e528c31b8c3e0c4cd0622335d9)), closes [#285](https://github.com/NilsR0711/drydock/issues/285)
+* **ui:** issue board Queue reflects scheduler state, not just the queue label ([#304](https://github.com/NilsR0711/drydock/issues/304)) ([bd61080](https://github.com/NilsR0711/drydock/commit/bd61080f19fe4e2c09c791c0446dce75d3c02e14)), closes [#286](https://github.com/NilsR0711/drydock/issues/286)
+* **ux:** consolidate Drydock lifecycle comments via shared marker upsert ([#289](https://github.com/NilsR0711/drydock/issues/289)) ([#302](https://github.com/NilsR0711/drydock/issues/302)) ([6c73bc8](https://github.com/NilsR0711/drydock/commit/6c73bc829268cdac164a64bdee2c4c1ebccc7529))
+
 ## [0.1.9](https://github.com/NilsR0711/drydock/compare/v0.1.8...v0.1.9) (2026-06-19)
 
 
