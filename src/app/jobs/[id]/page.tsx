@@ -13,6 +13,8 @@ import { Card } from "@/components/ui/card";
 import { getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import { jobEvents } from "@/lib/db/schema";
+import { getIssueTitle } from "@/lib/issues/service";
+import { jobHeading } from "@/lib/orchestrator/job-display";
 import { getJob } from "@/lib/orchestrator/jobs";
 import { listPrQuestions } from "@/lib/orchestrator/pr-questions";
 
@@ -36,6 +38,10 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   // A release job (issue #256) carries the sentinel issueNumber 0, so label it
   // by kind rather than as "#0".
   const subjectLabel = job.kind === "release" ? "Release" : `#${job.issueNumber}`;
+  // Lead with the issue title when the cache has it (issue #278); the heading
+  // helper degrades to "Job #id" for release jobs and missing titles.
+  const issueTitle = job.kind === "release" ? null : getIssueTitle(job.repoId, job.issueNumber);
+  const heading = jobHeading(job, issueTitle);
   // The Duration card ticks client-side from startedAt; nowSec seeds it so the
   // SSR markup and the first client render agree (issue #242).
   const nowSec = Math.floor(Date.now() / 1000);
@@ -48,13 +54,17 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           { label: repoName, href: `/repos/${job.repoId}` },
           { label: subjectLabel },
         ]}
-        title={`Job #${job.id}`}
+        title={heading}
         subtitle={
-          <span className="inline-flex items-center gap-2">
+          <span className="inline-flex flex-wrap items-center gap-2">
             <Badge status={job.status} />
-            <span className="font-mono">
-              {repoName} {subjectLabel}
-            </span>
+            <span className="font-mono text-foreground/80">{repoName}</span>
+            <Badge tone="neutral" className="font-mono">
+              {subjectLabel}
+            </Badge>
+            <Badge tone="neutral" className="font-mono">
+              job #{job.id}
+            </Badge>
           </span>
         }
         actions={
