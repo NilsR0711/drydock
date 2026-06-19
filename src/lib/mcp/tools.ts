@@ -18,6 +18,8 @@ import { isGitRepoPath } from "@/lib/repos/path";
 import { addRepo } from "@/lib/repos/service";
 import { getSettings, jobsAllowed, repoJobsAllowed, saveSettings } from "@/lib/settings/service";
 import { getBroker } from "@/lib/stream/broker";
+import { addTrackedPrByUrl } from "@/lib/tracked-prs/resolve";
+import { getTrackedPr, listTrackedPrs, untrackPr } from "@/lib/tracked-prs/service";
 
 /**
  * Dependencies a tool handler runs against. Only the DB is injected; the forge,
@@ -115,6 +117,15 @@ const getLogsShape = {
 } satisfies ZodRawShape;
 
 const drainShape = { on: z.boolean() } satisfies ZodRawShape;
+
+const trackPrShape = {
+  repoId: z.number().int().positive(),
+  url: z.string().url(),
+  // Off by default (issue #293): externally-authored PRs are only auto-merged
+  // when an operator opts this PR in (and even then only owned, clean branches).
+  autoMerge: z.boolean().optional(),
+} satisfies ZodRawShape;
+const trackedPrIdShape = { trackedPrId: z.number().int().positive() } satisfies ZodRawShape;
 
 /** Operationally-safe settings a remote host may change (no credential fields). */
 const updateSettingsShape = {
@@ -267,6 +278,41 @@ export const tools: ToolDef[] = [
       // orchestrator's driver tick reconciles aborted rows against its
       // in-process abort registry and kills the live subprocess.
       return transitionJob(jobId, "aborted", {}, db);
+    },
+  },
+  // ---- Tracked PRs (issue #293) ----------------------------------------
+  {
+    name: "track_pr",
+    description:
+      "Babysit an existing pull request by URL: Drydock watches its CI, runs review " +
+      "feedback, and (only when opted in via autoMerge AND the branch is one we own) " +
+      "auto-merges it. Externally-authored and fork PRs are watched but never merged or " +
+      "pushed to. The PR is tracked regardless of the repo's issue watch scope.",
+    inputSchema: trackPrShape,
+    handler: async (args, { db }) => {
+      const { repoId, url, autoMerge } = parseArgs(trackPrShape, args);
+      assertWorkAllowed(repoId, db);
+      return addTrackedPrByUrl({ repoId, url, autoMerge }, { db });
+    },
+  },
+  {
+    name: "list_tracked_prs",
+    description: "List the PRs Drydock is tracking for a repo, newest first.",
+    inputSchema: repoIdShape,
+    handler: (args, { db }) => {
+      const { repoId } = parseArgs(repoIdShape, args);
+      return listTrackedPrs(repoId, db);
+    },
+  },
+  {
+    name: "untrack_pr",
+    description: "Stop tracking a PR (the record is kept for history; re-add by URL to resume).",
+    inputSchema: trackedPrIdShape,
+    handler: (args, { db }) => {
+      const { trackedPrId } = parseArgs(trackedPrIdShape, args);
+      const tracked = getTrackedPr(trackedPrId, db);
+      if (!tracked) throw new Error(`tracked PR ${trackedPrId} not found`);
+      return untrackPr(trackedPrId, db);
     },
   },
   // ---- System -----------------------------------------------------------

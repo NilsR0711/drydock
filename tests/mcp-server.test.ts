@@ -5,6 +5,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/lib/db/client";
 import { repos } from "@/lib/db/schema";
+import { __setForgeFactory } from "@/lib/forge/registry";
 import { createMcpServer } from "@/lib/mcp/server";
 import { tools } from "@/lib/mcp/tools";
 
@@ -78,5 +79,68 @@ describe("MCP server", () => {
     })) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
     expect(result.isError).toBe(true);
     expect(textOf(result)).toMatch(/4242/);
+  });
+
+  it("tracks and untracks a PR by URL via MCP (issue #293)", async () => {
+    const repo = getDb()
+      .insert(repos)
+      .values({ path: "/r", name: "widgets", platform: "github" })
+      .returning()
+      .get();
+    __setForgeFactory(
+      () =>
+        ({
+          prInfo: async () => ({
+            number: 5,
+            title: "External",
+            author: "dev",
+            state: "open",
+            merged: false,
+            isCrossRepository: false,
+            headRefName: "feature/x",
+            headSha: "abc",
+            headSlug: "acme/widgets",
+            baseSlug: "acme/widgets",
+          }),
+        }) as never,
+    );
+    try {
+      active = await connectClient();
+      const tracked = (await active.client.callTool({
+        name: "track_pr",
+        arguments: { repoId: repo.id, url: "https://github.com/acme/widgets/pull/5" },
+      })) as { content: Array<{ type: string; text?: string }> };
+      const row = JSON.parse(textOf(tracked)) as { id: number; prNumber: number; status: string };
+      expect(row).toMatchObject({ prNumber: 5, status: "tracking" });
+
+      const listed = (await active.client.callTool({
+        name: "list_tracked_prs",
+        arguments: { repoId: repo.id },
+      })) as { content: Array<{ type: string; text?: string }> };
+      expect(JSON.parse(textOf(listed))).toHaveLength(1);
+
+      const stopped = (await active.client.callTool({
+        name: "untrack_pr",
+        arguments: { trackedPrId: row.id },
+      })) as { content: Array<{ type: string; text?: string }> };
+      expect(JSON.parse(textOf(stopped))).toMatchObject({ status: "stopped" });
+    } finally {
+      __setForgeFactory(null);
+    }
+  });
+
+  it("rejects a non-PR URL passed to track_pr", async () => {
+    const repo = getDb()
+      .insert(repos)
+      .values({ path: "/r", name: "widgets", platform: "github" })
+      .returning()
+      .get();
+    active = await connectClient();
+    const result = (await active.client.callTool({
+      name: "track_pr",
+      arguments: { repoId: repo.id, url: "https://github.com/acme/widgets/issues/5" },
+    })) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/valid pull-request URL/);
   });
 });
