@@ -6,8 +6,10 @@ import {
   GitPullRequestArrow,
   HeartPulse,
   MessageSquare,
+  ShieldAlert,
   ShieldCheck,
   Tag,
+  Terminal,
   Wand2,
 } from "lucide-react";
 import { type ReactNode, useState, useTransition } from "react";
@@ -167,6 +169,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [sandboxCpus, setSandboxCpus] = useState(repo.sandboxCpus ?? "");
   const [sandboxMemory, setSandboxMemory] = useState(repo.sandboxMemory ?? "");
   const [adoptClaudeMem, setAdoptClaudeMem] = useState(repo.adoptClaudeMem);
+  const [bypassPermissions, setBypassPermissions] = useState(repo.bypassPermissions);
   const [agentInstructions, setAgentInstructions] = useState(repo.agentInstructions ?? "");
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -606,6 +609,28 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
                 <span className="text-sm">Allow network access</span>
                 <HelpTip content="Off (default) runs the container with --network none. Turn on only if the toolchain must fetch dependencies during the run." />
               </div>
+            </AutoToggle>
+          </Fieldset>
+          <Fieldset
+            icon={Terminal}
+            legend="Shell access"
+            tone="destructive"
+            description="Let the agent run any command, unsupervised."
+          >
+            <AutoToggle
+              label="Skip permission prompts (--dangerously-skip-permissions)"
+              checked={bypassPermissions}
+              onChange={(v) => {
+                setBypassPermissions(v);
+                persist({ bypassPermissions: v });
+              }}
+              help="Runs this repo's agent jobs with --dangerously-skip-permissions instead of the default edits-only mode. The headless agent can then execute ANY Bash command unsupervised — needed for repos whose tests/builds can't run in a Docker sandbox (e.g. native Xcode: xcodebuild / simctl / xcrun). Dangerous: it grants full shell access with no approval gate, so leave it off unless this repo genuinely needs it."
+            >
+              <Alert tone="destructive" icon={ShieldAlert} className="sm:col-span-2">
+                The agent can run any command on this host with no approval gate — including
+                destructive ones. Prefer combining this with the container sandbox above, and only
+                enable it for repos you trust.
+              </Alert>
             </AutoToggle>
           </Fieldset>
           <Fieldset
