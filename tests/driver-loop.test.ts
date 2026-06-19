@@ -301,6 +301,19 @@ describe("driveTick", () => {
     });
     await expect(driveTick(deps([], { branchJanitor }) as never)).resolves.toBeUndefined();
   });
+
+  it("drives the tracked-PR sweep each tick (issue #293)", async () => {
+    const trackedPrs = vi.fn(async () => {});
+    await driveTick(deps([], { trackedPrs }) as never);
+    expect(trackedPrs).toHaveBeenCalledWith(db);
+  });
+
+  it("survives a tracked-PR sweep failure", async () => {
+    const trackedPrs = vi.fn(async () => {
+      throw new Error("tracked boom");
+    });
+    await expect(driveTick(deps([], { trackedPrs }) as never)).resolves.toBeUndefined();
+  });
 });
 
 describe("driveTick auto-processing", () => {

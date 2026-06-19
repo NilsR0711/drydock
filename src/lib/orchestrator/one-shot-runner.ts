@@ -4,7 +4,17 @@ import { oneShotCosts } from "@/lib/db/schema";
 import { type CommandOptions, type CommandRunner, spawnRunner } from "@/lib/exec/runner";
 import { StreamJsonParser } from "@/lib/stream/parser";
 
-export type OneShotType = "verify" | "decompose" | "pr-question" | "release" | "plan" | "pr_audit";
+export type OneShotType =
+  | "verify"
+  | "decompose"
+  | "pr-question"
+  | "release"
+  | "plan"
+  | "pr_audit"
+  // URL-tracked PR babysitting (issue #293): CI auto-heal and review-feedback
+  // edits run as decoupled one-shots since a tracked PR has no job to bill to.
+  | "pr_heal"
+  | "pr_feedback";
 
 export interface OneShotResult {
   /** Plain text extracted from assistant events (empty string if none). */
