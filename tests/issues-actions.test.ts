@@ -16,7 +16,7 @@ import {
   startIssueAction,
   viewIssueAction,
 } from "@/lib/issues/actions";
-import { getJob, transitionJob } from "@/lib/orchestrator/jobs";
+import { abortIfQueued, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { enqueueJob } from "@/lib/orchestrator/queue";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -119,6 +119,18 @@ describe("issue server actions", () => {
       transitionJob(job?.id ?? -1, "working");
       await removeFromQueueAction(repoId, 31);
       expect(getJob(job?.id ?? -1)?.status).toBe("working");
+    });
+
+    it("abortIfQueued only aborts a still-queued row — its WHERE guard skips working jobs", () => {
+      const repoId = seedRepoWithIssue(40);
+      const queued = enqueueJob({ repoId, issueNumber: 40 });
+      // A row that raced to `working` must survive the conditional update.
+      const working = enqueueJob({ repoId, issueNumber: 41 });
+      transitionJob(working?.id ?? -1, "working");
+
+      expect(abortIfQueued(queued?.id ?? -1)?.status).toBe("aborted");
+      expect(abortIfQueued(working?.id ?? -1)).toBeUndefined();
+      expect(getJob(working?.id ?? -1)?.status).toBe("working");
     });
 
     it("bulkRemoveFromQueueAction aborts each issue's queued job", async () => {

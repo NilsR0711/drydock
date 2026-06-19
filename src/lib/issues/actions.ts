@@ -16,9 +16,9 @@ import {
 } from "@/lib/issues/service";
 import { listSubtasks } from "@/lib/issues/subtasks";
 import { isKnownModelId } from "@/lib/models";
-import { openJobForIssue, openJobsByIssue, transitionJob } from "@/lib/orchestrator/jobs";
+import { abortIfQueued, openJobForIssue, openJobsByIssue } from "@/lib/orchestrator/jobs";
 import { enqueueJob } from "@/lib/orchestrator/queue";
-import { canTransition, type JobStatus } from "@/lib/orchestrator/state-machine";
+import type { JobStatus } from "@/lib/orchestrator/state-machine";
 
 /** Fetch all open issues from GitHub and cache them (backlog + queue). */
 export async function syncRepoIssuesAction(repoId: number) {
@@ -93,9 +93,9 @@ export async function addToQueueAction(
  */
 function abortQueuedJobForIssue(repoId: number, issueNumber: number) {
   const job = openJobForIssue(repoId, issueNumber);
-  if (job?.status === "queued" && canTransition("queued", "aborted")) {
-    transitionJob(job.id, "aborted");
-  }
+  // abortIfQueued re-checks the status atomically in its UPDATE guard, so a job
+  // claimed to `working` between this read and the write is left running.
+  if (job) abortIfQueued(job.id);
 }
 
 /** Remove the repo's queue label from an issue (GitHub + local cache). */

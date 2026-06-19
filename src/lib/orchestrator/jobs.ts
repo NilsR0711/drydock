@@ -128,6 +128,32 @@ export function openJobForIssue(
 }
 
 /**
+ * Abort a job only if it is STILL `queued` at the moment of the write. The
+ * status guard lives in the UPDATE's WHERE clause and runs inside a transaction,
+ * so a job the orchestrator claims to `working` between a caller's status read
+ * and this call is left running — the conditional update simply matches no row.
+ * This keeps "remove from queue aborts a not-yet-started job, never in-flight
+ * work" race-free (#311). Returns the aborted job, or undefined if it was no
+ * longer queued.
+ */
+export function abortIfQueued(jobId: number, db: DB = getDb()): Job | undefined {
+  const aborted = db.transaction((tx) => {
+    const txDb = tx as unknown as DB;
+    const row = tx
+      .update(jobs)
+      .set({ status: "aborted", finishedAt: Math.floor(Date.now() / 1000) })
+      .where(and(eq(jobs.id, jobId), eq(jobs.status, "queued")))
+      .returning()
+      .get();
+    if (!row) return undefined;
+    recordEvent(jobId, "status", { from: "queued", to: "aborted" }, txDb);
+    return row;
+  });
+  if (aborted) emitDashboardChange();
+  return aborted;
+}
+
+/**
  * Next queued job for a repo. Ordered by the manual issue priority
  * (issues.priority, lower = sooner); jobs without a cached issue row sort
  * last, then by creation order as a stable tiebreak.
