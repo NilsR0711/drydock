@@ -53,9 +53,14 @@ export function TrackedPrsPanel({
   }
 
   function untrack(id: number) {
+    setError(null);
     start(async () => {
-      const updated = await untrackPrAction(repoId, id);
-      setPrs((prev) => prev.map((p) => (p.id === id ? updated : p)));
+      try {
+        const updated = await untrackPrAction(repoId, id);
+        setPrs((prev) => prev.map((p) => (p.id === id ? updated : p)));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "could not stop tracking that PR");
+      }
     });
   }
 

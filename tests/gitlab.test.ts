@@ -939,4 +939,17 @@ describe("GitlabForge.prInfo", () => {
     expect(info.state).toBe("merged");
     expect(info.merged).toBe(true);
   });
+
+  it("defaults to fork (unowned) when project ownership is unknown", async () => {
+    const { forge } = makeForge([
+      {
+        method: "GET",
+        match: "/merge_requests/7",
+        response: { body: mr({ source_project_id: null, target_project_id: null }) },
+      },
+    ]);
+    const info = await forge.prInfo(7);
+    expect(info.isCrossRepository).toBe(true);
+    expect(info.headSlug).toBeNull();
+  });
 });

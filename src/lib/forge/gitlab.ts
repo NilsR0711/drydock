@@ -399,10 +399,14 @@ export class GitlabForge implements ForgeClient {
       })
       .parse(safeJson(res.body, {}));
     const baseSlug = decodeURIComponent(encodedPath);
-    const isFork =
+    // Fork-safe default: only treat the MR as in-repo when both project ids are
+    // known AND equal. Unknown ownership (either id missing) counts as a fork so
+    // we never enable push/auto-merge on a branch we may not control.
+    const sameProject =
       mr.source_project_id != null &&
       mr.target_project_id != null &&
-      mr.source_project_id !== mr.target_project_id;
+      mr.source_project_id === mr.target_project_id;
+    const isFork = !sameProject;
     const state = mr.state === "merged" ? "merged" : mr.state === "opened" ? "open" : "closed";
     return {
       number: mr.iid,
