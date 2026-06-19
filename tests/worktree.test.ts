@@ -195,9 +195,24 @@ describe("WorktreeManager", () => {
       repo.path,
       "worktree",
       "add",
+      "--force",
       wt.path,
       "drydock/issue-9-job-3",
     ]);
+  });
+
+  it("prepareForBranch force-adds so it can share a branch the job worktree still holds (issue #319)", async () => {
+    // When review feedback arrives, the originating job is usually still in the
+    // CI babysitter with the PR open, so its job-<id> worktree still has the
+    // branch checked out. git refuses to check the same branch out twice, so a
+    // bare `worktree add` dies on "branch already used by worktree" and the
+    // feedback is never applied. --force lets the feedback worktree share the
+    // branch; it only reads/commits/pushes and is torn down, leaving the job
+    // worktree untouched.
+    const { calls, run } = recordingRunner();
+    await new WorktreeManager(run).prepareForBranch(repo, "drydock/issue-9-job-3", "3");
+    const add = calls.find((c) => c.args.includes("worktree") && c.args.includes("add"));
+    expect(add?.args).toContain("--force");
   });
 
   it("prepareResume clears the stale worktree and restores the branch from origin (issue #257)", async () => {
