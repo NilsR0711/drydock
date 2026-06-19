@@ -154,9 +154,16 @@ async function reconcile(
   await feedback(current, repo, forge);
   if (getTrackedPr(current.id, db)?.status !== "tracking") return;
 
+  if (!(current.autoMerge && owned && mergeState === "clean")) return;
+  // Feedback may have pushed a new commit (driveTrackedPrFeedback →
+  // runAgentOnTrackedPr). Re-read the head before merging: if it moved, the CI
+  // that went green ran against the OLD commit, so merging now would land an
+  // unverified change. Defer to the next sweep, which re-checks the fresh run.
+  const post = await forge.prInfo(current.prNumber);
+  if (post.headSha !== info.headSha) return;
   const mergeable =
     outcome === "passed" || (outcome === "none" && repoAutomation(repo).mergeWithoutChecks);
-  if (mergeable && current.autoMerge && owned && mergeState === "clean") {
+  if (mergeable) {
     await forge.mergePr(current.prNumber);
     transitionTrackedPr(current.id, "merged", {}, db);
   }

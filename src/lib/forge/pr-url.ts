@@ -46,8 +46,9 @@ export function parsePrUrl(input: string): ParsedPrUrl | null {
 
   const segments = url.pathname.split("/").filter((s) => s.length > 0);
 
-  // GitHub: <owner>/<repo>/pull/<number>
-  const pullIdx = segments.indexOf("pull");
+  // GitHub: <owner>/<repo>/pull/<number>. Use the LAST occurrence so a repo or
+  // namespace segment literally named "pull" can't shadow the real PR token.
+  const pullIdx = segments.lastIndexOf("pull");
   if (pullIdx >= 2) {
     const prNumber = toPrNumber(segments[pullIdx + 1]);
     const owner = segments.slice(0, pullIdx - 1).join("/");
@@ -63,8 +64,9 @@ export function parsePrUrl(input: string): ParsedPrUrl | null {
     };
   }
 
-  // GitLab: <namespace…>/<project>(/-)?/merge_requests/<iid>
-  const mrIdx = segments.indexOf("merge_requests");
+  // GitLab: <namespace…>/<project>(/-)?/merge_requests/<iid>. Last occurrence,
+  // so a subgroup named "merge_requests" can't shadow the real MR token.
+  const mrIdx = segments.lastIndexOf("merge_requests");
   if (mrIdx >= 2) {
     const prNumber = toPrNumber(segments[mrIdx + 1]);
     // The `/-/` separator (when present) sits directly before `merge_requests`.

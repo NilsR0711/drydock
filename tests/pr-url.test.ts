@@ -74,4 +74,19 @@ describe("parsePrUrl", () => {
   it("trims surrounding whitespace", () => {
     expect(parsePrUrl("  https://github.com/acme/widgets/pull/3  ")?.prNumber).toBe(3);
   });
+
+  it("uses the last token when a namespace segment shadows the PR keyword", () => {
+    expect(parsePrUrl("https://gitlab.com/group/merge_requests/proj/-/merge_requests/5")).toEqual({
+      platform: "gitlab",
+      host: "gitlab.com",
+      owner: "group/merge_requests/proj".split("/").slice(0, -1).join("/"),
+      repo: "proj",
+      slug: "group/merge_requests/proj",
+      prNumber: 5,
+    });
+    expect(parsePrUrl("https://github.com/pull/widgets/pull/3")).toMatchObject({
+      slug: "pull/widgets",
+      prNumber: 3,
+    });
+  });
 });

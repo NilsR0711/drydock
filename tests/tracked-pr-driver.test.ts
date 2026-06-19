@@ -177,6 +177,19 @@ describe("driveTrackedPrs", () => {
     expect(getTrackedPr(tp.id, db)?.status).toBe("needs_human");
   });
 
+  it("does not auto-merge when review feedback pushed a new commit (stale green)", async () => {
+    const tp = trackPr({ repoId, prNumber: 42, url: "u", platform: "github", autoMerge: true }, db);
+    // prInfo is read twice: once up front, once after feedback. Return a moved
+    // head SHA the second time to simulate a commit pushed by the feedback step.
+    let call = 0;
+    const forge = fakeForge({ checks: [check("SUCCESS")], mergeState: "clean" });
+    forge.prInfo = vi.fn(async () => info({ headSha: call++ === 0 ? "old" : "new" }));
+    const d = deps(forge, { processFeedback: vi.fn(async () => {}) });
+    await driveTrackedPrs(d);
+    expect(forge.mergePr).not.toHaveBeenCalled();
+    expect(getTrackedPr(tp.id, db)?.status).toBe("tracking");
+  });
+
   it("runs review feedback for an open PR", async () => {
     trackPr({ repoId, prNumber: 42, url: "u", platform: "github" }, db);
     const forge = fakeForge({ checks: [check("SUCCESS")] });

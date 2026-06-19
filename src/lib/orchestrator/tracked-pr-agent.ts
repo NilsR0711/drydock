@@ -2,7 +2,7 @@ import { getAgentProvider } from "@/lib/agents/registry";
 import { type DB, getDb } from "@/lib/db/client";
 import type { Repo, TrackedPr } from "@/lib/db/schema";
 import type { ForgeClient } from "@/lib/forge/types";
-import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
+import { EmptyCommitError, type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { logError } from "@/lib/log/logger";
 import { getSettings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
@@ -55,8 +55,12 @@ export async function runAgentOnTrackedPr(
     if (exitCode !== 0) return false;
     try {
       await worktrees.commitAndPush(wt, opts.commitMessage);
-    } catch {
-      return false; // nothing staged — the agent produced no change.
+    } catch (err) {
+      // A genuine no-op run (clean tree) is "no change"; a real push/auth/remote
+      // failure must NOT be masked as that — rethrow so the caller can park the
+      // PR for a human instead of silently dropping a failed fix.
+      if (err instanceof EmptyCommitError) return false;
+      throw err;
     }
     return true;
   } finally {

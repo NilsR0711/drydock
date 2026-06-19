@@ -54,9 +54,23 @@ describe("runAgentOnTrackedPr", () => {
     expect(wts.remove).toHaveBeenCalledOnce(); // still cleans up
   });
 
-  it("reports failure when the commit is empty (no change produced)", async () => {
+  it("rethrows a real push failure instead of masking it as 'no change'", async () => {
     const wts = fakeWorktrees();
-    wts.commitAndPush.mockRejectedValueOnce(new Error("nothing to commit"));
+    wts.commitAndPush.mockRejectedValueOnce(new Error("remote rejected: permission denied"));
+    await expect(
+      runAgentOnTrackedPr(tracked, repo, opts, {
+        db,
+        worktrees: wts,
+        runAgent: vi.fn(async () => 0),
+      }),
+    ).rejects.toThrow(/permission denied/);
+    expect(wts.remove).toHaveBeenCalledOnce(); // still cleans up
+  });
+
+  it("treats a genuine empty commit as 'no change' (returns false)", async () => {
+    const { EmptyCommitError } = await import("@/lib/git/worktree");
+    const wts = fakeWorktrees();
+    wts.commitAndPush.mockRejectedValueOnce(new EmptyCommitError());
     const pushed = await runAgentOnTrackedPr(tracked, repo, opts, {
       db,
       worktrees: wts,
