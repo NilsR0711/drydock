@@ -156,10 +156,14 @@ export async function triageIssue(
   if (applied.length > 0) {
     for (const label of applied) await forge.ensureLabel(label);
     await forge.addLabels(listed.number, applied);
-    const marker = triageCommentMarker(listed.number);
-    const labelList = applied.map((l) => `\`${l}\``).join(", ");
-    const body = `${marker}\n\nauto-triage: applied ${labelList} — reasons: ${reasons.join("; ")}.`;
-    await upsertMarkerComment(forge, listed.number, marker, body, "triage");
+    // The "applied labels" note is purely informational — the labels it lists
+    // are already visible on the issue — so quiet repos suppress it (issue #289).
+    if (!repo.quietComments) {
+      const marker = triageCommentMarker(listed.number);
+      const labelList = applied.map((l) => `\`${l}\``).join(", ");
+      const body = `${marker}\n\nauto-triage: applied ${labelList} — reasons: ${reasons.join("; ")}.`;
+      await upsertMarkerComment(forge, listed.number, marker, body, "triage");
+    }
     mirrorLabelsLocal(repo.id, listed.number, applied, [], db);
   }
 

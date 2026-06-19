@@ -129,6 +129,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [planFirst, setPlanFirst] = useState(repo.planFirst);
   const [verifyPr, setVerifyPr] = useState(repo.verifyPr);
   const [autoPrAudit, setAutoPrAudit] = useState(repo.autoPrAudit);
+  const [quietComments, setQuietComments] = useState(repo.quietComments);
   // PR audits run on the CLI agents only; an OpenRouter repo without an
   // explicit audit agent falls back to claude so the select never holds a
   // value its option list cannot show (issue #169).
@@ -410,6 +411,15 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               <HelpTip content="Mirror the review on the pull request in addition to the issue." />
             </div>
           </AutoToggle>
+          <AutoToggle
+            label="Quiet issue comments"
+            checked={quietComments}
+            onChange={(v) => {
+              setQuietComments(v);
+              persist({ quietComments: v });
+            }}
+            help="Suppresses the purely-informational comments (auto-triage labels, post-PR verification summary). High-signal comments — PR audit, needs-human, merge-conflict park — are always posted."
+          />
           <AutoToggle
             label="Address PR review feedback"
             checked={autoFeedback}

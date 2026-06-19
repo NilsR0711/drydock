@@ -259,8 +259,18 @@ export async function runVerificationPass(
     }
 
     const applied = applyVerification(repo.id, job.issueNumber, result, db);
-    const body = redactSecrets(renderComment(job.id, result, applied));
-    await upsertMarkerComment(forge, job.issueNumber, verifyCommentMarker(job.id), body, "verify");
+    // The summary mirrors subtask status already updated on the issue, so quiet
+    // repos suppress it; the verdicts are still merged above (issue #289).
+    if (!repo.quietComments) {
+      const body = redactSecrets(renderComment(job.id, result, applied));
+      await upsertMarkerComment(
+        forge,
+        job.issueNumber,
+        verifyCommentMarker(job.id),
+        body,
+        "verify",
+      );
+    }
     recordEvent(
       job.id,
       "verification",

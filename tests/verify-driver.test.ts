@@ -351,6 +351,23 @@ describe("runVerificationPass", () => {
     expect(body).toContain("API done, UI missing");
   });
 
+  it("updates subtasks but posts no comment when quietComments is on", async () => {
+    const forge = fakeForge();
+    const repo = addRepo(
+      { path: "/q", name: "q", verifyPr: true, quietComments: true },
+      db,
+    ) as Repo;
+    syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
+    replaceSubtasks(repo.id, 1, ["Add API", "Wire UI"], "h", db);
+    const j = createJob({ repoId: repo.id, issueNumber: 1 }, db);
+    const job = getJob(j.id, db) as Job;
+    const result = vResult({ verdicts: [{ ordinal: 0, status: "done", reason: "" }] });
+    const out = await runVerificationPass(passDeps(forge, async () => result, repo, job));
+    expect(out).not.toBeNull();
+    expect(listSubtasks(repo.id, 1, db)[0]?.status).toBe("done");
+    expect(forge.commentIssue).not.toHaveBeenCalled();
+  });
+
   it("edits the prior verification comment in place on a second pass", async () => {
     const forge = fakeForge();
     const { repo, job } = setup();

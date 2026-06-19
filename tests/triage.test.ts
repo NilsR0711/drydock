@@ -166,6 +166,19 @@ describe("triageIssue", () => {
     expect(forge.calls.comments[0]).toContain(triageCommentMarker(1));
   });
 
+  it("applies labels but posts no comment when quietComments is on", async () => {
+    const quiet = addRepo(
+      { path: "/q", name: "q", autoTriageEnabled: true, quietComments: true },
+      db,
+    );
+    syncIssuesFromGh(quiet.id, [listed()], db);
+    const forge = fakeForge();
+    const result = await triageIssue(quiet, forge, listed(), db);
+    expect(result.applied.length).toBeGreaterThan(0);
+    expect(forge.addLabels).toHaveBeenCalled();
+    expect(forge.commentIssue).not.toHaveBeenCalled();
+  });
+
   it("edits the prior triage comment in place on re-triage instead of stacking", async () => {
     const forge = fakeForge();
     await triageIssue(repo, forge, listed(), db);

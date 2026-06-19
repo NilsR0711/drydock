@@ -128,6 +128,9 @@ export const repoInputSchema = z.object({
   // Opt-in claude-mem worktree adoption (issue #274). Off by default: it depends
   // on the external claude-mem plugin being installed. See the schema column.
   adoptClaudeMem: z.boolean().default(false),
+  // Quiet mode for the issue thread (issue #289). Off by default: existing repos
+  // keep the full audit trail. See the schema column for what it suppresses.
+  quietComments: z.boolean().default(false),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 
