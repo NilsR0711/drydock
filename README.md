@@ -41,6 +41,7 @@ dashboard bound to `127.0.0.1`.
 - [Development](#development)
 - [Operations](#operations)
 - [MCP server](#mcp-server)
+- [Desktop app (menu-bar)](#desktop-app-menu-bar)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
@@ -85,7 +86,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 🧹 **Branch & PR janitor** — a periodic background sweep keeps the remote tidy: the remote branch of a merged Drydock PR is **deleted within one sweep** (idempotent across restarts — each cleanup is stamped on the job's event log), an open PR that fell **behind** the default branch is updated automatically while conflict-free, and a **conflicted** PR is **auto-rebased onto the default branch** when the repo's `autoResolveMergeConflicts` flag is on (a bounded, single-attempt rebase that force-pushes only what it rewrites) — only if that repair can't clear the conflict (or the flag is off) does the job park as *needs a human* with an explicit “rebase needed: conflicts with `<default branch>`” reason instead of letting CI polling time out. Only branches under the `drydock/` prefix are ever deleted or updated.
 
-🔗 **Babysit any PR by URL** — point Drydock at an *existing* pull request (yours or someone else's) and it watches its CI, runs the review-feedback loop, heals failing checks on branches it owns, and hands off to a human on a conflict or a fork it can't push to — all the machinery that backs Drydock's own PRs, now decoupled from an originating issue. Add one from the repo dashboard or the `track_pr` MCP tool; it stays tracked regardless of whether the repo's *issues* are watched. **Auto-merge is opt-in per PR and only ever applies to clean, green branches we own** — externally-authored and fork PRs are never merged or pushed to. See [ADR 036](docs/adr/036-tracked-pr-babysitting.md).
+🔗 **Babysit any PR by URL** — point Drydock at an *existing* pull request (yours or someone else's) and it watches its CI, runs the review-feedback loop, heals failing checks on branches it owns, and hands off to a human on a conflict or a fork it can't push to — all the machinery that backs Drydock's own PRs, now decoupled from an originating issue. Add one from the repo dashboard or the `track_pr` MCP tool; it stays tracked regardless of whether the repo's *issues* are watched. **Auto-merge is opt-in per PR and only ever applies to clean, green branches we own** — externally-authored and fork PRs are never merged or pushed to. See [ADR 037](docs/adr/037-tracked-pr-babysitting.md).
 
 🩹 **CI auto-heal** — per repo, turn the failure path into a structured classify → fix → verify loop: failing checks are bucketed (healable / external / flaky / unknown), only healable ones get a targeted fix, and each attempt is verified for a real, improving change. Flaky checks get a plain re-run instead of a code edit (GitHub; on forges without re-run support they escalate to a human). External and AI-review checks are never code-healed. Hard budgets (per-session and per-fingerprint attempts, a cooldown, and a concurrency cap) keep it bounded. **On by default** (issue #254); opt-out per repo; never auto-merges.
 
@@ -130,6 +131,8 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 🔑 **Credential watchdog** — periodic auth probes (on startup, then every 15 minutes) catch expired credentials *before* the queue dies overnight: `gh auth status` for GitHub repos, a cheap authenticated API call per configured GitLab base URL, the agent CLIs, and the OpenRouter API key. On failure a persistent navbar banner names the dead credential, a notification fires once per outage, and new job starts are gated while in-flight jobs finish; the next healthy probe resumes the queue automatically — no manual toggle. Only definitive auth failures (non-zero `gh auth status`, HTTP 401/403, missing CLI/key) trip the gate; network hiccups, 5xx and timeouts never pause the queue, and the GitHub probe yields to the rate-limit governor so it never burns budget jobs are waiting on.
 
 🆙 **Update-available notice** — a passive, dismissible navbar banner appears when a newer Drydock release is published. The check queries the latest stable GitHub release (drafts/prereleases skipped), is cached for an hour, and dedupes concurrent checks onto a single upstream call; any network or parse error advertises no update, so a transient hiccup never raises a false alarm. Global installs get a `drydock update` hint.
+
+🖥️ **Native menu-bar shell (macOS)** — an optional [Tauri](https://tauri.app) desktop app wraps the dashboard and adds a tray with live counts (active / queued / needs-human) and quick toggles for global pause/resume and drain mode, so the dock is glanceable without a browser tab. It drives the server over HTTP-only control endpoints and keeps the loopback-only model. See [Desktop app](#desktop-app-menu-bar) and [ADR 036](docs/adr/036-desktop-menu-bar-shell.md).
 
 📐 **ADR review queue** — a file watcher surfaces new `docs/adr/*.md` decisions for approve/reject.
 
@@ -384,6 +387,7 @@ bin/drydock.mjs          # published `drydock` launcher (boots the standalone se
 scripts/drydock.ts       # MCP entrypoint (bundled for `drydock mcp`; tsx for `pnpm mcp`)
 scripts/package-standalone.mjs  # finishes the standalone bundle for npm
 scripts/package-mcp.mjs  # bundles the stdio MCP server into the distribution
+desktop/                 # optional native macOS menu-bar shell (Tauri/Rust; not in the npm package)
 docs/adr/                # architecture decision records (index: docs/DECISIONS.md)
 tests/                   # Vitest suite — fully offline
 ```
@@ -433,6 +437,13 @@ pnpm mcp            # start the local stdio MCP server (see "MCP server")
   limit). HTTP 200 while the driver loop ticks; 503 when the loop is stalled (no tick
   within 3 poll intervals), not running, or the DB is unreachable. Read-only and
   secret-free, served from a single cheap query set with no forge calls.
+- **Control endpoints** — `POST /api/control/pause` (`{ "paused": boolean }`) and
+  `POST /api/control/drain` (`{ "draining": boolean }`) flip global pause/resume and drain
+  mode over HTTP, so the [desktop shell](#desktop-app-menu-bar) and local scripts can toggle
+  automation without the dashboard. Both require a custom `x-drydock-control: 1` header (a
+  CSRF guard — a browser cannot forge it), and additionally a matching
+  `x-drydock-control-token` when `DRYDOCK_CONTROL_TOKEN` is set. See
+  [ADR 036](docs/adr/036-desktop-menu-bar-shell.md).
 - **Background daemon** — `drydock start` launches the server detached from the terminal and
   returns immediately, so closing the shell or losing the SSH session no longer kills it.
   `drydock status` reports whether it is running (pid, url, uptime; exit 3 when stopped),
@@ -508,6 +519,30 @@ The same PR Q&A is also reachable over REST for non-MCP HTTP clients: `POST
 /api/jobs/<id>/questions` with `{"question": "…"}` creates a question (returns it in the
 `answering` state) and `GET /api/jobs/<id>/questions` lists a job's questions newest-first — poll
 it for the terminal `answered`/`error` state, mirroring how the dashboard polls.
+
+## Desktop app (menu-bar)
+
+An optional native **macOS** menu-bar shell wraps the dashboard so the dock is glanceable and
+controllable without a browser tab ([#292](https://github.com/NilsR0711/drydock/issues/292)).
+It is a thin [Tauri 2](https://tauri.app) app under [`desktop/`](desktop/): a window pointing
+at the running dashboard plus a **tray** whose title shows live counts (active / queued, with a
+`⚠` badge for needs-human) and `⏸`/`⤓` glyphs for paused / draining. The tray menu toggles
+**pause/resume** and **drain mode**, and can show the window or open it in a browser.
+
+The shell talks to the server entirely over HTTP from Rust — it polls
+[`/api/health`](#operations) and posts to the [control endpoints](#operations) — so the wrapped
+dashboard stays the ordinary web app. It is built and distributed separately from the npm
+package and does not change the loopback-only binding model.
+
+```bash
+pnpm desktop:install   # one-time: install the Tauri CLI in desktop/
+pnpm tauri:dev         # run the shell against a running dashboard
+pnpm tauri:build       # produce a .app / .dmg
+```
+
+Requires [Rust](https://rustup.rs) and Xcode Command Line Tools for the native build (the web
+app needs neither). See [`desktop/README.md`](desktop/README.md) and
+[ADR 036](docs/adr/036-desktop-menu-bar-shell.md). Windows/Linux packaging is a follow-up.
 
 ## Roadmap
 

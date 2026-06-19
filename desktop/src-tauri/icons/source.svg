@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Drydock</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0f2740"/>
+      <stop offset="1" stop-color="#0a1a2b"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <!-- Anchor: maritime nod to "drydock" -->
+  <g fill="none" stroke="#5ec8f0" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="512" cy="276" r="60"/>
+    <line x1="512" y1="336" x2="512" y2="760"/>
+    <line x1="392" y1="436" x2="632" y2="436"/>
+    <path d="M252 556 q0 204 260 224 q260 -20 260 -224"/>
+    <line x1="252" y1="556" x2="206" y2="612"/>
+    <line x1="252" y1="556" x2="318" y2="586"/>
+    <line x1="772" y1="556" x2="818" y2="612"/>
+    <line x1="772" y1="556" x2="706" y2="586"/>
+  </g>
+</svg>
