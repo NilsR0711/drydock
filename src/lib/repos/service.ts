@@ -120,7 +120,7 @@ export const repoInputSchema = z.object({
       message: "prAuditLanguage must be a simple or BCP 47 language code",
     })
     .default("en"),
-  prAuditPostOnPr: z.boolean().default(false),
+  prAuditPostOnIssue: z.boolean().default(false),
   // Opt-in auto-fix of the audit's own findings (issue #318). Off by default and
   // only meaningful alongside autoPrAudit; see the schema column for the full
   // guardrails (severity threshold, budgets, no auto-merge, idempotency).

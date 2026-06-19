@@ -144,7 +144,11 @@ export const repos = sqliteTable("repos", {
   prAuditAgent: text("pr_audit_agent"),
   prAuditModel: text("pr_audit_model"),
   prAuditLanguage: text("pr_audit_language").notNull().default("en"),
-  prAuditPostOnPr: integer("pr_audit_post_on_pr", { mode: "boolean" }).notNull().default(false),
+  // The audit is posted canonically on the PR itself (issue #317). This opt-in
+  // flag additionally mirrors it onto the issue; off by default.
+  prAuditPostOnIssue: integer("pr_audit_post_on_issue", { mode: "boolean" })
+    .notNull()
+    .default(false),
   // Opt-in auto-fix of the AI PR audit's own findings (issue #318, default off).
   // Only meaningful when autoPrAudit is also on: when set, the agent revises the
   // diff to address its high-severity findings (blocker/major) and pushes a

@@ -148,7 +148,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
         : repo.defaultModel),
   );
   const [auditLanguage, setAuditLanguage] = useState(repo.prAuditLanguage);
-  const [auditPostOnPr, setAuditPostOnPr] = useState(repo.prAuditPostOnPr);
+  const [auditPostOnIssue, setAuditPostOnIssue] = useState(repo.prAuditPostOnIssue);
   const [autoPrAuditFix, setAutoPrAuditFix] = useState(repo.autoPrAuditFix);
   const [autoHealDeploy, setAutoHealDeploy] = useState(repo.autoHealDeployments);
   const [releaseEnabled, setReleaseEnabled] = useState(repo.releaseEnabled);
@@ -404,15 +404,15 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
             </Field>
             <div className="flex items-center gap-2.5 self-end pb-1.5">
               <Switch
-                checked={auditPostOnPr}
+                checked={auditPostOnIssue}
                 onChange={(v) => {
-                  setAuditPostOnPr(v);
-                  persist({ prAuditPostOnPr: v });
+                  setAuditPostOnIssue(v);
+                  persist({ prAuditPostOnIssue: v });
                 }}
-                aria-label="Also comment on the PR"
+                aria-label="Also comment on the issue"
               />
-              <span className="text-sm">Also comment on the PR</span>
-              <HelpTip content="Mirror the review on the pull request in addition to the issue." />
+              <span className="text-sm">Also comment on the issue</span>
+              <HelpTip content="The review is posted on the pull request. Enable this to also mirror it on the issue." />
             </div>
             <div className="flex items-center gap-2.5 self-end pb-1.5">
               <Switch
