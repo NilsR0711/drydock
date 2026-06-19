@@ -154,7 +154,17 @@ afterEach(async () => {
     }
     await waitUntil(() => !pidAlive(state.pid), 80, 25);
   }
-  rmSync(dir, { recursive: true, force: true });
+  // Windows briefly holds a lock on the just-exited daemon's files (SQLite
+  // DB/WAL, log) after the process dies, so a plain rmSync races the OS and
+  // throws EBUSY. `force` only swallows ENOENT, not EBUSY — `maxRetries`/
+  // `retryDelay` are what retry the transient lock. And teardown is best-effort:
+  // the dir lives under the OS tmpdir (reclaimed by the runner), so a lingering
+  // lock must never fail an otherwise-green test.
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {
+    // lock outlived the retries; leave the temp dir for the OS to reap
+  }
 });
 
 describe("daemon lifecycle (integration)", () => {
