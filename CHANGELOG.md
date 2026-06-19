@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.9](https://github.com/NilsR0711/drydock/compare/v0.1.8...v0.1.9) (2026-06-19)
+
+
+### Features
+
+* human-readable job titles and branch names (issue title slug) ([#280](https://github.com/NilsR0711/drydock/issues/280)) ([3b17c94](https://github.com/NilsR0711/drydock/commit/3b17c94a49ae3db3f46a363da0d621a1c992ea9d)), closes [#278](https://github.com/NilsR0711/drydock/issues/278)
+* **orchestrator:** detect max-turns abort and auto-resume instead of generic 'exited non-zero' ([#277](https://github.com/NilsR0711/drydock/issues/277)) ([00ed36e](https://github.com/NilsR0711/drydock/commit/00ed36ee3d063acb74bf2e29479b25ed0d0b8b5d))
+* **repos:** opt-in claude-mem worktree adoption after merge (per-repo setting) ([#275](https://github.com/NilsR0711/drydock/issues/275)) ([5e44b81](https://github.com/NilsR0711/drydock/commit/5e44b81ed84ed59acdcfc416ee5eee9d2959bbba))
+* **turns:** default the per-job turn budget to unlimited (0) ([#276](https://github.com/NilsR0711/drydock/issues/276)) ([1b98810](https://github.com/NilsR0711/drydock/commit/1b98810eb282c1722c29dc6064596ee393d43241))
+
+
+### Bug Fixes
+
+* **orchestrator:** share abort registry on globalThis so Stop kills the agent ([#273](https://github.com/NilsR0711/drydock/issues/273)) ([bf7e793](https://github.com/NilsR0711/drydock/commit/bf7e79371c50b7807902ef36518e742966730248))
+
 ## [0.1.8](https://github.com/NilsR0711/drydock/compare/v0.1.7...v0.1.8) (2026-06-18)
 
 
