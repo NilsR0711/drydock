@@ -3,13 +3,15 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { JobsHistoryFilters } from "@/components/jobs-history-filters";
 import { JobsHistoryPagination } from "@/components/jobs-history-pagination";
+import { JobsLiveRefresh } from "@/components/jobs-live-refresh";
+import { LiveDuration } from "@/components/live-duration";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { listJobsPage, listRepos } from "@/lib/db/queries";
 import { MODELS, modelLabel } from "@/lib/models";
-import { formatDuration, formatUsd, relativeTime } from "@/lib/utils";
+import { formatUsd, relativeTime } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +32,13 @@ export default async function JobsIndexPage({
   const repos = listRepos();
   const result = listJobsPage({ page, pageSize: PAGE_SIZE, repoId, status, model, search });
 
+  // Single render-time clock seeds every in-flight row's live duration ticker so
+  // SSR and the first client render agree (issue #282).
+  const nowSec = Math.floor(Date.now() / 1000);
+
   return (
     <div className="dd-fade-up">
+      <JobsLiveRefresh />
       <PageHeader
         title="Job history"
         subtitle={`Every run Drydock has executed, newest first — ${result.total} job${
@@ -68,12 +75,9 @@ export default async function JobsIndexPage({
           </div>
           <ul>
             {result.rows.map((row) => {
-              // Active runs have no finish time yet — measure to "now" like the
-              // job detail page, so in-flight jobs still show an elapsed duration.
+              // In-flight rows keep elapsing; LiveDuration ticks them client-side
+              // so the column stays current between server refreshes (issue #282).
               const isActive = ["working", "ci_running", "retrying"].includes(row.status);
-              const endedAt = row.finishedAt ?? (isActive ? Math.floor(Date.now() / 1000) : null);
-              const durationSec =
-                row.startedAt && endedAt ? Math.max(0, endedAt - row.startedAt) : null;
               return (
                 <li key={row.id}>
                   <Link
@@ -93,9 +97,13 @@ export default async function JobsIndexPage({
                     <span className="hidden text-right text-sm tnum sm:block">
                       {formatUsd(row.costUsd)}
                     </span>
-                    <span className="hidden text-right text-sm text-muted-foreground tnum sm:block">
-                      {durationSec !== null ? formatDuration(durationSec) : "—"}
-                    </span>
+                    <LiveDuration
+                      startedAt={row.startedAt}
+                      finishedAt={row.finishedAt}
+                      active={isActive}
+                      nowSec={nowSec}
+                      className="hidden text-right text-sm text-muted-foreground tnum sm:block"
+                    />
                     <span className="hidden text-right text-xs text-muted-foreground sm:block">
                       {relativeTime(row.createdAt)}
                     </span>
