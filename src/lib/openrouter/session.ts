@@ -114,6 +114,9 @@ export async function runOpenRouterJobSession(
     outputTokens: 0,
     timedOut: false,
     costExceeded: false,
+    // The HTTP tool-loop enforces its own turn budget and never emits the CLI's
+    // `error_max_turns` result, so it never sets this max-turns signal (issue #277).
+    maxTurnsReached: false,
   };
 
   // Pre-spawn limit gate (ADR 030): a latched provider refuses the session
@@ -359,5 +362,14 @@ export async function runOpenRouterJobSession(
       .run();
   }
 
-  return { exitCode, costUsd, inputTokens, outputTokens, timedOut, costExceeded, limit };
+  return {
+    exitCode,
+    costUsd,
+    inputTokens,
+    outputTokens,
+    timedOut,
+    costExceeded,
+    maxTurnsReached: false,
+    limit,
+  };
 }

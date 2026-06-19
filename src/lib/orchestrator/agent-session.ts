@@ -85,6 +85,13 @@ export interface AgentSessionResult {
   /** True when the session was aborted by the per-job cost ceiling (issue #57). */
   costExceeded: boolean;
   /**
+   * True when the session was cut off by its positive turn budget (issue #277):
+   * the CLI exits non-zero with a terminal `error_max_turns` result and no
+   * provider-limit signal. A recoverable outcome — callers may resume the stored
+   * session to continue the work instead of escalating it as "exited non-zero".
+   */
+  maxTurnsReached: boolean;
+  /**
    * Set when the child process failed to spawn (e.g. ENOENT — CLI not found).
    * Distinguishes "binary missing" from a real non-zero agent exit so callers
    * can surface a clear "failed to start <command>" diagnostic.
@@ -106,6 +113,27 @@ export interface SessionLimitInfo extends ProviderLimitInfo {
    * fresh strikes and never extend the wait window.
    */
   latched?: boolean;
+}
+
+/**
+ * The Claude Code `stream-json` result subtype emitted when a session is cut off
+ * by `--max-turns` (issue #277). Surfaced via `parser.resultSubtype`; agents
+ * without an analogous signal never set it, so detection is a no-op for them.
+ */
+const MAX_TURNS_RESULT_SUBTYPE = "error_max_turns";
+
+/**
+ * Whether a finished, failed session ended because it exhausted its turn budget
+ * (issue #277). Drydock's own aborts (timeout, cost cap) end the session
+ * incompletely too, so they are excluded up front — only a genuine
+ * `error_max_turns` result counts.
+ */
+function reachedMaxTurns(
+  parser: StreamParser,
+  outcome: { timedOut: boolean; costExceeded: boolean },
+): boolean {
+  if (outcome.timedOut || outcome.costExceeded) return false;
+  return parser.resultSubtype === MAX_TURNS_RESULT_SUBTYPE;
 }
 
 /** Sentinel exit code recorded when a session is killed by the wall-clock timeout. */
@@ -147,6 +175,7 @@ function limitGateResult(
     outputTokens: 0,
     timedOut: false,
     costExceeded: false,
+    maxTurnsReached: false,
     limit: {
       agent: provider.id,
       kind: latch.kind,
@@ -498,6 +527,7 @@ export async function spawnAgentSession(
     outputTokens: parser.totalOutputTokens,
     timedOut,
     costExceeded,
+    maxTurnsReached: reachedMaxTurns(parser, { timedOut, costExceeded }),
     spawnError,
     limit: classifySessionFailure(provider, parser, stderrTail, {
       exitCode,
@@ -685,6 +715,7 @@ export async function resumeAgentSession(
     outputTokens: parser.totalOutputTokens,
     timedOut,
     costExceeded,
+    maxTurnsReached: reachedMaxTurns(parser, { timedOut, costExceeded }),
     spawnError,
     limit: classifySessionFailure(provider, parser, stderrTail, {
       exitCode,

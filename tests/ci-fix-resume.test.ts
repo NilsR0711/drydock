@@ -11,6 +11,7 @@ const session = (exitCode: number) => ({
   exitCode,
   timedOut: false,
   costExceeded: false,
+  maxTurnsReached: false,
   sessionId: "s",
   costUsd: 0,
   inputTokens: 0,

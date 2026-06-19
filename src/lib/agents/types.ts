@@ -29,6 +29,12 @@ export interface StreamParser {
   readonly costUsd: number;
   /** Final result text from the stream, when the agent emitted one (issue #166). */
   readonly resultText?: string;
+  /**
+   * Terminal result subtype, when the agent emits one (issue #277). The Claude
+   * Code `stream-json` result carries e.g. `success` / `error_max_turns`; agents
+   * without an analogous signal (codex) leave it undefined.
+   */
+  readonly resultSubtype?: string;
   /** Whether the stream's final result was flagged as an error (issue #166). */
   readonly resultIsError?: boolean;
   /**

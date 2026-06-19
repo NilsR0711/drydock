@@ -104,6 +104,17 @@ describe("pr-format template (issue #252)", () => {
     expect(DEFAULT_TEMPLATES["limit-resume"]).toContain("$PR_FORMAT");
   });
 
+  it("the turn-resume template tells the agent its work is intact and injects $PR_FORMAT", () => {
+    const tpl = DEFAULT_TEMPLATES[TEMPLATE_NAMES.turnResume];
+    expect(tpl).toMatch(/turn budget/i);
+    // Unlike the limit-resume path, the worktree survives — the prompt must not
+    // claim uncommitted work is gone (issue #277).
+    expect(tpl).toMatch(/uncommitted edits.*still in place/i);
+    expect(tpl).toContain("$PR_FORMAT");
+    expect(tpl).toMatch(/do not push or open a pull request/i);
+    expect(tpl).toContain(".drydock/PR.md");
+  });
+
   it("resolveTemplateContent falls back to the code default for pr-format", () => {
     expect(resolveTemplateContent(repoId, TEMPLATE_NAMES.prFormat, db)).toBe(
       DEFAULT_TEMPLATES[TEMPLATE_NAMES.prFormat],

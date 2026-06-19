@@ -165,6 +165,15 @@ export interface RunJobDeps {
   adoptClaudeMem?: (input: { branch: string; cwd: string }) => Promise<void>;
 }
 
+/**
+ * How many times a job that keeps exhausting its turn budget is auto-resumed
+ * before escalating to a human (issue #277). Each resume grants a fresh budget's
+ * worth of turns, so this bounds total work at roughly (1 + cap) × the budget —
+ * enough for a task that legitimately needs a few more passes, while still
+ * converging on needs_human for one that never finishes.
+ */
+export const MAX_TURN_RESUMES = 3;
+
 /** Keeps an unexpectedly verbose plan from flooding the work prompt. */
 const PLAN_MAX_CHARS = 10_000;
 
@@ -896,6 +905,52 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
       return afterSession;
     }
+    // Max-turns auto-resume (issue #277): a session that exhausts a positive turn
+    // budget aborts non-zero with no provider-limit signal — historically this
+    // fell through to the generic exit-code branch and parked the job as "exited
+    // non-zero". When auto-resume is on, continue the main work by resuming the
+    // stored session in place (its conversation context AND uncommitted edits are
+    // intact), bounded by MAX_TURN_RESUMES so a job that never finishes still
+    // escalates with a clear turn-budget reason instead of looping forever. The
+    // toggle is re-read each pass so an operator flipping it mid-run takes effect.
+    let turnResumeAttempts = 0;
+    while (
+      session.maxTurnsReached &&
+      getSettings(db).maxTurnsAutoResume &&
+      session.sessionId &&
+      provider.supportsResume &&
+      turnResumeAttempts < MAX_TURN_RESUMES
+    ) {
+      turnResumeAttempts += 1;
+      recordEvent(
+        job.id,
+        "status",
+        {
+          reason: `turn budget (${job.maxTurns}) reached, resuming`,
+          attempt: turnResumeAttempts,
+          sessionId: session.sessionId,
+        },
+        db,
+      );
+      if (repo.autoDecompose) markSubtasksWorking(repo.id, job.issueNumber, db);
+      const resumePrompt = renderTemplate(
+        resolveTemplateContent(repo.id, TEMPLATE_NAMES.turnResume, db),
+        {
+          ISSUE_NUM: job.issueNumber,
+          BRANCH: wt.branch,
+          REPO_NAME: repo.name,
+          PR_FORMAT: resolveTemplateContent(repo.id, TEMPLATE_NAMES.prFormat, db),
+        },
+      );
+      session = await resumeLimitSession(getJob(job.id, db) as Job, resumePrompt, wt.path);
+      // A concurrent abort/stop during the resume must win, exactly as after the
+      // initial session: never push an aborted job's partial work.
+      const afterResume = getJob(job.id, db) as Job;
+      if (afterResume.status === "aborted" || afterResume.status === "interrupted") {
+        if (repo.autoDecompose) markSubtasksParked(repo.id, job.issueNumber, db);
+        return afterResume;
+      }
+    }
     if (session.timedOut) {
       return await parkForHuman(`${provider.label} timed out after ${maxJobMinutes} minutes`);
     }
@@ -929,6 +984,12 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         );
       }
       return await parkOnLimit(limit);
+    }
+    // Still over the turn budget after exhausting auto-resume (or with the toggle
+    // off): escalate with the explicit turn-budget reason (issue #277) instead of
+    // the misleading generic "exited non-zero" the exit-code branch would report.
+    if (session.maxTurnsReached) {
+      return await parkForHuman(`turn budget (${job.maxTurns}) reached`);
     }
     if (session.exitCode !== 0) {
       return await parkForHuman(`${provider.label} exited non-zero`);

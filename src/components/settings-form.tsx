@@ -239,6 +239,22 @@ export function SettingsForm({
             />
           </div>
 
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">Auto-resume on turn budget</p>
+              <p className="text-xs text-muted-foreground">
+                When a job exhausts a positive <code>max turns</code> budget, resume it to continue
+                the work (a few times) instead of parking it in needs-human. Only applies when a
+                turn budget is set.
+              </p>
+            </div>
+            <Switch
+              checked={s.maxTurnsAutoResume}
+              onChange={(v) => set("maxTurnsAutoResume", v)}
+              aria-label="Auto-resume on turn budget"
+            />
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Poll interval (s)" hint="How often to check for new issues.">
               <Input
