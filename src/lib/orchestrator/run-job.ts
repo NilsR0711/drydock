@@ -710,6 +710,11 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
               db,
               provider,
               command: sessionEnv.command,
+              // Bound the fix session like the implement/CI-fix sessions: the
+              // per-sweep/per-item budgets cap how many fixes run, but a single
+              // hung agent must not block the job indefinitely (CodeRabbit #323).
+              timeoutMs,
+              costCapUsd: maxJobCostUsd,
               sideSession: true,
             }).then((r) => ({ exitCode: r.exitCode })),
         }),
