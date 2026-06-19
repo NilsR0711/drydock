@@ -997,6 +997,75 @@ describe("provider limit detection (issue #166)", () => {
   });
 });
 
+describe("max-turns abort detection (issue #277)", () => {
+  // A Claude `stream-json` run cut off by `--max-turns` ends with a terminal
+  // result event carrying subtype `error_max_turns` and is_error: true.
+  const maxTurnsStream = `${JSON.stringify({
+    type: "result",
+    subtype: "error_max_turns",
+    is_error: true,
+    session_id: "sess-mt",
+  })}\n`;
+
+  it("flags maxTurnsReached when the stream ends with error_max_turns", async () => {
+    const job = createJob({ repoId, issueNumber: 40, agent: "claude" }, db);
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner(maxTurnsStream, {}, 1),
+    });
+    expect(res.maxTurnsReached).toBe(true);
+    // It is a Drydock-recoverable outcome, not a provider limit/auth condition.
+    expect(res.limit).toBeUndefined();
+  });
+
+  it("does not flag a normal success as maxTurnsReached", async () => {
+    const job = createJob({ repoId, issueNumber: 41, agent: "claude" }, db);
+    const ok = `${JSON.stringify({ type: "result", subtype: "success", is_error: false })}\n`;
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner(ok, {}, 0),
+    });
+    expect(res.maxTurnsReached).toBe(false);
+  });
+
+  it("flags maxTurnsReached on the resume path too", async () => {
+    const job = createJob({ repoId, issueNumber: 42, agent: "claude" }, db);
+    const res = await resumeAgentSession(
+      getJob(job.id, db) as never,
+      "sess-mt",
+      "ignored-log",
+      "/tmp/r",
+      {
+        db,
+        broker: new LogBroker(db),
+        runner: captureRunner(maxTurnsStream, {}, 1),
+        resumePrompt: "continue",
+      },
+    );
+    expect(res.maxTurnsReached).toBe(true);
+  });
+
+  it("does not flag a timeout abort as maxTurnsReached", async () => {
+    const job = createJob({ repoId, issueNumber: 43, agent: "claude" }, db);
+    let resolveDone: (code: number) => void = () => {};
+    const done = new Promise<number>((res) => {
+      resolveDone = res;
+    });
+    const hangingRunner: StreamRunner = () => ({ done, abort: () => resolveDone(1) });
+    const res = await spawnAgentSession(getJob(job.id, db) as never, "p", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: hangingRunner,
+      timeoutMs: 10,
+      graceMs: 5,
+    });
+    expect(res.timedOut).toBe(true);
+    expect(res.maxTurnsReached).toBe(false);
+  });
+});
+
 describe("resume overrides for the limit-resume path (issue #166)", () => {
   it("uses the injected prompt, model, and turn budget instead of the CI-fix defaults", async () => {
     const job = createJob({ repoId, issueNumber: 29, agent: "claude" }, db);
