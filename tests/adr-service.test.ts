@@ -91,7 +91,10 @@ describe("chokidar watcher", () => {
     mkdirSync(adrDir, { recursive: true });
 
     process.env.DRYDOCK_DB = ":memory:";
-    const watchers = watchAdrDirs([{ path: repoRoot }]);
+    // Force polling so the `add` event is deterministic: the native fsevents
+    // backend can initialize/emit late on a loaded macOS CI runner, which made
+    // this test flaky. Polling picks up the new file on a fixed interval.
+    const watchers = watchAdrDirs([{ path: repoRoot }], { usePolling: true, interval: 50 });
     await new Promise<void>((resolve) => {
       watchers[0]?.on("ready", () => resolve());
     });
@@ -100,9 +103,10 @@ describe("chokidar watcher", () => {
     writeFileSync(join(adrDir, "001-test.md"), "# ADR 001: Watched decision\n");
 
     // Poll until the add event has been processed instead of racing a fixed
-    // sleep — chokidar's add event can fire late under load.
+    // sleep — chokidar's add event can fire late under load. Budget ~9s, well
+    // within the 15s test timeout, so even a slow runner has room.
     const seen = async () => {
-      for (let i = 0; i < 100; i++) {
+      for (let i = 0; i < 180; i++) {
         if (listAdrs(undefined, getDb()).some((r) => r.title === "ADR 001: Watched decision")) {
           return true;
         }
@@ -113,5 +117,5 @@ describe("chokidar watcher", () => {
     const found = await seen();
     await Promise.all(watchers.map((w) => w.close()));
     expect(found).toBe(true);
-  }, 10000);
+  }, 15000);
 });
