@@ -310,7 +310,8 @@ merge, with no further toggles. New repos default `autoHealCi`, `autoResolveMerg
 already started (a queued job's PR), never on the backlog at large. The **AI PR audit**
 (`autoPrAudit`) is **off** by default (issue #316): a repo that already runs an external
 reviewer shouldn't pay for a second whole-PR review by accident — opt in per repo to use
-Drydock as the reviewer. There is **no daily
+Drydock as the reviewer. This rollout also backfills **existing** repos to off, so
+re-enable it explicitly in repo settings if you want Drydock PR audits. There is **no daily
 cost ceiling** by default, with an unlimited turn budget and a generous time budget
 (`dailyCostLimitUsd = 0`, `maxTurns = 0` (unlimited), `maxJobMinutes = 120`; set
 `maxTurns` to a positive value to cap turns per job). When a positive turn budget _is_
