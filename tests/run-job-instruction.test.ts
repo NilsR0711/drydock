@@ -130,6 +130,22 @@ describe("runJob human-guided resume (issue #257)", () => {
     expect(eventReasons(job.id).some((r) => /human instruction/i.test(r))).toBe(true);
   });
 
+  it("reuses the existing PR instead of re-running createPr (issue #331)", async () => {
+    const deps = baseDeps();
+    const job = unblockedJob("resolve the conflicts");
+    // A resume on a branch that already has an open PR: prNumber is set, exactly
+    // the state a fix-an-existing-PR job carries.
+    db.update(jobs).set({ prNumber: 238 }).where(eq(jobs.id, job.id)).run();
+    await runJob(job.id, deps as never);
+
+    // The finish path must not re-open a PR — `gh pr create` errors with
+    // "already exists" there and falsely parks the job as needs_human.
+    expect(deps.createPr).not.toHaveBeenCalled();
+    // It proceeds straight back to CI on the existing PR number.
+    expect(deps.runBabysitter).toHaveBeenCalledWith(expect.anything(), 238);
+    expect(getJob(job.id, db)?.status).toBe("merged");
+  });
+
   it("falls back to a fresh run with the instruction in the prompt when no session can be resumed", async () => {
     const deps = baseDeps();
     // No stored session id → nothing to --resume; must still carry the guidance.

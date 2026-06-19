@@ -759,10 +759,27 @@ export class GhClient {
       flagEq("--title", input.title),
       flagEq("--body", input.body),
     ]);
-    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr create failed");
+    if (res.exitCode !== 0) {
+      // The branch may already have an open PR — e.g. a human-instruction
+      // resume re-runs the finish path on a branch that already has one
+      // (issue #331). Treat that as success and resolve the existing number,
+      // mirroring the idempotency `ensureLabel` already has, instead of
+      // rethrowing and falsely parking the job as needs_human.
+      if (/already exists/i.test(res.stderr)) return await this.prNumberForBranch(input.head);
+      throw new GhError(res.stderr || "gh pr create failed");
+    }
     const match = res.stdout.match(/\/pull\/(\d+)/);
     if (!match?.[1]) throw new GhError(`could not parse PR number from: ${res.stdout}`);
     return Number(match[1]);
+  }
+
+  /** The PR number open for a branch, used to make `createPr` idempotent. */
+  async prNumberForBranch(branch: string): Promise<number> {
+    const res = await this.exec(["pr", "view", branch, "--json", "number"]);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr view failed");
+    const parsed = z.object({ number: z.number() }).safeParse(JSON.parse(res.stdout || "{}"));
+    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
+    return parsed.data.number;
   }
 
   /**
