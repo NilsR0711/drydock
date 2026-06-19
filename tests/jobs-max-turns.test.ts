@@ -6,9 +6,9 @@ import { saveSettings } from "@/lib/settings/service";
 
 /**
  * The global `maxTurns` setting is the source of truth for a new job's turn
- * budget (issue #254): raising it in Settings must take effect for the next
- * job, and 0 (unlimited) must round-trip as 0 rather than the legacy hardcoded
- * fallback. An explicit per-call override still wins.
+ * budget (issue #254): it defaults to 0 (unlimited), raising it in Settings must
+ * take effect for the next job, and 0 must round-trip as 0 rather than the
+ * legacy hardcoded fallback. An explicit per-call override still wins.
  */
 let db: DB;
 let repoId: number;
@@ -19,9 +19,9 @@ beforeEach(() => {
 });
 
 describe("createJob turn budget (issue #254)", () => {
-  it("inherits the global maxTurns default for a fresh job", () => {
+  it("inherits the global maxTurns default (0 = unlimited) for a fresh job", () => {
     const job = createJob({ repoId, issueNumber: 1 }, db);
-    expect(job.maxTurns).toBe(200);
+    expect(job.maxTurns).toBe(0);
   });
 
   it("inherits a customized global maxTurns, including 0 (unlimited)", () => {

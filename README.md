@@ -291,10 +291,10 @@ queued issue runs the whole pipeline — queue → implement → commit → PR �
 feedback → merge — with no toggles to flip. New repos default `autoTriageEnabled`,
 `autoProcessEnabled`, `autoHealCi`, `autoResolveMergeConflicts`, `autoDecompose`,
 `verifyPr`, `autoReviewFeedback` and `autoPrAudit` **on**, and there is **no daily cost
-ceiling** by default, with a generous turn/time budget (`dailyCostLimitUsd = 0`,
-`maxTurns = 200`, `maxJobMinutes = 120`; set `maxTurns = 0` for a fully unlimited turn
-budget). Release management stays **off** — cutting a release is hard to reverse and is
-triggered manually.
+ceiling** by default, with an unlimited turn budget and a generous time budget
+(`dailyCostLimitUsd = 0`, `maxTurns = 0` (unlimited), `maxJobMinutes = 120`; set
+`maxTurns` to a positive value to cap turns per job). Release management stays **off** —
+cutting a release is hard to reverse and is triggered manually.
 
 > ⚠️ **Spend trade-off.** With auto-merge on and no cost ceiling, a new repo can incur
 > **unbounded API spend on its first run** — including on prompt-injected or low-quality

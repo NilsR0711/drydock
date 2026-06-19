@@ -26,9 +26,11 @@ export const settingsSchema = z.object({
   // Per-job turn budget (issue #254). 0 is off (unlimited): the runner drops the
   // CLI `--max-turns` flag and the OpenRouter loop skips its turn check, so a
   // long task is bounded only by maxJobMinutes / the per-job cost cap. Defaults
-  // high (200) so normal tasks finish — the live test job hit the old 40-turn
-  // wall on an ordinary issue. The value seeds each new job's budget.
-  maxTurns: z.number().int().nonnegative().default(200),
+  // to 0 (unlimited) so a fresh install is fully autonomous out of the box —
+  // ordinary issues routinely exceed any fixed turn wall and a max-turns abort
+  // would otherwise escalate to needs_human. The value seeds each new job's
+  // budget; set a positive ceiling here or per-call to cap turns.
+  maxTurns: z.number().int().nonnegative().default(0),
   // Hard wall-clock timeout per agent session in minutes (issue #47). A hung
   // agent (network stall, MCP deadlock, stdin prompt) is aborted after this so
   // it never holds a job slot forever. Defaults to 120 so long autonomous tasks
