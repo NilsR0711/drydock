@@ -10,7 +10,10 @@ import { addRepo } from "@/lib/repos/service";
 let db: DB;
 beforeEach(() => {
   db = createDb(":memory:");
-  addRepo({ path: "/repo", name: "acme", sequential: false }, db);
+  // autoDecompose defaults on (issue #254); pin it off so the background
+  // decompose sweep (issue #284) doesn't issue its own refresh/list and skew
+  // these assertions about the main issue sweep's rate-limit behaviour.
+  addRepo({ path: "/repo", name: "acme", sequential: false, autoDecompose: false }, db);
   setDrainMode(false);
 });
 

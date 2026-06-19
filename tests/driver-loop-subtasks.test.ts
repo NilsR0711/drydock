@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
-import type { Repo } from "@/lib/db/schema";
+import { jobs, type Repo } from "@/lib/db/schema";
 import type { CommandResult } from "@/lib/exec/runner";
 import type { ForgeClient } from "@/lib/forge/types";
 import type { GhIssue, IssueDetail } from "@/lib/github/gh";
 import { syncIssuesFromGh } from "@/lib/issues/service";
 import { listSubtasks } from "@/lib/issues/subtasks";
+import { __resetDecomposeSweep } from "@/lib/orchestrator/decompose-driver";
 import { defaultDecompose, driveTick } from "@/lib/orchestrator/driver-loop";
+import { listJobsByStatus } from "@/lib/orchestrator/jobs";
+import { setDrainMode } from "@/lib/orchestrator/runtime";
 import type { DecomposeForge } from "@/lib/orchestrator/subtask-driver";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
@@ -15,6 +18,8 @@ let db: DB;
 
 beforeEach(() => {
   db = createDb(":memory:");
+  setDrainMode(false);
+  __resetDecomposeSweep();
 });
 
 const stubForge = () => ({ refreshRateLimit: vi.fn(async () => {}) }) as unknown as ForgeClient;
@@ -31,8 +36,29 @@ function tickDeps(over: Record<string, unknown>) {
   };
 }
 
-describe("driveTick subtask decomposition", () => {
-  it("decomposes only ready/queued candidates for an opted-in repo", async () => {
+describe("driveTick decomposition is off the critical path (issue #284)", () => {
+  it("enqueues and claims a queued issue without waiting on a slow decompose", async () => {
+    const repo = addRepo({ path: "/r", name: "r", autoDecompose: true }, db);
+    // The same issue is both manually queued (so it must enqueue + claim) and a
+    // decompose candidate (so the old inline decompose would run before enqueue).
+    const fetched: GhIssue[] = [{ number: 1, title: "Q", labels: [{ name: repo.queueLabel }] }];
+    // A decompose that never settles within the tick: the old code awaited it
+    // before enqueue, so the queued issue would never become a job.
+    const decompose = vi.fn(() => new Promise<void>(() => {}));
+    const started: number[] = [];
+    const runJob = vi.fn(async (jobId: number) => {
+      started.push(jobId);
+      return {} as never;
+    });
+
+    await driveTick(tickDeps({ fetchIssues: async () => fetched, decompose, runJob }));
+
+    // The claim loop ran and started the job even though decompose never settled.
+    expect(started.length).toBe(1);
+    expect(listJobsByStatus(["working"], db).map((j) => j.issueNumber)).toEqual([1]);
+  });
+
+  it("dispatches decompose as a background sweep, not inline before enqueue", async () => {
     const repo = addRepo({ path: "/r", name: "r", autoDecompose: true }, db);
     const fetched: GhIssue[] = [
       { number: 1, title: "Ready", labels: [{ name: "ready" }] },
@@ -42,23 +68,23 @@ describe("driveTick subtask decomposition", () => {
     const decompose = vi.fn(
       async (_r: Repo, _f: ForgeClient, _candidates: GhIssue[], _db: DB) => {},
     );
+
     await driveTick(tickDeps({ fetchIssues: async () => fetched, decompose }));
 
-    expect(decompose).toHaveBeenCalledTimes(1);
+    // Fire-and-forget: the sweep is dispatched but may not have reached
+    // decompose by the time the tick resolves — only the enqueue/claim path is
+    // guaranteed synchronous.
+    await vi.waitFor(() => expect(decompose).toHaveBeenCalledTimes(1));
     const candidates = decompose.mock.calls[0]?.[2] ?? [];
     expect(candidates.map((c) => c.number).sort()).toEqual([1, 2]);
-  });
-
-  it("does not decompose for a repo that has not opted in", async () => {
-    addRepo({ path: "/r", name: "r", autoDecompose: false }, db);
-    const decompose = vi.fn(async () => {});
-    await driveTick(
-      tickDeps({
-        fetchIssues: async () => [{ number: 1, title: "Ready", labels: [{ name: "ready" }] }],
-        decompose,
-      }),
-    );
-    expect(decompose).not.toHaveBeenCalled();
+    // The manually queued issue still became a job regardless of decompose.
+    expect(
+      db
+        .select()
+        .from(jobs)
+        .all()
+        .map((j) => j.issueNumber),
+    ).toContain(2);
   });
 });
 

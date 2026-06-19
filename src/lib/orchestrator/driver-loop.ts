@@ -1,10 +1,9 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { AGENT_IDS, getAgentProvider } from "@/lib/agents/registry";
+import { AGENT_IDS } from "@/lib/agents/registry";
 import type { AgentId } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
 import { type Issue, issues, type Job, jobs, type Repo } from "@/lib/db/schema";
-import type { CommandRunner } from "@/lib/exec/runner";
 import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient } from "@/lib/forge/types";
 import type { GhIssue } from "@/lib/github/gh";
@@ -24,10 +23,10 @@ import { shouldSyncCatalog, syncOpenRouterCatalog } from "@/lib/openrouter/catal
 import { resolveOpenRouterApiKey } from "@/lib/openrouter/config";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
-import { commandForAgent } from "./agent-command";
 import { runBranchJanitorSweep } from "./branch-janitor";
 import { getCredentialFailures } from "./credential-status";
 import { runCredentialProbeSweep, shouldRunCredentialProbe } from "./credential-watchdog";
+import { type DriveDecomposeDeps, defaultDecompose, runDecomposeSweep } from "./decompose-driver";
 import { driveDeploymentHealing } from "./deployment-healing-driver";
 import { listJobsByStatus, recordEvent, transitionJob } from "./jobs";
 import { agentLimitBlocked } from "./provider-limit";
@@ -47,7 +46,10 @@ import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
 import { reconcileExternalAborts } from "./singleton";
 import { JOB_STATES, TERMINAL_STATES } from "./state-machine";
-import { buildSubtaskGenerator, decomposeRepo } from "./subtask-driver";
+
+// Re-exported for callers/tests that import the default decomposition step from
+// the driver module; the implementation now lives in decompose-driver (#284).
+export { defaultDecompose };
 
 /** Latch so the daily cost-limit notification fires once per breach, not per tick. */
 const costLimitState: EdgeState = { active: false };
@@ -82,35 +84,6 @@ export interface DriveTickDeps {
   openrouterCatalogSync?: (db: DB) => Promise<unknown>;
   /** Credential watchdog probe round (issue #177, injectable for tests). */
   credentialProbe?: (db: DB) => Promise<unknown>;
-}
-
-/**
- * Default decomposition step: split work-candidate issues into subtasks using
- * an agent one-shot fallback for prose, scoped to the repo's checkout. Bounded
- * to issues actually queued/ready for work by the caller.
- *
- * Routed through the repo's {@link getAgentProvider agent provider} (issue #49):
- * a Codex repo decomposes via `codex exec` with the configured `codexPath`, a
- * Claude repo via `claude -p` with `claudePath`, using the repo's own model —
- * never the global `claudePath` with Claude-shaped flags regardless of agent.
- */
-export function defaultDecompose(
-  repo: Repo,
-  forge: ForgeClient,
-  candidates: GhIssue[],
-  db: DB,
-  opts: { runner?: CommandRunner } = {},
-): Promise<void> {
-  const provider = getAgentProvider(repo.agent);
-  const generate = buildSubtaskGenerator({
-    provider,
-    command: commandForAgent(provider, db),
-    model: repo.defaultModel,
-    cwd: repo.path,
-    db,
-    runner: opts.runner,
-  });
-  return decomposeRepo(repo, forge, candidates, db, { generate });
 }
 
 /** Shared GitHub-label metadata for the repo's needs-human escalation label. */
@@ -286,7 +259,6 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   const repos = listRepos(db);
 
   const triage = deps.triage ?? triageRepo;
-  const decompose = deps.decompose ?? defaultDecompose;
   for (const repo of repos) {
     // The background sweep runs at `low` priority so its GitHub calls yield the
     // rate-limit budget to interactive routes and active jobs (which run at the
@@ -316,31 +288,11 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
           await triage(repo, forge, fetched, db);
         }
 
-        // Opt-in decomposition (issue #19): split large work-candidate issues
-        // into tracked subtasks before they are worked. Bounded to issues that
-        // are queued or carry a ready label, to cap the per-issue detail fetch.
-        // Skipped while the repo's agent is limit-latched (issue #167): every
-        // one-shot would only bounce off the exhausted quota, and a limit
-        // failure mid-sweep must not stamp issues as non-decomposable.
-        if (cfg.autoDecompose && !agentLimitBlocked(repo.agent as AgentId, db)) {
-          const candidates = fetched.filter((gh) => {
-            const labelNames = gh.labels.map((l) => l.name);
-            return (
-              labelNames.includes(repo.queueLabel) ||
-              labelNames.some((l) => cfg.readyLabels.includes(l))
-            );
-          });
-          if (candidates.length > 0) {
-            try {
-              await decompose(repo, forge, candidates, db);
-            } catch (err) {
-              // A provider-limit abort latched the agent and stopped the sweep
-              // (issue #167); issue enqueueing below must still run — claimNext
-              // excludes the latched agent's jobs anyway.
-              logError(`[driver] decomposition sweep failed for ${repo.name}`, err);
-            }
-          }
-        }
+        // Opt-in decomposition (issue #19) is NOT run here: its per-issue agent
+        // one-shots are slow, and awaiting them before this enqueue loop wedged
+        // the tick so queued issues never became jobs (issue #284). It now runs
+        // as a fire-and-forget background sweep after the claim loop, permanently
+        // off the critical path of job creation and starting.
 
         for (const gh of fetched) {
           const labelNames = gh.labels.map((l) => l.name);
@@ -492,6 +444,24 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
         releaseLease(jobId, leaseToken, db);
         unregisterActiveJob(jobId);
       });
+  }
+
+  // Opt-in issue decomposition (issue #19) runs as a fire-and-forget background
+  // sweep (issue #284). Its per-issue agent one-shots are slow, so it must never
+  // block the enqueue/claim path above: firing it without awaiting keeps job
+  // creation and starting on the critical path every tick, and the sweep's
+  // in-flight guard drops overlapping runs so one that outlives the poll
+  // interval can't pile up. Forge calls run at `low` priority inside the sweep.
+  const decomposeSweep: (d: DriveDecomposeDeps) => Promise<void> =
+    deps.decompose != null
+      ? (d) => runDecomposeSweep({ ...d, decompose: deps.decompose })
+      : runDecomposeSweep;
+  try {
+    void decomposeSweep({ db, forgeFor: deps.forgeFor, fetchIssues: deps.fetchIssues }).catch(
+      (err) => logError("[driver] decomposition sweep failed", err),
+    );
+  } catch (err) {
+    logError("[driver] decomposition sweep failed", err);
   }
 
   // Drive the opt-in PR review-feedback lifecycle (issue #18) as a low-priority
