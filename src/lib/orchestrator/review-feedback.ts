@@ -361,6 +361,16 @@ export async function processPrFeedback(
       continue;
     }
 
+    // Interactive review bots (e.g. CodeRabbit) treat ANY reply in a thread they
+    // authored as a chat turn and act on it: in PR #226 a Drydock "flagging for a
+    // human" reply made CodeRabbit open its OWN fix PR, outsourcing work Drydock
+    // is meant to do itself. So we never write status replies into a bot-authored
+    // thread. The fix still happens here (apply + commit), the thread is still
+    // resolved (a silent, non-triggering mutation), and a flagged item is simply
+    // left unresolved so a human still sees the open thread.
+    const notify = (message: string): Promise<void> =>
+      first.authorIsBot ? Promise.resolve() : postReply(deps.forge, thread, message);
+
     const classification = classifyFeedback(first.body);
     let item = openFeedbackItem(
       { ...ownerFields, prNumber, threadId: thread.id, reviewer: first.author, classification },
@@ -393,9 +403,7 @@ export async function processPrFeedback(
     if (item.status === "pending") {
       if (classification === "question") {
         item = transitionFeedbackItem(item.id, "flagged", {}, db);
-        await postReply(
-          deps.forge,
-          thread,
+        await notify(
           "Drydock: this looks like a question rather than a change request, so it's flagged for a human reviewer.",
         );
         summary.flagged++;
@@ -404,9 +412,7 @@ export async function processPrFeedback(
       }
       if (classification === "out_of_scope") {
         item = transitionFeedbackItem(item.id, "rejected", {}, db);
-        await postReply(
-          deps.forge,
-          thread,
+        await notify(
           "Drydock: treating this as out of scope for this PR — please open a follow-up issue if it should be tracked.",
         );
         await deps.forge.resolveReviewThread(thread.id);
@@ -422,9 +428,7 @@ export async function processPrFeedback(
       if (applied >= budgets.maxItemsPerSweep) continue; // defer to next sweep
       if (item.attempts >= budgets.maxAttemptsPerItem) {
         item = transitionFeedbackItem(item.id, "flagged", {}, db);
-        await postReply(
-          deps.forge,
-          thread,
+        await notify(
           `Drydock: could not resolve this after ${item.attempts} attempt(s); flagging for a human.`,
         );
         summary.flagged++;
@@ -435,7 +439,7 @@ export async function processPrFeedback(
       applied++;
       item = transitionFeedbackItem(item.id, "in_progress", {}, db);
       if (deps.includeProgressReplies) {
-        await postReply(deps.forge, thread, "Drydock: working on this now…");
+        await notify("Drydock: working on this now…");
       }
 
       // A throw must never strand the item in `in_progress` (it would be
@@ -450,14 +454,12 @@ export async function processPrFeedback(
       summary.processed++;
       if (result.ok) {
         transitionFeedbackItem(item.id, "resolved", { detail: result.detail }, db);
-        await postReply(deps.forge, thread, "Drydock: applied this change and pushed a commit. ✅");
+        await notify("Drydock: applied this change and pushed a commit. ✅");
         await deps.forge.resolveReviewThread(thread.id);
         summary.resolved++;
       } else if (item.attempts >= budgets.maxAttemptsPerItem) {
         transitionFeedbackItem(item.id, "failed", { detail: result.detail }, db);
-        await postReply(
-          deps.forge,
-          thread,
+        await notify(
           `Drydock: could not apply this automatically (${result.detail ?? "no change produced"}); flagging for a human.`,
         );
         summary.failed++;
