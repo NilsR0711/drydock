@@ -386,6 +386,27 @@ describe("WorktreeManager", () => {
       );
     });
 
+    it("aborts when an internal git command fails inside the loop, never rejecting (issue #327)", async () => {
+      // `git add -A` exits non-zero (this.git throws). The method must honour its
+      // contract — abort the rebase and return { ok: false } — rather than reject
+      // and leave the worktree mid-rebase for the caller to untangle. (CodeRabbit)
+      const { calls, run } = scriptedRunner([
+        { match: isRebaseStart, result: conflict },
+        { match: isDiffU, result: { stdout: "a.txt\n", stderr: "", exitCode: 0 } },
+        {
+          match: (a) => a[0] === "add" && a[1] === "-A",
+          result: { stdout: "", stderr: "fatal: unable to write index", exitCode: 128 },
+        },
+      ]);
+      const m = new WorktreeManager(run);
+      await expect(
+        m.rebaseOntoBaseWithResolver(wt, "main", repo.path, async () => {}),
+      ).resolves.toEqual({ ok: false, resolvedConflicts: 0 });
+      const ran = calls.map((c) => c.args.join(" "));
+      expect(ran).toContain("rebase --abort");
+      expect(ran.some((a) => a.startsWith("push"))).toBe(false);
+    });
+
     it("aborts when the resolver throws (issue #327)", async () => {
       const { calls, run } = scriptedRunner([
         { match: isRebaseStart, result: conflict },

@@ -454,49 +454,53 @@ export class WorktreeManager {
         return { ok: false, resolvedConflicts };
       };
 
-      while (res.exitCode !== 0) {
-        if (resolvedConflicts >= maxResolutions) return abort();
+      try {
+        while (res.exitCode !== 0) {
+          if (resolvedConflicts >= maxResolutions) return await abort();
 
-        const conflicts = (await this.git(["diff", "--name-only", "--diff-filter=U"], wt.path))
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean);
-        // A non-zero rebase with no unmerged paths stopped for some reason other
-        // than a content conflict (e.g. a hook, an empty commit); there is
-        // nothing for the resolver to do, so fall back to the safe abort.
-        if (conflicts.length === 0) return abort();
+          const conflicts = (await this.git(["diff", "--name-only", "--diff-filter=U"], wt.path))
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean);
+          // A non-zero rebase with no unmerged paths stopped for some reason other
+          // than a content conflict (e.g. a hook, an empty commit); there is
+          // nothing for the resolver to do, so fall back to the safe abort.
+          if (conflicts.length === 0) return await abort();
 
-        try {
           await resolve(conflicts);
-        } catch {
-          return abort();
+
+          await this.git(["add", "-A"], wt.path);
+          // `git diff --cached --check` also flags whitespace errors, so the exit
+          // code alone is too blunt: key on the "conflict marker" phrase so a
+          // legitimate resolution that happens to carry trailing whitespace is not
+          // discarded, while a surviving `<<<<<<<`/`>>>>>>>` marker still aborts.
+          // A genuine command failure (index lock, etc.) writes to stderr and must
+          // also abort — otherwise an empty stdout would be misread as "clean" and
+          // continue the rebase over an unresolved staging area. Whitespace-only
+          // findings go to stdout with an empty stderr, so they still pass.
+          const check = await this.run("git", ["diff", "--cached", "--check"], wt.path);
+          if (
+            check.stdout.includes("conflict marker") ||
+            (check.exitCode !== 0 && check.stderr.trim() !== "")
+          ) {
+            return await abort();
+          }
+
+          resolvedConflicts++;
+          // `-c core.editor=true` keeps the replayed commit's message without
+          // opening an interactive editor (which would hang headlessly).
+          res = await this.run("git", ["-c", "core.editor=true", "rebase", "--continue"], wt.path);
         }
 
-        await this.git(["add", "-A"], wt.path);
-        // `git diff --cached --check` also flags whitespace errors, so the exit
-        // code alone is too blunt: key on the "conflict marker" phrase so a
-        // legitimate resolution that happens to carry trailing whitespace is not
-        // discarded, while a surviving `<<<<<<<`/`>>>>>>>` marker still aborts.
-        // A genuine command failure (index lock, etc.) writes to stderr and must
-        // also abort — otherwise an empty stdout would be misread as "clean" and
-        // continue the rebase over an unresolved staging area. Whitespace-only
-        // findings go to stdout with an empty stderr, so they still pass.
-        const check = await this.run("git", ["diff", "--cached", "--check"], wt.path);
-        if (
-          check.stdout.includes("conflict marker") ||
-          (check.exitCode !== 0 && check.stderr.trim() !== "")
-        ) {
-          return abort();
-        }
-
-        resolvedConflicts++;
-        // `-c core.editor=true` keeps the replayed commit's message without
-        // opening an interactive editor (which would hang headlessly).
-        res = await this.run("git", ["-c", "core.editor=true", "rebase", "--continue"], wt.path);
+        await this.git(["push", "--force-with-lease", "origin", wt.branch], wt.path);
+        return { ok: true, resolvedConflicts };
+      } catch {
+        // Any failure inside the loop — the resolver throwing, or an internal git
+        // command (diff/add/push) exiting non-zero — must honour the method's
+        // contract: abort the in-progress rebase and report failure, never reject
+        // and leave the worktree mid-rebase for the caller to untangle.
+        return abort();
       }
-
-      await this.git(["push", "--force-with-lease", "origin", wt.branch], wt.path);
-      return { ok: true, resolvedConflicts };
     });
   }
 
