@@ -387,15 +387,23 @@ describe("listReposWithStats", () => {
 });
 
 describe("PR audit settings (issue #168)", () => {
-  it("defaults the audit ON with inherited agent/model and English output (issue #254)", () => {
+  it("defaults the audit OFF (opt-in) with inherited agent/model and English output (issue #316)", () => {
+    // Opt-in by default (issue #316): a repo that already runs an external
+    // reviewer (CodeRabbit, Cursor BugBot) must not pay for a second whole-PR
+    // review by accident. The agent/model/language defaults still apply so the
+    // audit is fully configured the moment a repo opts in.
     const repo = addRepo({ path: "/tmp/foo", name: "foo" }, db);
-    expect(repo.autoPrAudit).toBe(true);
+    expect(repo.autoPrAudit).toBe(false);
     expect(repo.prAuditAgent).toBeNull();
     expect(repo.prAuditModel).toBeNull();
     expect(repo.prAuditLanguage).toBe("en");
-    // Posting the audit onto the PR itself stays opt-in (the issue comment is
-    // the default surface); only the audit run is enabled by default.
+    // Posting the audit onto the PR itself stays opt-in too.
     expect(repo.prAuditPostOnPr).toBe(false);
+  });
+
+  it("lets a repo opt in to the audit (issue #316)", () => {
+    const repo = addRepo({ path: "/tmp/foo", name: "foo", autoPrAudit: true }, db);
+    expect(repo.autoPrAudit).toBe(true);
   });
 
   it("persists explicit audit settings", () => {

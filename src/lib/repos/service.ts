@@ -107,10 +107,11 @@ export const repoInputSchema = z.object({
   // Per-repo inbound webhook secret (issue #61). Non-empty enables webhook-driven
   // sync; null/empty disables it and leaves polling as the sole sync path.
   webhookSecret: z.string().nullish(),
-  // AI PR audit (issue #168), defaulted ON for autonomous review (issue #254).
+  // AI PR audit (issue #168), opt-in/off by default (issue #316): repos already
+  // running an external reviewer must not pay for a duplicate whole-PR review.
   // Agent/model null inherits the repo's agent/defaultModel; the output language
   // is a simple or BCP 47 code.
-  autoPrAudit: z.boolean().default(true),
+  autoPrAudit: z.boolean().default(false),
   prAuditAgent: z.enum(["claude", "codex"]).nullish(),
   prAuditModel: z.string().min(1).refine(isKnownModelId, { message: "unknown model id" }).nullish(),
   prAuditLanguage: z
