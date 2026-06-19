@@ -79,7 +79,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 🦊 **GitHub & GitLab** — choose the platform per repo. GitLab (gitlab.com or self-hosted) uses the REST API v4 with a per-repo base URL + access token — no extra CLI to install.
 
-🛂 **Autonomous triage** — per repo, let Drydock label incoming issues (deterministic keyword classifier, whitelist-only output) and auto-process the ones that are *ready* and not blocked. **On by default** (issue #254); gated by author association for public repos, a per-issue attempt limit, and all the usual cost/concurrency limits. Opt-out per repo. Never auto-merges.
+🛂 **Autonomous triage** — per repo, let Drydock label incoming issues (deterministic keyword classifier, whitelist-only output) and auto-process the ones that are *ready* and not blocked. **Off by default** — opt in per repo (issue #285), since turning either on acts on the whole backlog; gated by author association for public repos, a per-issue attempt limit, and all the usual cost/concurrency limits. Never auto-merges.
 
 🔧 **CI babysitting & auto-merge** — polls `gh pr checks`, merges on green (optionally after a per-repo **merge gate**: a settle window that holds the merge so late bot/human reviews can land and feed the review-feedback loop first; any regression re-arms the window), and on red resumes the session with a CI-fix prompt (up to **3 retries**), then files a follow-up issue and hands off. The failed log is classified by failure type (test, type error, lint, build, dependency, timeout, flaky) and reduced to a focused, line-capped evidence slice so the fix prompt targets the actual failure.
 
@@ -89,7 +89,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 💬 **PR review-feedback** — per repo, ingest review threads on a Drydock PR and run the mechanical iteration: only **trusted reviewers** and explicitly **allowlisted bots** are acted on — unlisted bots are ignored, each comment walks a lifecycle (`pending → queued → in_progress → resolved`, with `failed` / `rejected` / `flagged` branches), and the agent applies the change on the PR branch, replies, and resolves the thread. Status replies are marker-based and idempotent (updated in place, not duplicated), with bounded per-sweep and per-item budgets. **On by default** for autonomous operation, seeded with well-known review bots (`cursor[bot]`, `coderabbitai[bot]`) and opt-out per repo; never auto-merges. See [ADR 019](docs/adr/019-pr-review-feedback.md).
 
-🧩 **Issue decomposition** — per repo, split a large issue ("fix these 5 bugs", "implement X with A/B/C") into ordered, tracked subtasks. A deterministic heuristic handles GitHub task lists (`- [ ]`) and "Bug N —" headings for free; prose falls back to a one-shot agent. Decomposition is idempotent (keyed on the issue body hash, redone only when the body changes), subtasks are surfaced in the agent prompt and worked in order, and progress is reflected on the issue and in the UI. **On by default** (issue #254); opt-out per repo. See [ADR 020](docs/adr/020-issue-decomposition.md).
+🧩 **Issue decomposition** — per repo, split a large issue ("fix these 5 bugs", "implement X with A/B/C") into ordered, tracked subtasks. A deterministic heuristic handles GitHub task lists (`- [ ]`) and "Bug N —" headings for free; prose falls back to a one-shot agent. Decomposition is idempotent (keyed on the issue body hash, redone only when the body changes), subtasks are surfaced in the agent prompt and worked in order, and progress is reflected on the issue and in the UI. **Off by default** — opt in per repo (issue #285): it fires slow agent one-shots across the backlog. See [ADR 020](docs/adr/020-issue-decomposition.md).
 
 🪜 **Opt-in model escalation on retry** — per repo, retry failed jobs one rung up the model ladder: when a job parked in *needs a human* is requeued, the next attempt runs the **next-stronger model** of the repo's agent (e.g. Haiku → Sonnet → Opus), capped at the strongest. The escalated model is persisted on the job, so each attempt is **priced at the model that actually ran** and the job page shows which rung an attempt used (a `model_escalated` event on the timeline). Limit-parked jobs resuming their session and interrupted jobs are never escalated. Off by default.
 
@@ -288,14 +288,22 @@ private/loopback/link-local addresses are refused unless you opt in with
 
 ## Configuration
 
-### Autonomous by default
+### Safe by default, autonomous on demand
 
-Out of the box Drydock is **fully autonomous**: add a repo with zero configuration and a
-queued issue runs the whole pipeline — queue → implement → commit → PR → CI heal → review
-feedback → merge — with no toggles to flip. New repos default `autoTriageEnabled`,
-`autoProcessEnabled`, `autoHealCi`, `autoResolveMergeConflicts`, `autoDecompose`,
-`verifyPr`, `autoReviewFeedback` and `autoPrAudit` **on**, and there is **no daily cost
-ceiling** by default, with an unlimited turn budget and a generous time budget
+Adding a repo does **nothing** to its backlog until you opt in. The flags that act on a
+whole backlog the moment a repo is registered are **off by default** ([issue #285]):
+`autoTriageEnabled`, `autoProcessEnabled` and `autoDecompose`. This is the deliberate
+posture for an autonomous-but-controlled tool — turning automation loose on an entire
+backlog should be an explicit choice, not the side effect of registering a repo.
+Manual **"Start now"** and the `drydock:queue` label already work without any of these
+flags, so you stay in control of what runs and when.
+
+Once you _do_ start work — queue an issue or flip on auto-processing — the **in-flight
+pipeline runs autonomously**: implement → commit → PR → CI heal → review feedback →
+merge, with no further toggles. New repos default `autoHealCi`, `autoResolveMergeConflicts`,
+`verifyPr`, `autoReviewFeedback` and `autoPrAudit` **on** — these only act on work you
+already started (a queued job's PR), never on the backlog at large. There is **no daily
+cost ceiling** by default, with an unlimited turn budget and a generous time budget
 (`dailyCostLimitUsd = 0`, `maxTurns = 0` (unlimited), `maxJobMinutes = 120`; set
 `maxTurns` to a positive value to cap turns per job). When a positive turn budget _is_
 set and a session hits it, Drydock recognises the `error_max_turns` abort and — with
@@ -305,15 +313,16 @@ retries) instead of parking it in `needs_human`; either way the escalation reads
 management stays **off** — cutting a release is hard to reverse and is triggered manually.
 
 [issue #277]: https://github.com/NilsR0711/drydock/issues/277
+[issue #285]: https://github.com/NilsR0711/drydock/issues/285
 
-> ⚠️ **Spend trade-off.** With auto-merge on and no cost ceiling, a new repo can incur
-> **unbounded API spend on its first run** — including on prompt-injected or low-quality
-> issues. This is the intended default, but every value stays editable: set a positive
-> **daily cost limit** and/or **max job cost** in **Settings** (global) or per repo to cap
-> spend, raise `minAuthorAssociation` to `approved` (the default) on public repos, and flip
-> any automation flag off per repo. Reverting a field to its default restores the
-> autonomous behavior. Existing repos keep their stored values and are **not** silently
-> switched to the new defaults.
+> ⚠️ **Spend trade-off.** Once you enable auto-processing, a repo with auto-merge on and
+> no cost ceiling can incur **unbounded API spend** — including on prompt-injected or
+> low-quality issues — and enabling it on a large `ready` backlog enqueues every eligible
+> issue. Every value stays editable: set a positive **daily cost limit** and/or **max job
+> cost** in **Settings** (global) or per repo to cap spend, raise `minAuthorAssociation`
+> to `approved` (the default) on public repos, and flip any automation flag on or off per
+> repo. Existing repos keep their stored values and are **not** silently switched to the
+> new defaults.
 
 Drydock is configured at runtime from the **Settings** page and per-repo controls — no
 `.env` required. The environment variables, all optional:

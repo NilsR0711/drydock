@@ -175,16 +175,22 @@ describe("repos service", () => {
     expect(updated.defaultModel).toBe("claude-haiku-4-5");
   });
 
-  it("defaults the full autonomous pipeline ON with safe label/author defaults (issue #254)", () => {
+  it("defaults backlog-driving automation OFF (opt-in) while keeping the in-flight pipeline ON (issue #285)", () => {
     const repo = addRepo({ path: "/auto", name: "auto" }, db);
-    // Fully autonomous out of the box: queue -> implement -> commit -> PR ->
-    // CI heal -> review feedback -> merge with no manual toggles.
-    expect(repo.autoTriageEnabled).toBe(true);
-    expect(repo.autoProcessEnabled).toBe(true);
+    // Safe by default (issue #285): the flags that act on a whole backlog the
+    // moment a repo is registered — auto-triage labelling, auto-processing the
+    // ready queue into jobs, and decomposing large issues — are opt-in. A fresh
+    // repo does nothing automatically until the user turns them on per repo.
+    expect(repo.autoTriageEnabled).toBe(false);
+    expect(repo.autoProcessEnabled).toBe(false);
+    expect(repo.autoDecompose).toBe(false);
+    // The in-flight pipeline that only acts on work the user already started
+    // (a queued job's PR) stays autonomous out of the box: CI heal, review
+    // feedback, merge-conflict repair, and post-PR verification.
     expect(repo.autoHealCi).toBe(true);
     expect(repoAutomation(repo).autoHealCi).toBe(true);
+    expect(repo.autoReviewFeedback).toBe(true);
     expect(repo.autoResolveMergeConflicts).toBe(true);
-    expect(repo.autoDecompose).toBe(true);
     expect(repo.verifyPr).toBe(true);
     // Safe-by-default gates stay conservative: author association and label
     // gating are unchanged, and releases remain manual (hard to reverse).
@@ -196,6 +202,18 @@ describe("repos service", () => {
     expect(cfg.blockingLabels).toContain("blocked");
     expect(cfg.autoLabelWhitelist).toContain("bug");
     expect(cfg.priorityAuthors).toEqual([]);
+  });
+
+  it("lets a repo opt in to backlog-driving automation (issue #285)", () => {
+    const repo = addRepo({ path: "/optin", name: "optin" }, db);
+    const on = updateRepo(
+      repo.id,
+      { autoTriageEnabled: true, autoProcessEnabled: true, autoDecompose: true },
+      db,
+    );
+    expect(on.autoTriageEnabled).toBe(true);
+    expect(on.autoProcessEnabled).toBe(true);
+    expect(on.autoDecompose).toBe(true);
   });
 
   it("lets a repo opt out of any autonomous default (issue #254)", () => {

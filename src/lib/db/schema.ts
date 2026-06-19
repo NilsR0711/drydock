@@ -21,11 +21,14 @@ export const repos = sqliteTable("repos", {
   dailyCostLimitUsd: real("daily_cost_limit_usd").notNull().default(0),
   adrGating: integer("adr_gating", { mode: "boolean" }).notNull().default(false),
   sequential: integer("sequential", { mode: "boolean" }).notNull().default(true),
-  // Fully-autonomous automation (issue #254): on by default so a new repo runs
-  // the whole pipeline unattended. Kept in sync with repoInputSchema; opt-out
-  // per repo. See ADR 016.
-  autoTriageEnabled: integer("auto_triage_enabled", { mode: "boolean" }).notNull().default(true),
-  autoProcessEnabled: integer("auto_process_enabled", { mode: "boolean" }).notNull().default(true),
+  // Backlog-driving automation is opt-in (issue #285): default OFF so a freshly
+  // added repo does nothing to its whole backlog until the user turns these on
+  // per repo. Default-on (the legacy #254 posture) meant registering a repo
+  // could silently auto-triage and mass-enqueue every `ready` issue in a single
+  // tick. A `schema.ts` default change only affects new rows; existing repos
+  // keep their stored value. Kept in sync with repoInputSchema. See ADR 016.
+  autoTriageEnabled: integer("auto_triage_enabled", { mode: "boolean" }).notNull().default(false),
+  autoProcessEnabled: integer("auto_process_enabled", { mode: "boolean" }).notNull().default(false),
   // CI auto-healing on by default for autonomous operation (issue #254). See ADR 017.
   autoHealCi: integer("auto_heal_ci", { mode: "boolean" }).notNull().default(true),
   // PR review-feedback lifecycle (ADR 019). Defaults ON for autonomous
@@ -43,9 +46,10 @@ export const repos = sqliteTable("repos", {
   includeProgressReplies: integer("include_progress_replies", { mode: "boolean" })
     .notNull()
     .default(false),
-  // Decomposition of large issues into tracked subtasks, on by default for
-  // autonomous operation (issue #254). See ADR 020.
-  autoDecompose: integer("auto_decompose", { mode: "boolean" }).notNull().default(true),
+  // Decomposition of large issues into tracked subtasks. Opt-in (issue #285):
+  // it fires slow `claude -p` one-shots across the backlog and can stall the
+  // driver loop, so default OFF. Only affects new rows. See ADR 020.
+  autoDecompose: integer("auto_decompose", { mode: "boolean" }).notNull().default(false),
   // Opt-in plan-first stage (issue #160, default off). Before the implementation
   // session, a read-only one-shot pass produces an implementation plan that is
   // posted on the issue and embedded in the work prompt. Best-effort: any plan
