@@ -4,6 +4,7 @@ import { createDb, type DB } from "@/lib/db/client";
 import { repos } from "@/lib/db/schema";
 import type { GhIssue } from "@/lib/github/gh";
 import {
+  getIssueTitle,
   listIssues,
   reorderIssues,
   setQueueLabelLocal,
@@ -27,6 +28,17 @@ function defined<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("expected a value");
   return value;
 }
+
+describe("getIssueTitle (issue #278)", () => {
+  it("returns the cached title for a known issue", () => {
+    syncIssuesFromGh(repoId, [gh(5, "Add pagination")], db);
+    expect(getIssueTitle(repoId, 5, db)).toBe("Add pagination");
+  });
+
+  it("returns null when the cache holds no row for the issue", () => {
+    expect(getIssueTitle(repoId, 999, db)).toBeNull();
+  });
+});
 
 describe("issues service", () => {
   it("inserts synced issues in fetch order with ascending priority", () => {

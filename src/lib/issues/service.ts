@@ -41,6 +41,21 @@ export function listIssues(repoId: number, db: DB = getDb()): Issue[] {
 }
 
 /**
+ * The cached title of a single issue, or null when the issues cache holds no
+ * row for `(repoId, number)` (issue #278). Branch naming and the job detail
+ * page read this to surface what a job is about; both degrade gracefully on
+ * null, so a cache miss is a normal, non-exceptional outcome.
+ */
+export function getIssueTitle(repoId: number, number: number, db: DB = getDb()): string | null {
+  const row = db
+    .select({ title: issues.title })
+    .from(issues)
+    .where(and(eq(issues.repoId, repoId), eq(issues.number, number)))
+    .get();
+  return row?.title ?? null;
+}
+
+/**
  * Reconcile the cached issues for a repo with a fresh GitHub fetch.
  * - existing issues keep their priority and get title/labels/state refreshed
  * - new issues are appended after the current maximum priority

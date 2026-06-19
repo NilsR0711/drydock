@@ -26,6 +26,43 @@ function sanitize(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "-");
 }
 
+/**
+ * Upper bound on the slug segment derived from an issue title (issue #278).
+ * Keeps branch names readable and well clear of filesystem/ref length limits
+ * while leaving room for the `drydock/issue-{nr}-…-job-{id}` scaffolding.
+ */
+const MAX_SLUG_LENGTH = 50;
+
+/**
+ * Turn a free-text issue title into a git-ref-safe branch segment (issue #278):
+ * accents stripped to ASCII, lowercased, every run of non-alphanumerics folded
+ * to a single hyphen, edges trimmed, and capped to {@link MAX_SLUG_LENGTH} with
+ * no dangling hyphen. Returns "" when nothing slug-able remains (e.g. a
+ * title that is only emoji/punctuation) so callers can degrade gracefully.
+ */
+export function slugifyTitle(title: string): string {
+  return title
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, MAX_SLUG_LENGTH)
+    .replace(/-+$/g, "");
+}
+
+/**
+ * Branch-name label for an issue job (issue #278): embeds the slugified title
+ * after the issue number when one is available, e.g.
+ * `issue-13-add-pagination`. Falls back to the bare `issue-{nr}` label when the
+ * title is missing or slugifies to nothing, preserving the prior ID-only
+ * branch shape as the defensive default.
+ */
+export function issueBranchLabel(issueNumber: number, title?: string | null): string {
+  const slug = title ? slugifyTitle(title) : "";
+  return slug ? `issue-${issueNumber}-${slug}` : `issue-${issueNumber}`;
+}
+
 /** Directory holding all app-owned worktrees for a single repo. */
 export function repoWorktreesDir(repoName: string): string {
   return join(worktreeHome(), "worktrees", sanitize(repoName));

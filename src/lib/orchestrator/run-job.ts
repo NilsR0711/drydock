@@ -8,8 +8,13 @@ import type { Job, Repo } from "@/lib/db/schema";
 import { followupIssues, jobs } from "@/lib/db/schema";
 import type { StreamRunner } from "@/lib/exec/stream-runner";
 import { getForge } from "@/lib/forge/registry";
-import { EmptyCommitError, type Worktree, WorktreeManager } from "@/lib/git/worktree";
-import { listIssues, markIssueNeedsHuman } from "@/lib/issues/service";
+import {
+  EmptyCommitError,
+  issueBranchLabel,
+  type Worktree,
+  WorktreeManager,
+} from "@/lib/git/worktree";
+import { getIssueTitle, listIssues, markIssueNeedsHuman } from "@/lib/issues/service";
 import { listSubtasks } from "@/lib/issues/subtasks";
 import { logError } from "@/lib/log/logger";
 import type { NotificationEvent } from "@/lib/notify/events";
@@ -57,7 +62,7 @@ import type { SubtaskStatus } from "./subtask-state";
 import { runVerificationPass } from "./verify-driver";
 
 interface WorktreeApi {
-  prepare(repo: Repo, jobId: number, issueNumber?: number): Promise<Worktree>;
+  prepare(repo: Repo, jobId: number, issueNumber?: number, label?: string): Promise<Worktree>;
   /** Restore a parked job's preserved branch to resume its prior work (issue #257). */
   prepareResume(repo: Repo, jobId: number, branch: string): Promise<Worktree>;
   commitAndPush(wt: Worktree, message: string): Promise<void>;
@@ -672,9 +677,17 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // commits rather than a blank branch.
     const resumeOnExistingBranch = !!humanInstruction && !!job.branch;
 
+    // Human-readable branch label (issue #278): fold the cached issue title into
+    // the branch name so a repo's job list reads semantically. Read from the
+    // issues cache (not the live fetch, which happens after worktree prep) and
+    // degrade to the bare `issue-{nr}` label when the cache has no title yet.
+    const branchLabel = issueBranchLabel(
+      job.issueNumber,
+      getIssueTitle(repo.id, job.issueNumber, db),
+    );
     wt = resumeOnExistingBranch
       ? await worktrees.prepareResume(repo, job.id, job.branch as string)
-      : await worktrees.prepare(repo, job.id, job.issueNumber);
+      : await worktrees.prepare(repo, job.id, job.issueNumber, branchLabel);
     recordEvent(job.id, "worktree", { path: wt.path, branch: wt.branch }, db);
 
     // Sandboxed execution preflight (issue #182, ADR 033): detect a usable

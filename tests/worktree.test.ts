@@ -7,6 +7,8 @@ import type { CommandResult, CommandRunner } from "@/lib/exec/runner";
 import { spawnRunner } from "@/lib/exec/runner";
 import {
   EmptyCommitError,
+  issueBranchLabel,
+  slugifyTitle,
   stripAiAttribution,
   type Worktree,
   WorktreeManager,
@@ -38,7 +40,62 @@ function recordingRunner() {
   return { calls, run };
 }
 
+describe("slugifyTitle (issue #278)", () => {
+  it("lowercases and hyphenates a normal title", () => {
+    expect(slugifyTitle("Add pagination to the API")).toBe("add-pagination-to-the-api");
+  });
+
+  it("strips punctuation and collapses separator runs", () => {
+    expect(slugifyTitle("Fix bug #42: crash on start!!")).toBe("fix-bug-42-crash-on-start");
+  });
+
+  it("trims leading and trailing separators", () => {
+    expect(slugifyTitle("  /Leading & trailing/  ")).toBe("leading-trailing");
+  });
+
+  it("transliterates accented characters to ASCII", () => {
+    expect(slugifyTitle("Café déjà vu")).toBe("cafe-deja-vu");
+  });
+
+  it("caps the slug length without leaving a trailing hyphen", () => {
+    // A long title sliced at the 50-char cap must not end on a dangling hyphen.
+    const slug = slugifyTitle(`${"word ".repeat(40)}`.trim());
+    expect(slug.length).toBeLessThanOrEqual(50);
+    expect(slug).not.toMatch(/-$/);
+  });
+
+  it("returns an empty string when the title has no slug-able characters", () => {
+    expect(slugifyTitle("🎉🎉🎉")).toBe("");
+    expect(slugifyTitle("   ")).toBe("");
+  });
+});
+
+describe("issueBranchLabel (issue #278)", () => {
+  it("embeds the slugified title alongside the issue number", () => {
+    expect(issueBranchLabel(13, "Add pagination")).toBe("issue-13-add-pagination");
+  });
+
+  it("degrades to the id-only label when the title is missing or empty", () => {
+    expect(issueBranchLabel(13)).toBe("issue-13");
+    expect(issueBranchLabel(13, "")).toBe("issue-13");
+    expect(issueBranchLabel(13, null)).toBe("issue-13");
+    // A title that slugifies to nothing also degrades gracefully.
+    expect(issueBranchLabel(13, "🎉")).toBe("issue-13");
+  });
+});
+
 describe("WorktreeManager", () => {
+  it("prepare builds a branch from a slugified issue-title label (issue #278)", async () => {
+    const { run } = recordingRunner();
+    const wt = await new WorktreeManager(run).prepare(
+      repo,
+      42,
+      13,
+      issueBranchLabel(13, "Add pagination to the API"),
+    );
+    expect(wt.branch).toBe("drydock/issue-13-add-pagination-to-the-api-job-42");
+  });
+
   it("prepare adds a worktree on a new branch off the default branch", async () => {
     const { calls, run } = recordingRunner();
     const wt = await new WorktreeManager(run).prepare(repo, 42);
