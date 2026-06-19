@@ -214,7 +214,14 @@ export class WorktreeManager {
     const path = join(repoWorktreesDir(repo.name), `fb-${sanitize(key)}`);
     const base = await this.withRepoLock(repo.path, async () => {
       await this.git(["-C", repo.path, "fetch", "origin", branch]);
-      await this.git(["-C", repo.path, "worktree", "add", path, branch]);
+      // --force: when review feedback arrives the originating job is usually
+      // still in the CI babysitter with the PR open, so its job-<id> worktree
+      // still has this branch checked out. git refuses to check the same branch
+      // out in two worktrees, so a bare `worktree add` dies on "branch already
+      // used by worktree" and the feedback never gets applied (issue #319).
+      // The feedback worktree only reads, commits, and pushes before being torn
+      // down, so sharing the branch leaves the job worktree unaffected.
+      await this.git(["-C", repo.path, "worktree", "add", "--force", path, branch]);
       return this.resolveBase(repo.path, branch);
     });
     return { path, branch, base };
