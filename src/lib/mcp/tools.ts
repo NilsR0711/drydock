@@ -13,6 +13,8 @@ import { isKnownModelId } from "@/lib/models";
 import { requeueJobWithEscalation } from "@/lib/orchestrator/escalation";
 import { getJob, listJobs, transitionJob } from "@/lib/orchestrator/jobs";
 import { startPrAudit } from "@/lib/orchestrator/pr-audit-driver";
+import { questionSchema, startPrQuestion } from "@/lib/orchestrator/pr-question-service";
+import { getPrQuestion } from "@/lib/orchestrator/pr-questions";
 import { resumeJobWithInstruction } from "@/lib/orchestrator/resume-instruction";
 import { isGitRepoPath } from "@/lib/repos/path";
 import { addRepo } from "@/lib/repos/service";
@@ -112,6 +114,13 @@ const setLabelsShape = {
 const getLogsShape = {
   jobId: z.number().int().positive(),
   limit: z.number().int().positive().max(1000).optional(),
+} satisfies ZodRawShape;
+
+const askPrQuestionShape = {
+  jobId: z.number().int().positive(),
+  // Reuse the shared validator (trim + min + MAX_QUESTION_CHARS) so the
+  // advertised MCP input schema never drifts from what startPrQuestion enforces.
+  question: questionSchema,
 } satisfies ZodRawShape;
 
 const drainShape = { on: z.boolean() } satisfies ZodRawShape;
@@ -326,6 +335,27 @@ export const tools: ToolDef[] = [
       // events; the pass never rejects, so nothing is left unhandled.
       const { prNumber } = startPrAudit(jobId, db);
       return { jobId, prNumber, status: "audit_started" };
+    },
+  },
+  {
+    name: "ask_pr_question",
+    description:
+      "Ask a free-text question about a job's open PR (issue #55) and get the answer back. A " +
+      "read-only QA agent answers from the PR's assembled context (metadata, CI state, review " +
+      "feedback, activity log, diff); it never edits files or touches job state. The call blocks " +
+      "until the question reaches a terminal state and returns the persisted record with its " +
+      "`status` (answered | error), `answer`, and `errorMessage`. Like the dashboard's ask path, " +
+      "this is an on-demand read-only query and is not gated by the work-allowed checks.",
+    inputSchema: askPrQuestionShape,
+    handler: async (args, { db }) => {
+      const { jobId, question } = parseArgs(askPrQuestionShape, args);
+      // startPrQuestion validates the question and the job's PR, throwing before
+      // any record is created on a bad request. We await the background run (it
+      // never throws and is bounded by the driver's timeout) so the host gets
+      // the answer in-band rather than having to poll.
+      const { record, done } = startPrQuestion(jobId, question, db);
+      await done;
+      return getPrQuestion(record.id, db) ?? record;
     },
   },
 ];

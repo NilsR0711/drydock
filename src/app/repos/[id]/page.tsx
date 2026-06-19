@@ -37,6 +37,7 @@ import { jobEvents, jobs } from "@/lib/db/schema";
 import { listOpenRouterModels } from "@/lib/openrouter/catalog";
 import { recentHealingSessions } from "@/lib/orchestrator/ci-healing";
 import { recentDeploymentHealingSessions } from "@/lib/orchestrator/deployment-healing";
+import { openJobsByIssue } from "@/lib/orchestrator/jobs";
 import { recentReleaseRuns } from "@/lib/release/release-service";
 import { getSettings } from "@/lib/settings/service";
 
@@ -170,6 +171,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
             repoId={ws.repo.id}
             queueLabel={ws.repo.queueLabel}
             initialIssues={ws.issues}
+            initialOpenJobs={openJobsByIssue(ws.repo.id, db)}
             pollIntervalSec={settings.pollIntervalSec}
             defaultModel={ws.repo.defaultModel}
             defaultAgent={ws.repo.agent}

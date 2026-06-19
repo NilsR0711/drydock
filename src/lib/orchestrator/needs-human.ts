@@ -1,6 +1,7 @@
 import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
+import { upsertMarkerComment } from "@/lib/forge/comment-upsert";
 import { getForge } from "@/lib/forge/registry";
 import type { IssueCommentRef } from "@/lib/forge/types";
 import { setQueueLabelLocal } from "@/lib/issues/service";
@@ -101,20 +102,7 @@ async function upsertNeedsHumanComment(
 ): Promise<void> {
   const marker = needsHumanCommentMarker(jobId);
   const body = needsHumanCommentBody(jobId, reason);
-  if (forge.listIssueComments && forge.updateIssueComment) {
-    try {
-      const existing = (await forge.listIssueComments(issueNumber)).find((c) =>
-        c.body.includes(marker),
-      );
-      if (existing) {
-        await forge.updateIssueComment(issueNumber, existing.id, body);
-        return;
-      }
-    } catch (err) {
-      logError(`[needs-human] comment upsert degraded to a fresh post on #${issueNumber}`, err);
-    }
-  }
-  await forge.commentIssue(issueNumber, body);
+  await upsertMarkerComment(forge, issueNumber, marker, body, "needs-human");
 }
 
 /**

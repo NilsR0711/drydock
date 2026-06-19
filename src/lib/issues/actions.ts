@@ -16,13 +16,24 @@ import {
 } from "@/lib/issues/service";
 import { listSubtasks } from "@/lib/issues/subtasks";
 import { isKnownModelId } from "@/lib/models";
+import { openJobsByIssue } from "@/lib/orchestrator/jobs";
 import { enqueueJob } from "@/lib/orchestrator/queue";
+import type { JobStatus } from "@/lib/orchestrator/state-machine";
 
 /** Fetch all open issues from GitHub and cache them (backlog + queue). */
 export async function syncRepoIssuesAction(repoId: number) {
   const result = await syncRepoIssues(repoId);
   revalidatePath(`/repos/${repoId}`);
   return result;
+}
+
+/**
+ * Map of issueNumber → open (non-terminal) job status for the repo (issue #286).
+ * The Issues board polls this so the Queue/Backlog split reflects actual
+ * scheduler state, not just the queue label. Local DB read — no GitHub round-trip.
+ */
+export async function listOpenIssueJobsAction(repoId: number): Promise<Record<number, JobStatus>> {
+  return openJobsByIssue(repoId);
 }
 
 /** Persist a new manual ordering for the repo's issue queue. */

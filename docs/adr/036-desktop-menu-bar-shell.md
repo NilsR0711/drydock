@@ -1,4 +1,4 @@
-# ADR 035: Native desktop menu-bar shell (Tauri)
+# ADR 036: Native desktop menu-bar shell (Tauri)
 
 - **Status:** accepted
 - **Date:** 2026-06-19

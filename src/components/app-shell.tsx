@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   ListChecks,
   Pause,
+  ScrollText,
   Settings,
   TriangleAlert,
 } from "lucide-react";
@@ -37,6 +38,7 @@ const NAV: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/prompts", label: "Prompts", icon: FileText },
   { href: "/adrs", label: "ADRs", icon: BookText },
   { href: "/costs", label: "Costs", icon: DollarSign },
+  { href: "/logs", label: "Logs", icon: ScrollText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

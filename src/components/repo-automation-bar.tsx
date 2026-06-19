@@ -6,8 +6,10 @@ import {
   GitPullRequestArrow,
   HeartPulse,
   MessageSquare,
+  ShieldAlert,
   ShieldCheck,
   Tag,
+  Terminal,
   Wand2,
 } from "lucide-react";
 import { type ReactNode, useState, useTransition } from "react";
@@ -129,6 +131,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [planFirst, setPlanFirst] = useState(repo.planFirst);
   const [verifyPr, setVerifyPr] = useState(repo.verifyPr);
   const [autoPrAudit, setAutoPrAudit] = useState(repo.autoPrAudit);
+  const [quietComments, setQuietComments] = useState(repo.quietComments);
   // PR audits run on the CLI agents only; an OpenRouter repo without an
   // explicit audit agent falls back to claude so the select never holds a
   // value its option list cannot show (issue #169).
@@ -167,6 +170,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [sandboxCpus, setSandboxCpus] = useState(repo.sandboxCpus ?? "");
   const [sandboxMemory, setSandboxMemory] = useState(repo.sandboxMemory ?? "");
   const [adoptClaudeMem, setAdoptClaudeMem] = useState(repo.adoptClaudeMem);
+  const [bypassPermissions, setBypassPermissions] = useState(repo.bypassPermissions);
   const [agentInstructions, setAgentInstructions] = useState(repo.agentInstructions ?? "");
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -207,7 +211,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               setAutoTriage(v);
               persist({ autoTriageEnabled: v });
             }}
-            help="Reads each new issue and applies whitelisted labels. Never processes — only classifies."
+            help="Off by default (opt-in). Reads each new issue and applies whitelisted labels. Never processes — only classifies."
           >
             <TagField
               label="Auto-label whitelist"
@@ -253,7 +257,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               setAutoProcess(v);
               persist({ autoProcessEnabled: v });
             }}
-            help="Works issues that are ready and not blocked, opening a PR for each."
+            help="Off by default (opt-in). Works issues that are ready and not blocked, opening a PR for each. Turning this on lets Drydock enqueue your whole ready backlog automatically."
           >
             <TagField
               label="Ready labels"
@@ -303,7 +307,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               setAutoDecompose(v);
               persist({ autoDecompose: v });
             }}
-            help="Splits big issues into ordered, tracked subtasks before working them."
+            help="Off by default (opt-in). Splits big issues into ordered, tracked subtasks before working them."
           />
           <AutoToggle
             label="Plan before implementing"
@@ -410,6 +414,15 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               <HelpTip content="Mirror the review on the pull request in addition to the issue." />
             </div>
           </AutoToggle>
+          <AutoToggle
+            label="Quiet issue comments"
+            checked={quietComments}
+            onChange={(v) => {
+              setQuietComments(v);
+              persist({ quietComments: v });
+            }}
+            help="Suppresses the purely-informational comments (auto-triage labels, post-PR verification summary). High-signal comments — PR audit, needs-human, merge-conflict park — are always posted."
+          />
           <AutoToggle
             label="Address PR review feedback"
             checked={autoFeedback}
@@ -606,6 +619,28 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
                 <span className="text-sm">Allow network access</span>
                 <HelpTip content="Off (default) runs the container with --network none. Turn on only if the toolchain must fetch dependencies during the run." />
               </div>
+            </AutoToggle>
+          </Fieldset>
+          <Fieldset
+            icon={Terminal}
+            legend="Shell access"
+            tone="destructive"
+            description="Let the agent run any command, unsupervised."
+          >
+            <AutoToggle
+              label="Skip permission prompts (--dangerously-skip-permissions)"
+              checked={bypassPermissions}
+              onChange={(v) => {
+                setBypassPermissions(v);
+                persist({ bypassPermissions: v });
+              }}
+              help="Runs this repo's agent jobs with --dangerously-skip-permissions instead of the default edits-only mode. The headless agent can then execute ANY Bash command unsupervised — needed for repos whose tests/builds can't run in a Docker sandbox (e.g. native Xcode: xcodebuild / simctl / xcrun). Dangerous: it grants full shell access with no approval gate, so leave it off unless this repo genuinely needs it."
+            >
+              <Alert tone="destructive" icon={ShieldAlert} className="sm:col-span-2">
+                The agent can run any command on this host with no approval gate — including
+                destructive ones. Prefer combining this with the container sandbox above, and only
+                enable it for repos you trust.
+              </Alert>
             </AutoToggle>
           </Fieldset>
           <Fieldset

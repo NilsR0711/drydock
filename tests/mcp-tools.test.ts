@@ -10,6 +10,7 @@ import { type DB, getDb } from "@/lib/db/client";
 import { issues, jobEvents, jobs, repos, settings } from "@/lib/db/schema";
 import { __setForgeFactory } from "@/lib/forge/registry";
 import { type ToolDef, tools } from "@/lib/mcp/tools";
+import { __setPrAnswerGenerator } from "@/lib/orchestrator/pr-question-service";
 import { getSettings, saveSettings } from "@/lib/settings/service";
 
 function tool(name: string): ToolDef {
@@ -64,6 +65,7 @@ describe("MCP tool registry", () => {
         "abort_job",
         "add_repo",
         "add_to_queue",
+        "ask_pr_question",
         "get_job",
         "get_logs",
         "get_settings",
@@ -436,5 +438,101 @@ describe("run_pr_audit tool (issue #168)", () => {
         .filter((e) => e.type === "pr_audit_failed");
       expect(failed).toHaveLength(1);
     });
+  });
+});
+
+describe("ask_pr_question tool (issue #296)", () => {
+  let db: DB;
+
+  beforeEach(() => {
+    db = getDb();
+    db.delete(jobEvents).run();
+    db.delete(jobs).run();
+    db.delete(issues).run();
+    db.delete(repos).run();
+    db.delete(settings).run();
+    saveSettings({ paused: false, draining: false, dailyCostLimitUsd: 10 }, db);
+    __setForgeFactory(
+      () =>
+        ({
+          prDiff: vi.fn(async () => "diff --git a/x b/x\n+y"),
+          prChecks: vi.fn(async () => []),
+          viewIssue: vi.fn(async () => ({
+            number: 1,
+            title: "t",
+            body: "b",
+            state: "open",
+            labels: [],
+            comments: [],
+          })),
+        }) as never,
+    );
+  });
+
+  afterEach(() => {
+    __setForgeFactory(null);
+    __setPrAnswerGenerator(null);
+  });
+
+  it("rejects a job without a PR", async () => {
+    const repoId = seedRepo(db);
+    const jobId = db
+      .insert(jobs)
+      .values({ repoId, issueNumber: 1, status: "queued", agent: "claude" })
+      .returning()
+      .get().id;
+    await expect(run("ask_pr_question", { jobId, question: "why?" }, db)).rejects.toThrow(/no PR/i);
+  });
+
+  it("rejects an unknown job", async () => {
+    await expect(run("ask_pr_question", { jobId: 999, question: "why?" }, db)).rejects.toThrow(
+      /999/,
+    );
+  });
+
+  it("rejects an empty question at the schema", async () => {
+    const repoId = seedRepo(db);
+    const jobId = db
+      .insert(jobs)
+      .values({ repoId, issueNumber: 1, status: "ci_running", prNumber: 7, agent: "claude" })
+      .returning()
+      .get().id;
+    await expect(run("ask_pr_question", { jobId, question: "" }, db)).rejects.toThrow();
+  });
+
+  it("returns the answered record after the QA run completes", async () => {
+    __setPrAnswerGenerator(async () => "Because the queue logic changed.");
+    const repoId = seedRepo(db);
+    const jobId = db
+      .insert(jobs)
+      .values({ repoId, issueNumber: 1, status: "ci_running", prNumber: 7, agent: "claude" })
+      .returning()
+      .get().id;
+
+    const result = (await run("ask_pr_question", { jobId, question: "why?" }, db)) as {
+      status: string;
+      answer: string | null;
+      prNumber: number;
+    };
+    expect(result.status).toBe("answered");
+    expect(result.answer).toBe("Because the queue logic changed.");
+    expect(result.prNumber).toBe(7);
+  });
+
+  it("returns an error record when the agent yields no answer", async () => {
+    __setPrAnswerGenerator(async () => null);
+    const repoId = seedRepo(db);
+    const jobId = db
+      .insert(jobs)
+      .values({ repoId, issueNumber: 1, status: "ci_running", prNumber: 7, agent: "claude" })
+      .returning()
+      .get().id;
+
+    const result = (await run("ask_pr_question", { jobId, question: "why?" }, db)) as {
+      status: string;
+      errorMessage: string | null;
+    };
+    expect(result.status).toBe("error");
+    expect(result.errorMessage).toMatch(/empty response/i);
   });
 });

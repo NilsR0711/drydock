@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
+import { getServerLogger } from "@/lib/log/server-log";
 import { MODELS } from "@/lib/models";
 import { saveCredentialStatus } from "@/lib/orchestrator/credential-status";
 import { addRepo } from "@/lib/repos/service";
@@ -33,6 +34,19 @@ describe("settings", () => {
     saveSettings({ maxTurns: 500 }, db);
     expect(getSettings(db).maxTurns).toBe(500);
     expect(() => saveSettings({ maxTurns: -1 }, db)).toThrow();
+  });
+
+  it("defaults the server log level to info and rejects unknown levels (issue #294)", () => {
+    expect(getSettings(db).logLevel).toBe("info");
+    saveSettings({ logLevel: "warn" }, db);
+    expect(getSettings(db).logLevel).toBe("warn");
+    // @ts-expect-error — exercising the runtime guard with an invalid level
+    expect(() => saveSettings({ logLevel: "verbose" }, db)).toThrow();
+  });
+
+  it("pushes a saved log level down to the live server logger (issue #294)", () => {
+    saveSettings({ logLevel: "error" }, db);
+    expect(getServerLogger().getLevel()).toBe("error");
   });
 
   it("persists a custom retention window", () => {

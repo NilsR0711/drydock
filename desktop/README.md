@@ -51,7 +51,7 @@ All optional; sensible defaults target a local foreground server.
 The pause/drain endpoints require a custom request header that the shell always
 sends; a browser cannot forge it (it forces a CORS preflight that the server
 never satisfies). When `DRYDOCK_CONTROL_TOKEN` is set, the shell additionally
-sends the matching token. See ADR 035.
+sends the matching token. See ADR 036.
 
 ## Layout
 

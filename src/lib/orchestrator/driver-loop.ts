@@ -1,10 +1,9 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { AGENT_IDS, getAgentProvider } from "@/lib/agents/registry";
+import { AGENT_IDS } from "@/lib/agents/registry";
 import type { AgentId } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
 import { type Issue, issues, type Job, jobs, type Repo } from "@/lib/db/schema";
-import type { CommandRunner } from "@/lib/exec/runner";
 import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient } from "@/lib/forge/types";
 import type { GhIssue } from "@/lib/github/gh";
@@ -24,10 +23,10 @@ import { shouldSyncCatalog, syncOpenRouterCatalog } from "@/lib/openrouter/catal
 import { resolveOpenRouterApiKey } from "@/lib/openrouter/config";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
-import { commandForAgent } from "./agent-command";
 import { runBranchJanitorSweep } from "./branch-janitor";
 import { getCredentialFailures } from "./credential-status";
 import { runCredentialProbeSweep, shouldRunCredentialProbe } from "./credential-watchdog";
+import { runDecomposeSweep } from "./decompose-driver";
 import { driveDeploymentHealing } from "./deployment-healing-driver";
 import { listJobsByStatus, recordEvent, transitionJob } from "./jobs";
 import { agentLimitBlocked } from "./provider-limit";
@@ -46,8 +45,7 @@ import { runReviewFeedbackSweep } from "./review-feedback-driver";
 import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
 import { reconcileExternalAborts } from "./singleton";
-import { JOB_STATES, TERMINAL_STATES } from "./state-machine";
-import { buildSubtaskGenerator, decomposeRepo } from "./subtask-driver";
+import { OPEN_STATES, TERMINAL_SUCCESS_STATES } from "./state-machine";
 
 /** Latch so the daily cost-limit notification fires once per breach, not per tick. */
 const costLimitState: EdgeState = { active: false };
@@ -68,8 +66,8 @@ export interface DriveTickDeps {
   forgeFor?: (repo: Repo) => ForgeClient;
   /** Auto-triage entry point (injectable for tests). */
   triage?: (repo: Repo, forge: ForgeClient, fetched: GhIssue[], db: DB) => Promise<TriageResult[]>;
-  /** Decomposition sweep entry point (injectable for tests). */
-  decompose?: (repo: Repo, forge: ForgeClient, candidates: GhIssue[], db: DB) => Promise<void>;
+  /** Decomposition sweep entry point (issue #284, injectable for tests). */
+  decompose?: (db: DB) => Promise<void>;
   /** Review-feedback sweep entry point (injectable for tests). */
   reviewFeedback?: (db: DB) => Promise<void>;
   /** Post-merge deployment-healing sweep entry point (injectable for tests). */
@@ -82,35 +80,6 @@ export interface DriveTickDeps {
   openrouterCatalogSync?: (db: DB) => Promise<unknown>;
   /** Credential watchdog probe round (issue #177, injectable for tests). */
   credentialProbe?: (db: DB) => Promise<unknown>;
-}
-
-/**
- * Default decomposition step: split work-candidate issues into subtasks using
- * an agent one-shot fallback for prose, scoped to the repo's checkout. Bounded
- * to issues actually queued/ready for work by the caller.
- *
- * Routed through the repo's {@link getAgentProvider agent provider} (issue #49):
- * a Codex repo decomposes via `codex exec` with the configured `codexPath`, a
- * Claude repo via `claude -p` with `claudePath`, using the repo's own model —
- * never the global `claudePath` with Claude-shaped flags regardless of agent.
- */
-export function defaultDecompose(
-  repo: Repo,
-  forge: ForgeClient,
-  candidates: GhIssue[],
-  db: DB,
-  opts: { runner?: CommandRunner } = {},
-): Promise<void> {
-  const provider = getAgentProvider(repo.agent);
-  const generate = buildSubtaskGenerator({
-    provider,
-    command: commandForAgent(provider, db),
-    model: repo.defaultModel,
-    cwd: repo.path,
-    db,
-    runner: opts.runner,
-  });
-  return decomposeRepo(repo, forge, candidates, db, { generate });
 }
 
 /** Shared GitHub-label metadata for the repo's needs-human escalation label. */
@@ -200,12 +169,12 @@ async function routeNeedsReview(
   );
 }
 
-// Every non-terminal state counts as "open" for issue-level dedupe, including
-// the operator-gated parking states (needs_human/interrupted, ADR 005): a
-// parked issue is skipped by the tick instead of churning a no-op enqueue (or,
-// worse, auto-requeueing past the operator gate) every poll. Derived from the
-// state machine so it stays in lockstep with enqueueJob's non-terminal dedupe.
-const OPEN_STATES = JOB_STATES.filter((s) => !TERMINAL_STATES.includes(s));
+// OPEN_STATES (every non-terminal state) is the issue-level dedupe set, shared
+// with the state machine and the Issues board (issue #286). It includes the
+// operator-gated parking states (needs_human/interrupted, ADR 005): a parked
+// issue is skipped by the tick instead of churning a no-op enqueue (or, worse,
+// auto-requeueing past the operator gate) every poll.
+//
 // Non-terminal, already-started states. A repo with any such job is "in flight":
 // for sequential repos the next issue waits until this clears. Parked jobs
 // (needs_human/interrupted) are deliberately NOT in flight — they must not
@@ -224,6 +193,36 @@ const IN_FLIGHT_STATES = [
 function hasOpenJob(db: DB, repoId: number, issueNumber: number): boolean {
   return listJobsByStatus([...OPEN_STATES], db).some(
     (j) => j.repoId === repoId && j.issueNumber === issueNumber,
+  );
+}
+
+/**
+ * Whether automation already completed this issue: a prior job reached terminal
+ * success (`merged`/`released`). The non-terminal dedupe — {@link hasOpenJob}
+ * and enqueueJob's partial unique index — deliberately frees the dedupe key
+ * once a job settles, so a just-merged issue resurfacing in a stale `fetched`
+ * snapshot (issue #288) would otherwise be re-enqueued and redo landed work,
+ * producing a guaranteed-conflicting second PR. This guard is the deterministic
+ * backstop that holds even when a long tick (issue #284) enqueues from a list
+ * captured minutes before the merge. `aborted` (terminal *failure*) is excluded
+ * so the retry path stays open.
+ */
+function hasSuccessfulJob(db: DB, repoId: number, issueNumber: number): boolean {
+  // Targeted lookup (mirrors failedAttempts) rather than scanning every
+  // historical success job: the merged/released set grows unbounded over the
+  // repo's lifetime, and this runs per fetched issue in the enqueue loop.
+  return (
+    db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.repoId, repoId),
+          eq(jobs.issueNumber, issueNumber),
+          inArray(jobs.status, [...TERMINAL_SUCCESS_STATES]),
+        ),
+      )
+      .get() !== undefined
   );
 }
 
@@ -286,7 +285,6 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   const repos = listRepos(db);
 
   const triage = deps.triage ?? triageRepo;
-  const decompose = deps.decompose ?? defaultDecompose;
   for (const repo of repos) {
     // The background sweep runs at `low` priority so its GitHub calls yield the
     // rate-limit budget to interactive routes and active jobs (which run at the
@@ -316,31 +314,11 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
           await triage(repo, forge, fetched, db);
         }
 
-        // Opt-in decomposition (issue #19): split large work-candidate issues
-        // into tracked subtasks before they are worked. Bounded to issues that
-        // are queued or carry a ready label, to cap the per-issue detail fetch.
-        // Skipped while the repo's agent is limit-latched (issue #167): every
-        // one-shot would only bounce off the exhausted quota, and a limit
-        // failure mid-sweep must not stamp issues as non-decomposable.
-        if (cfg.autoDecompose && !agentLimitBlocked(repo.agent as AgentId, db)) {
-          const candidates = fetched.filter((gh) => {
-            const labelNames = gh.labels.map((l) => l.name);
-            return (
-              labelNames.includes(repo.queueLabel) ||
-              labelNames.some((l) => cfg.readyLabels.includes(l))
-            );
-          });
-          if (candidates.length > 0) {
-            try {
-              await decompose(repo, forge, candidates, db);
-            } catch (err) {
-              // A provider-limit abort latched the agent and stopped the sweep
-              // (issue #167); issue enqueueing below must still run — claimNext
-              // excludes the latched agent's jobs anyway.
-              logError(`[driver] decomposition sweep failed for ${repo.name}`, err);
-            }
-          }
-        }
+        // Opt-in decomposition (issue #19) is NO LONGER awaited here: it runs a
+        // slow LLM one-shot per candidate and used to wedge the whole tick
+        // before enqueue ever ran (issue #284). It now runs as a fire-and-forget
+        // background sweep at the end of the tick, so it can never block job
+        // creation or the claim loop.
 
         for (const gh of fetched) {
           const labelNames = gh.labels.map((l) => l.name);
@@ -365,6 +343,11 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
             continue;
           }
           if (hasOpenJob(db, repo.id, gh.number)) continue;
+          // Issue-level success dedupe (issue #288): a prior job already
+          // merged/released this issue. enqueueJob dedupes only non-terminal
+          // jobs, so a stale `fetched` snapshot from a long tick (issue #284)
+          // could otherwise re-enqueue a now-closed, already-merged issue.
+          if (hasSuccessfulJob(db, repo.id, gh.number)) continue;
           if (auto && gh.author && cfg.priorityAuthors.includes(gh.author)) {
             boostPriority(db, repo.id, gh.number);
           }
@@ -536,6 +519,20 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
     await withPriority("low", () => branchJanitor(db));
   } catch (err) {
     logError("[driver] branch-janitor sweep failed", err);
+  }
+
+  // Decompose opted-in repos' queued/ready issues into subtasks (issues #19,
+  // #284). Fire-and-forget: each candidate runs a slow `claude -p`/`codex exec`
+  // one-shot, so awaiting it here would re-create the wedge it used to cause —
+  // synced-but-never-enqueued issues and a starved claim loop. The in-flight
+  // guard in the sweep prevents successive ticks from stacking overlapping runs.
+  try {
+    const decomposeSweep = deps.decompose ?? ((d: DB) => runDecomposeSweep({ db: d }));
+    void Promise.resolve(decomposeSweep(db)).catch((err) =>
+      logError("[driver] decomposition sweep failed", err),
+    );
+  } catch (err) {
+    logError("[driver] decomposition sweep dispatch failed", err);
   }
 
   // Mirror the OpenRouter model catalog (issue #169) when a refresh is due.

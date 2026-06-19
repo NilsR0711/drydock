@@ -366,6 +366,35 @@ export class WorktreeManager {
     }
   }
 
+  /**
+   * Rebase the worktree's branch onto the latest base and force-push the result
+   * (issue #287). Fetches the base, rebases onto it; a rebase that hits a
+   * conflict it cannot replay automatically is aborted and reported as
+   * `{ ok: false }`, leaving the branch untouched on the remote for a human. A
+   * clean rebase is force-pushed with a lease — so a branch that moved on the
+   * remote since we checked it out aborts the push instead of being clobbered —
+   * and reported as `{ ok: true }`. The only history rewritten is what the
+   * rebase itself replays; nothing else is force-pushed.
+   */
+  async rebaseOntoBase(
+    wt: Worktree,
+    baseBranch: string,
+    repoPath: string,
+  ): Promise<{ ok: boolean }> {
+    return this.withRepoLock(repoPath, async () => {
+      await this.git(["fetch", "origin", baseBranch], wt.path);
+      const res = await this.run("git", ["rebase", `origin/${baseBranch}`], wt.path);
+      if (res.exitCode !== 0) {
+        // Abort the half-applied rebase so the worktree is left clean for the
+        // caller to remove; the abort is best-effort and never masks the result.
+        await this.run("git", ["rebase", "--abort"], wt.path);
+        return { ok: false };
+      }
+      await this.git(["push", "--force-with-lease", "origin", wt.branch], wt.path);
+      return { ok: true };
+    });
+  }
+
   async remove(wt: Worktree, repoPath: string): Promise<void> {
     await this.withRepoLock(repoPath, async () => {
       await this.git(["-C", repoPath, "worktree", "remove", "--force", wt.path]);
