@@ -14,6 +14,7 @@ import {
   type Worktree,
   WorktreeManager,
 } from "@/lib/git/worktree";
+import type { PrAuditResult } from "@/lib/issues/pr-audit";
 import { getIssueTitle, listIssues, markIssueNeedsHuman } from "@/lib/issues/service";
 import { listSubtasks } from "@/lib/issues/subtasks";
 import { logError } from "@/lib/log/logger";
@@ -46,6 +47,7 @@ import { getJob, recordEvent, transitionJob } from "./jobs";
 import { announceNeedsHuman as defaultAnnounceNeedsHuman } from "./needs-human";
 import { runOneShotAndRecordCost } from "./one-shot-runner";
 import { runPrAuditPass } from "./pr-audit-driver";
+import { buildAuditFixApply, runPrAuditFixPass } from "./pr-audit-fix";
 import { consumePrMetadata as defaultConsumePrMetadata, type PrMetadata } from "./pr-metadata";
 import { nudgeAwareSleep } from "./pr-nudge";
 import { clearProviderLimit, latchProviderLimit, limitAutoWaitEnabled } from "./provider-limit";
@@ -71,6 +73,8 @@ interface WorktreeApi {
    * Resolves to whether anything was preserved (false for a genuine no-op).
    */
   commitAndPushForHuman(wt: Worktree, message: string): Promise<boolean>;
+  /** The worktree's current HEAD SHA, the audit-fix commit/push base (issue #318). */
+  headSha(wt: Worktree): Promise<string>;
   remove(wt: Worktree, repoPath: string): Promise<void>;
 }
 
@@ -92,7 +96,9 @@ export interface RunJobDeps {
   runBabysitter?: (job: Job, prNumber: number) => Promise<Job>;
   verify?: (job: Job, prNumber: number) => Promise<void>;
   /** Run the opt-in AI PR audit after the PR opens (issue #168); injectable for tests. */
-  audit?: (job: Job, prNumber: number) => Promise<void>;
+  audit?: (job: Job, prNumber: number) => Promise<PrAuditResult | null>;
+  /** Auto-fix the audit's own findings (issue #318); injectable for tests. */
+  auditFix?: (job: Job, prNumber: number, result: PrAuditResult) => Promise<void>;
   notify?: NotifyEvent;
   /** Run the read-only plan stage (issue #160); injectable for tests. */
   runPlan?: (job: Job, prompt: string, cwd: string) => Promise<{ text: string; exitCode: number }>;
@@ -682,8 +688,37 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   // touches job state; it resolves its own agent/model from the repo settings.
   const runAudit =
     deps.audit ??
-    ((j: Job, prNumber: number) =>
-      runPrAuditPass({ job: j, prNumber, repo, forge, db }).then(() => undefined));
+    ((j: Job, prNumber: number) => runPrAuditPass({ job: j, prNumber, repo, forge, db }));
+  // Opt-in audit auto-fix (issue #318): when both flags are on, the agent
+  // addresses its own high-severity audit findings in the job's worktree and
+  // pushes a follow-up commit. The fix re-triggers CI and goes through the
+  // normal merge gate (no auto-merge shortcut). Best-effort and bounded.
+  const runAuditFix =
+    deps.auditFix ??
+    ((j: Job, prNumber: number, result: PrAuditResult) =>
+      runPrAuditFixPass({
+        jobId: j.id,
+        prNumber,
+        result,
+        db,
+        apply: buildAuditFixApply({
+          worktree: wt as Worktree,
+          headSha: (w) => worktrees.headSha(w),
+          commitAndPush: (w, message) => worktrees.commitAndPush(w, message),
+          runSession: (prompt, cwd) =>
+            spawnAgentSession(j, prompt, cwd, {
+              db,
+              provider,
+              command: sessionEnv.command,
+              // Bound the fix session like the implement/CI-fix sessions: the
+              // per-sweep/per-item budgets cap how many fixes run, but a single
+              // hung agent must not block the job indefinitely (CodeRabbit #323).
+              timeoutMs,
+              costCapUsd: maxJobCostUsd,
+              sideSession: true,
+            }).then((r) => ({ exitCode: r.exitCode })),
+        }),
+      }).then(() => undefined));
 
   try {
     // Human-guided resume (issue #257): a needs_human job the operator unblocked
@@ -1130,11 +1165,24 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     // Opt-in AI PR audit (issue #168), after the cheaper verification pass.
     // Wrapped so a failure is logged but never flips the job or blocks merge.
     if (repo.autoPrAudit) {
+      let auditResult: PrAuditResult | null = null;
       try {
-        await runAudit(getJob(job.id, db) as Job, prNumber);
+        auditResult = await runAudit(getJob(job.id, db) as Job, prNumber);
       } catch (auditErr) {
         const message = auditErr instanceof Error ? auditErr.message : String(auditErr);
         recordEvent(job.id, "error", { message: `pr audit failed: ${message}` }, db);
+      }
+      // Opt-in auto-fix of the audit's own findings (issue #318), gated on the
+      // audit itself. Runs before the babysitter so the fix commit is part of
+      // the CI the merge gate waits on. Best-effort: a failure never flips the
+      // job or blocks the merge path.
+      if (repo.autoPrAuditFix && auditResult) {
+        try {
+          await runAuditFix(getJob(job.id, db) as Job, prNumber, auditResult);
+        } catch (fixErr) {
+          const message = fixErr instanceof Error ? fixErr.message : String(fixErr);
+          recordEvent(job.id, "error", { message: `pr audit fix failed: ${message}` }, db);
+        }
       }
     }
 

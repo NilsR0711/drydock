@@ -121,6 +121,10 @@ export const repoInputSchema = z.object({
     })
     .default("en"),
   prAuditPostOnIssue: z.boolean().default(false),
+  // Opt-in auto-fix of the audit's own findings (issue #318). Off by default and
+  // only meaningful alongside autoPrAudit; see the schema column for the full
+  // guardrails (severity threshold, budgets, no auto-merge, idempotency).
+  autoPrAuditFix: z.boolean().default(false),
   // Opt-in model escalation ladder on requeue (issue #179).
   escalateModelOnRetry: z.boolean().default(false),
   // Opt-in sandboxed agent execution (issue #182, ADR 033). "docker" runs the

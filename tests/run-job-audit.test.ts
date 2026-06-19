@@ -44,6 +44,10 @@ function deps(over: Record<string, unknown> = {}) {
       }),
       audit: vi.fn(async () => {
         order.push("audit");
+        return null;
+      }),
+      auditFix: vi.fn(async () => {
+        order.push("auditFix");
       }),
       runBabysitter: vi.fn(async (job: Job) => {
         order.push("babysitter");
@@ -88,6 +92,86 @@ describe("runJob PR audit hook (issue #168)", () => {
     const { d } = deps({
       audit: vi.fn(async () => {
         throw new Error("audit blew up");
+      }),
+    });
+    const job = createJob({ repoId: repo.id, issueNumber: 1 }, db);
+
+    const result = await runJob(job.id, d as never);
+
+    expect(result.status).toBe("merged");
+    expect(d.runBabysitter).toHaveBeenCalledTimes(1);
+  });
+});
+
+const auditResultWithFindings = {
+  summary: "",
+  recommendation: "request_changes" as const,
+  findings: [
+    { severity: "blocker" as const, title: "Null deref", body: "Guard it.", path: "src/x.ts" },
+  ],
+  issueCoverage: { met: [], missing: [] },
+};
+
+describe("runJob PR audit auto-fix hook (issue #318)", () => {
+  it("runs the auto-fix after the audit when both flags are on, before the babysitter", async () => {
+    const repo = addRepo({ path: "/r", name: "r", autoPrAudit: true, autoPrAuditFix: true }, db);
+    syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
+    const { order, d } = deps({
+      audit: vi.fn(async () => {
+        order.push("audit");
+        return auditResultWithFindings;
+      }),
+      auditFix: vi.fn(async () => {
+        order.push("auditFix");
+      }),
+    });
+    const job = createJob({ repoId: repo.id, issueNumber: 1 }, db);
+
+    const result = await runJob(job.id, d as never);
+
+    expect(result.status).toBe("merged");
+    expect(d.auditFix).toHaveBeenCalledTimes(1);
+    const call = (d.auditFix as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call?.[1]).toBe(55);
+    expect(call?.[2]).toBe(auditResultWithFindings);
+    expect(order).toEqual(["verify", "audit", "auditFix", "babysitter"]);
+  });
+
+  it("skips the auto-fix when the repo opted into the audit but not the fix", async () => {
+    const repo = addRepo({ path: "/r", name: "r", autoPrAudit: true, autoPrAuditFix: false }, db);
+    syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
+    const { d } = deps({
+      audit: vi.fn(async () => auditResultWithFindings),
+      auditFix: vi.fn(async () => {}),
+    });
+    const job = createJob({ repoId: repo.id, issueNumber: 1 }, db);
+
+    await runJob(job.id, d as never);
+
+    expect(d.auditFix).not.toHaveBeenCalled();
+  });
+
+  it("skips the auto-fix when the audit produced no result", async () => {
+    const repo = addRepo({ path: "/r", name: "r", autoPrAudit: true, autoPrAuditFix: true }, db);
+    syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
+    const { d } = deps({
+      audit: vi.fn(async () => null),
+      auditFix: vi.fn(async () => {}),
+    });
+    const job = createJob({ repoId: repo.id, issueNumber: 1 }, db);
+
+    await runJob(job.id, d as never);
+
+    expect(d.auditFix).not.toHaveBeenCalled();
+  });
+
+  it("does not corrupt the job when the auto-fix throws", async () => {
+    const repo = addRepo({ path: "/r", name: "r", autoPrAudit: true, autoPrAuditFix: true }, db);
+    syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
+    const { d } = deps({
+      audit: vi.fn(async () => auditResultWithFindings),
+      auditFix: vi.fn(async () => {
+        throw new Error("fix blew up");
       }),
     });
     const job = createJob({ repoId: repo.id, issueNumber: 1 }, db);

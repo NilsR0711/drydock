@@ -149,6 +149,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   );
   const [auditLanguage, setAuditLanguage] = useState(repo.prAuditLanguage);
   const [auditPostOnIssue, setAuditPostOnIssue] = useState(repo.prAuditPostOnIssue);
+  const [autoPrAuditFix, setAutoPrAuditFix] = useState(repo.autoPrAuditFix);
   const [autoHealDeploy, setAutoHealDeploy] = useState(repo.autoHealDeployments);
   const [releaseEnabled, setReleaseEnabled] = useState(repo.releaseEnabled);
   const [resolveConflicts, setResolveConflicts] = useState(repo.autoResolveMergeConflicts);
@@ -412,6 +413,18 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               />
               <span className="text-sm">Also comment on the issue</span>
               <HelpTip content="The review is posted on the pull request. Enable this to also mirror it on the issue." />
+            </div>
+            <div className="flex items-center gap-2.5 self-end pb-1.5">
+              <Switch
+                checked={autoPrAuditFix}
+                onChange={(v) => {
+                  setAutoPrAuditFix(v);
+                  persist({ autoPrAuditFix: v });
+                }}
+                aria-label="Auto-fix audit findings"
+              />
+              <span className="text-sm">Auto-fix audit findings</span>
+              <HelpTip content="Let the agent address its own high-severity findings (blocker/major) and push a follow-up commit to the PR branch — no external review bot needed. The fix re-triggers CI and still goes through the normal merge gate; it never auto-merges." />
             </div>
           </AutoToggle>
           <AutoToggle
