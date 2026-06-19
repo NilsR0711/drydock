@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
 import { type Job, jobEvents, jobs as jobsTable, type Repo } from "@/lib/db/schema";
+import { upsertMarkerComment } from "@/lib/forge/comment-upsert";
 import { getForge } from "@/lib/forge/registry";
 import type { ForgeClient } from "@/lib/forge/types";
 import { logError } from "@/lib/log/logger";
@@ -130,6 +131,15 @@ async function refreshOpenPrs(repo: Repo, jobs: Job[], forge: ForgeClient, db: D
   }
 }
 
+/**
+ * Hidden marker keyed by job id so re-escalating the same job (it was requeued
+ * and conflicts again) edits the same comment in place instead of stacking a
+ * fresh one (idempotency, ADR 019; issue #289).
+ */
+export function conflictCommentMarker(jobId: number): string {
+  return `<!-- drydock:conflict:${jobId} -->`;
+}
+
 /** Park the job for a human with the rebase reason; the comment is best-effort
  * and the transition tolerates a concurrent settle (merge/abort) of the job. */
 async function escalateConflict(
@@ -141,11 +151,11 @@ async function escalateConflict(
 ): Promise<void> {
   const reason = `rebase needed: conflicts with ${repo.defaultBranch}`;
   try {
-    await forge.commentIssue(
-      job.issueNumber,
-      `⚠️ PR #${prNumber} conflicts with \`${repo.defaultBranch}\` — a rebase is needed. ` +
-        `Parking job #${job.id} for a human.`,
-    );
+    const marker = conflictCommentMarker(job.id);
+    const body =
+      `${marker}\n\n⚠️ PR #${prNumber} conflicts with \`${repo.defaultBranch}\` — a rebase is needed. ` +
+      `Parking job #${job.id} for a human.`;
+    await upsertMarkerComment(forge, job.issueNumber, marker, body, "janitor");
   } catch (err) {
     logError(`[janitor] conflict comment failed for job ${job.id}`, err);
   }

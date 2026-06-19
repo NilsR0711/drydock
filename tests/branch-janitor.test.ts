@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { type Job, jobEvents, type Repo } from "@/lib/db/schema";
 import type { ForgeClient, PrMergeState } from "@/lib/forge/types";
-import { runBranchJanitorSweep } from "@/lib/orchestrator/branch-janitor";
+import { conflictCommentMarker, runBranchJanitorSweep } from "@/lib/orchestrator/branch-janitor";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { addRepo } from "@/lib/repos/service";
 
@@ -172,6 +172,17 @@ describe("runBranchJanitorSweep — stale/conflicted PR refresh", () => {
     expect(issueNumber).toBe(7);
     expect(body).toContain("#12");
     expect(body).toContain("main");
+  });
+
+  it("embeds the conflict marker so a re-escalation edits in place", async () => {
+    const repo = makeRepo();
+    const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    const forge = janitorForge({
+      prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
+    });
+    await runBranchJanitorSweep({ db, forgeFor: () => forge });
+    const body = (forge.commentIssue as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    expect(body).toContain(conflictCommentMarker(job.id));
   });
 
   it("still escalates when the issue comment fails (best-effort)", async () => {
