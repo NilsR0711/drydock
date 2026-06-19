@@ -205,7 +205,10 @@ export const jobs = sqliteTable(
     // template (no saved repo version). Lets analytics slice outcomes by the
     // exact prompt revision a job ran with, alongside model and agent.
     implementPromptVersion: integer("implement_prompt_version"),
-    maxTurns: integer("max_turns").notNull().default(40),
+    // Per-job turn budget; 0 means unlimited (issue #254). createJob seeds this
+    // from the global maxTurns setting, so this column default is only a fallback
+    // for direct inserts — kept at 0 (unlimited) to match the autonomous default.
+    maxTurns: integer("max_turns").notNull().default(0),
     totalInputTokens: integer("total_input_tokens").notNull().default(0),
     totalOutputTokens: integer("total_output_tokens").notNull().default(0),
     costUsd: real("cost_usd").notNull().default(0),

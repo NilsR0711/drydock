@@ -17,10 +17,11 @@ describe("settings", () => {
   it("returns defaults when unset", () => {
     const s = getSettings(db);
     expect(s.paused).toBe(false);
-    // Fully-autonomous out of the box (issue #254): no daily cost ceiling and a
-    // generous turn/time budget so a normal task finishes without manual tuning.
+    // Fully-autonomous out of the box (issue #254): no daily cost ceiling and an
+    // unlimited turn budget so a normal task finishes without manual tuning,
+    // bounded only by maxJobMinutes / the per-job cost cap.
     expect(s.dailyCostLimitUsd).toBe(0);
-    expect(s.maxTurns).toBe(200);
+    expect(s.maxTurns).toBe(0);
     expect(s.maxJobMinutes).toBe(120);
     expect(s.maxParallelJobs).toBe(3);
     expect(s.retentionDays).toBe(30);
