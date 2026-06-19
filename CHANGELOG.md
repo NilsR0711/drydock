@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.12](https://github.com/NilsR0711/drydock/compare/v0.1.11...v0.1.12) (2026-06-19)
+
+
+### Features
+
+* **pr-audit:** auto-fix the audit's own findings (opt-in) ([#323](https://github.com/NilsR0711/drydock/issues/323)) ([4fbc2e5](https://github.com/NilsR0711/drydock/commit/4fbc2e5758559bb17c79b051a8bd1c4bfcdcd5cb))
+* **pr-audit:** post the PR audit on the pull request, not the issue ([#317](https://github.com/NilsR0711/drydock/issues/317)) ([#322](https://github.com/NilsR0711/drydock/issues/322)) ([04f7b16](https://github.com/NilsR0711/drydock/commit/04f7b1673e5def2e51eeb0b5df4b844fba0b55b2))
+* **repos:** make AI PR audit opt-in (default off) ([#321](https://github.com/NilsR0711/drydock/issues/321)) ([7187bdc](https://github.com/NilsR0711/drydock/commit/7187bdc0a7bd04bcdeb6376e23280fa2af51fc7e))
+
+
+### Bug Fixes
+
+* **review-feedback:** force-add the apply worktree so it can share a branch the job worktree still holds ([#319](https://github.com/NilsR0711/drydock/issues/319)) ([#320](https://github.com/NilsR0711/drydock/issues/320)) ([6c6a5e6](https://github.com/NilsR0711/drydock/commit/6c6a5e698429696fd1edc45977b811a31cfa3a91))
+
 ## [0.1.11](https://github.com/NilsR0711/drydock/compare/v0.1.10...v0.1.11) (2026-06-19)
 
 
