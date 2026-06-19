@@ -153,6 +153,9 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [autoHealDeploy, setAutoHealDeploy] = useState(repo.autoHealDeployments);
   const [releaseEnabled, setReleaseEnabled] = useState(repo.releaseEnabled);
   const [resolveConflicts, setResolveConflicts] = useState(repo.autoResolveMergeConflicts);
+  const [agentResolveConflicts, setAgentResolveConflicts] = useState(
+    repo.resolveConflictsWithAgent,
+  );
   const [progressReplies, setProgressReplies] = useState(repo.includeProgressReplies);
   const [ready, setReady] = useState(parseList(repo.readyLabels).join(", "));
   const [blocking, setBlocking] = useState(parseList(repo.blockingLabels).join(", "));
@@ -475,6 +478,15 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               persist({ autoResolveMergeConflicts: v });
             }}
             help="Rebases and resolves mechanical conflicts; complex ones still escalate."
+          />
+          <AutoToggle
+            label="Resolve real conflicts with an agent"
+            checked={agentResolveConflicts}
+            onChange={(v) => {
+              setAgentResolveConflicts(v);
+              persist({ resolveConflictsWithAgent: v });
+            }}
+            help="When a rebase hits genuine conflicts, an agent resolves the markers and force-pushes, posting an auditable PR comment. Riskier than a plain rebase, so off by default."
           />
         </Fieldset>
 
