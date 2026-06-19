@@ -68,6 +68,14 @@ export interface AgentSessionDeps {
    * headlessly. CLI providers only — ignored by the http tool-loop path.
    */
   bypassPermissions?: boolean;
+  /**
+   * Per-repo command allowlist (issue #329): commands pre-approved for headless
+   * Bash via the provider's `--allowedTools`, layered on the default edits-only
+   * mode. A safer middle ground than `bypassPermissions` for repos that only
+   * need a real build/test step. CLI providers only — ignored by the http
+   * tool-loop path, and superseded by `bypassPermissions` when that is set.
+   */
+  allowedCommands?: string[];
   /** HTTP transport override for http providers like openrouter (tests, issue #169). */
   fetchImpl?: typeof fetch;
   /** Tool executor override for http providers' tool loops (tests, issue #169). */
@@ -435,6 +443,7 @@ export async function spawnAgentSession(
     model,
     maxTurns: job.maxTurns,
     bypassPermissions: deps.bypassPermissions,
+    allowedCommands: deps.allowedCommands,
   });
   // Tail of stderr, retained for provider-limit classification (issue #166).
   let stderrTail = "";
@@ -628,6 +637,7 @@ export async function resumeAgentSession(
         model,
         maxTurns,
         bypassPermissions: deps.bypassPermissions,
+        allowedCommands: deps.allowedCommands,
       })
     : null;
   // Fallback: agents that can't resume retry from scratch with the fix prompt.
@@ -638,6 +648,7 @@ export async function resumeAgentSession(
       model,
       maxTurns,
       bypassPermissions: deps.bypassPermissions,
+      allowedCommands: deps.allowedCommands,
     });
 
   // Tail of stderr, retained for provider-limit classification (issue #166).

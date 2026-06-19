@@ -77,6 +77,26 @@ describe("spawnAgentSession", () => {
     expect(captured.args).not.toContain("acceptEdits");
   });
 
+  it("threads allowedCommands into the start args as --allowedTools rules (issue #329)", async () => {
+    const job = createJob(
+      { repoId, issueNumber: 329, agent: "claude", model: "claude-opus-4-8" },
+      db,
+    );
+    const captured: Captured = {};
+    await spawnAgentSession(getJob(job.id, db) as never, "build it", "/tmp/r", {
+      db,
+      broker: new LogBroker(db),
+      runner: captureRunner("", captured),
+      allowedCommands: ["git", "xcodebuild"],
+    });
+    const idx = captured.args?.indexOf("--allowedTools") ?? -1;
+    expect(idx).toBeGreaterThan(-1);
+    expect(captured.args?.slice(idx + 1, idx + 3)).toEqual(["Bash(git:*)", "Bash(xcodebuild:*)"]);
+    // Allowlist layers on the default edits-only mode, not the bypass.
+    expect(captured.args).toContain("acceptEdits");
+    expect(captured.args).not.toContain("--dangerously-skip-permissions");
+  });
+
   it("captures the Claude subscription usage reading from the run (issue #188)", async () => {
     const job = createJob(
       { repoId, issueNumber: 188, agent: "claude", model: "claude-opus-4-8" },
