@@ -211,7 +211,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               setAutoTriage(v);
               persist({ autoTriageEnabled: v });
             }}
-            help="Reads each new issue and applies whitelisted labels. Never processes — only classifies."
+            help="Off by default (opt-in). Reads each new issue and applies whitelisted labels. Never processes — only classifies."
           >
             <TagField
               label="Auto-label whitelist"
@@ -257,7 +257,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               setAutoProcess(v);
               persist({ autoProcessEnabled: v });
             }}
-            help="Works issues that are ready and not blocked, opening a PR for each."
+            help="Off by default (opt-in). Works issues that are ready and not blocked, opening a PR for each. Turning this on lets Drydock enqueue your whole ready backlog automatically."
           >
             <TagField
               label="Ready labels"
@@ -307,7 +307,7 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               setAutoDecompose(v);
               persist({ autoDecompose: v });
             }}
-            help="Splits big issues into ordered, tracked subtasks before working them."
+            help="Off by default (opt-in). Splits big issues into ordered, tracked subtasks before working them."
           />
           <AutoToggle
             label="Plan before implementing"
