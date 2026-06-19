@@ -144,6 +144,14 @@ export const repos = sqliteTable("repos", {
   prAuditModel: text("pr_audit_model"),
   prAuditLanguage: text("pr_audit_language").notNull().default("en"),
   prAuditPostOnPr: integer("pr_audit_post_on_pr", { mode: "boolean" }).notNull().default(false),
+  // Opt-in auto-fix of the AI PR audit's own findings (issue #318, default off).
+  // Only meaningful when autoPrAudit is also on: when set, the agent revises the
+  // diff to address its high-severity findings (blocker/major) and pushes a
+  // follow-up commit to the PR branch — no external review bot required. The fix
+  // commit re-triggers CI and goes through the normal merge gate; a self-review
+  // never shortcuts the merge. Bounded by the review-feedback budgets and
+  // idempotent across repeated audit runs.
+  autoPrAuditFix: integer("auto_pr_audit_fix", { mode: "boolean" }).notNull().default(false),
   // Opt-in model escalation ladder (issue #179, default off). When a failed
   // (needs_human) job is requeued, the next attempt runs the next-stronger
   // model in the agent's catalog ladder, capped at the strongest model. The
