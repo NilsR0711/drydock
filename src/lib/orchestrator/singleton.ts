@@ -2,8 +2,10 @@ import { inArray } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { pruneOldData } from "@/lib/db/prune";
 import { jobs } from "@/lib/db/schema";
-import { logError } from "@/lib/log/logger";
+import { logError, logInfo } from "@/lib/log/logger";
+import { setServerLogLevel } from "@/lib/log/server-log";
 import { notifyDraining } from "@/lib/notify/lifecycle";
+import { getSettings } from "@/lib/settings/service";
 import { recoverOnStartup } from "./driver";
 import { startDriverLoop, stopDriverLoop } from "./driver-loop";
 import { getJob, transitionJob } from "./jobs";
@@ -178,6 +180,16 @@ function startPruneSweep(): void {
 export function startOrchestrator(): void {
   if (started) return;
   started = true;
+
+  // Adopt the operator's saved log level now the DB is available — until here
+  // the sink ran on the DRYDOCK_LOG_LEVEL bootstrap default (issue #294). A
+  // first boot with no settings row simply re-applies the same "info" default.
+  try {
+    setServerLogLevel(getSettings().logLevel);
+  } catch {
+    // No settings row yet / DB unavailable: keep the bootstrap level.
+  }
+  logInfo("[orchestrator] starting");
 
   // Crash recovery and the scheduler loop run in the real server only. Skipping
   // them under Vitest keeps lazy getDb() bootstraps from mutating per-test DBs or

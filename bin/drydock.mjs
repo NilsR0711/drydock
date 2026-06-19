@@ -461,6 +461,9 @@ async function serve({ host, port, open }) {
     PORT: String(port),
     DRYDOCK_DB: resolveDbPath(),
     DRYDOCK_MIGRATIONS: join(PACKAGE_ROOT, "drizzle"),
+    // Structured server-log sink (issue #294). Default location under the data
+    // dir; an explicit DRYDOCK_LOG_FILE in the environment still wins.
+    DRYDOCK_LOG_FILE: process.env.DRYDOCK_LOG_FILE ?? join(dataDir, "logs", "drydock.log"),
     // Surface the running version and install kind to the dashboard so it can
     // show an "update available" notice without bundling package.json (#58).
     DRYDOCK_VERSION: readVersion(),

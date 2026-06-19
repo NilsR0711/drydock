@@ -323,13 +323,17 @@ Drydock is configured at runtime from the **Settings** page and per-repo control
 | `DRYDOCK_DATA_DIR` | `~/.drydock` | Directory for the database and local state (packaged runs) |
 | `DRYDOCK_DB` | `<data dir>/drydock.db`¹ | SQLite file path (use `:memory:` for ephemeral runs); overrides the data dir |
 | `DRYDOCK_MIGRATIONS` | `./drizzle` | Folder of generated SQL migrations (set automatically by the `drydock` launcher) |
+| `DRYDOCK_LOG_FILE` | `<data dir>/logs/drydock.log` | Structured server-log file (NDJSON, secret-redacted, rotating); shown on the **Logs** page. A `:memory:`/unset database disables the file sink |
+| `DRYDOCK_LOG_LEVEL` | `info` | Bootstrap log level (`debug`/`info`/`warn`/`error`); the saved **Settings** value takes over at runtime |
+| `DRYDOCK_LOG_MAX_BYTES` | `5000000` | Rotate the active log file once it would exceed this many bytes |
+| `DRYDOCK_LOG_MAX_FILES` | `5` | How many rotated log files to keep (`<file>.1` … `<file>.N`) |
 | `DRYDOCK_ALLOW_PRIVATE_FORGE` | _unset_ | Set to `1` to allow a GitLab base URL on a private/loopback network (self-hosted); otherwise such targets are refused as an SSRF safeguard |
 | `DRYDOCK_OPENROUTER_API_KEY` | _unset_ | Overrides the OpenRouter API key stored in settings (headless deployments keep the secret out of SQLite) |
 
 ¹ A source checkout (`pnpm dev`/`pnpm start`) defaults `DRYDOCK_DB` to `data/drydock.db` in the
 project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 
-**Settings (global):** pause switch · release management kill-switch (master on/off for the opt-in release pipeline) · daily cost limit (0 = off / unlimited) · max job cost (per-job USD ceiling that aborts a runaway session mid-stream; 0 = off) · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · auto-wait on Claude and Codex provider limits (per-agent toggles: park jobs hit by usage/rate limits or overloads and resume them automatically when the window resets; default on) · auto-resume on turn budget (resume a session that exhausts a positive `maxTurns` budget to continue its work, bounded, instead of escalating; default on) · `claude`/`gh` CLI paths · OpenRouter backend (enable switch, API key, catalog refresh interval, default model, free-models-only policy, attribution headers, limit auto-wait, plus test-connection and refresh-models actions) · notification channels (Telegram / Slack / email) and per-event opt-in.
+**Settings (global):** pause switch · release management kill-switch (master on/off for the opt-in release pipeline) · daily cost limit (0 = off / unlimited) · max job cost (per-job USD ceiling that aborts a runaway session mid-stream; 0 = off) · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · auto-wait on Claude and Codex provider limits (per-agent toggles: park jobs hit by usage/rate limits or overloads and resume them automatically when the window resets; default on) · auto-resume on turn budget (resume a session that exhausts a positive `maxTurns` budget to continue its work, bounded, instead of escalating; default on) · server log level (minimum severity written to the structured server log; the **Logs** page filters on top of this) · `claude`/`gh` CLI paths · OpenRouter backend (enable switch, API key, catalog refresh interval, default model, free-models-only policy, attribution headers, limit auto-wait, plus test-connection and refresh-models actions) · notification channels (Telegram / Slack / email) and per-event opt-in.
 **Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · agent (`claude`, `codex`, or `openrouter` once enabled) · default model (validated against the synced catalog for OpenRouter) · serial vs. parallel processing · queue label (default `drydock:queue`) · optional job/CI timeout overrides.
 
 ## Screens
@@ -344,6 +348,7 @@ project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 | `/prompts` | Versioned prompt editor |
 | `/adrs` | ADR review queue |
 | `/costs` | Cost dashboard — daily, by model, top jobs, CSV/JSON export |
+| `/logs` | Server logs — structured records with level filter, text search, and live tail |
 | `/settings` | Global settings |
 
 ## Project layout

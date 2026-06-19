@@ -27,6 +27,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
 import type { AgentId } from "@/lib/agents/types";
+import { LOG_LEVELS } from "@/lib/log/types";
 import { NOTIFICATION_EVENT_LABELS, NOTIFICATION_EVENTS } from "@/lib/notify/events";
 import {
   refreshOpenRouterCatalogAction,
@@ -688,14 +689,29 @@ export function SettingsForm({
             <Archive className="h-4 w-4" />
           </span>
           <div>
-            <h3 className="text-base font-semibold">Retention</h3>
+            <h3 className="text-base font-semibold">Logging &amp; retention</h3>
             <p className="text-sm text-muted-foreground">
-              How long to keep job logs before they are pruned.
+              Server log verbosity and how long to keep job logs before they are pruned.
             </p>
           </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3">
+          <Field
+            label="Server log level"
+            hint="Minimum severity written to the server log. The Logs page filters on top of this."
+          >
+            <Select
+              value={s.logLevel}
+              onChange={(e) => set("logLevel", e.target.value as Settings["logLevel"])}
+            >
+              {LOG_LEVELS.map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </Select>
+          </Field>
           <Field label="Log retention (days)" hint="Older job logs are deleted automatically.">
             <Input
               type="number"
