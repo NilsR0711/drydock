@@ -293,8 +293,14 @@ feedback → merge — with no toggles to flip. New repos default `autoTriageEna
 `verifyPr`, `autoReviewFeedback` and `autoPrAudit` **on**, and there is **no daily cost
 ceiling** by default, with an unlimited turn budget and a generous time budget
 (`dailyCostLimitUsd = 0`, `maxTurns = 0` (unlimited), `maxJobMinutes = 120`; set
-`maxTurns` to a positive value to cap turns per job). Release management stays **off** —
-cutting a release is hard to reverse and is triggered manually.
+`maxTurns` to a positive value to cap turns per job). When a positive turn budget _is_
+set and a session hits it, Drydock recognises the `error_max_turns` abort and — with
+`maxTurnsAutoResume` **on** (default) — resumes the session to continue the work (bounded
+retries) instead of parking it in `needs_human`; either way the escalation reads a clear
+"turn budget (N) reached" rather than a generic "exited non-zero" ([issue #277]). Release
+management stays **off** — cutting a release is hard to reverse and is triggered manually.
+
+[issue #277]: https://github.com/NilsR0711/drydock/issues/277
 
 > ⚠️ **Spend trade-off.** With auto-merge on and no cost ceiling, a new repo can incur
 > **unbounded API spend on its first run** — including on prompt-injected or low-quality
@@ -319,7 +325,7 @@ Drydock is configured at runtime from the **Settings** page and per-repo control
 ¹ A source checkout (`pnpm dev`/`pnpm start`) defaults `DRYDOCK_DB` to `data/drydock.db` in the
 project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 
-**Settings (global):** pause switch · release management kill-switch (master on/off for the opt-in release pipeline) · daily cost limit (0 = off / unlimited) · max job cost (per-job USD ceiling that aborts a runaway session mid-stream; 0 = off) · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · auto-wait on Claude and Codex provider limits (per-agent toggles: park jobs hit by usage/rate limits or overloads and resume them automatically when the window resets; default on) · `claude`/`gh` CLI paths · OpenRouter backend (enable switch, API key, catalog refresh interval, default model, free-models-only policy, attribution headers, limit auto-wait, plus test-connection and refresh-models actions) · notification channels (Telegram / Slack / email) and per-event opt-in.
+**Settings (global):** pause switch · release management kill-switch (master on/off for the opt-in release pipeline) · daily cost limit (0 = off / unlimited) · max job cost (per-job USD ceiling that aborts a runaway session mid-stream; 0 = off) · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · auto-wait on Claude and Codex provider limits (per-agent toggles: park jobs hit by usage/rate limits or overloads and resume them automatically when the window resets; default on) · auto-resume on turn budget (resume a session that exhausts a positive `maxTurns` budget to continue its work, bounded, instead of escalating; default on) · `claude`/`gh` CLI paths · OpenRouter backend (enable switch, API key, catalog refresh interval, default model, free-models-only policy, attribution headers, limit auto-wait, plus test-connection and refresh-models actions) · notification channels (Telegram / Slack / email) and per-event opt-in.
 **Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · agent (`claude`, `codex`, or `openrouter` once enabled) · default model (validated against the synced catalog for OpenRouter) · serial vs. parallel processing · queue label (default `drydock:queue`) · optional job/CI timeout overrides.
 
 ## Screens
