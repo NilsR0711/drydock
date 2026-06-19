@@ -121,6 +121,15 @@ function nonEmptyCommitMessage(cleaned: string): string {
   return cleaned.trim() === "" ? STRIPPED_MESSAGE_FALLBACK : cleaned;
 }
 
+/**
+ * Upper bound on conflict stops an agent-assisted rebase will resolve before
+ * giving up (issue #327). A rebase replays the branch commit by commit and may
+ * stop on each, so this bounds total agent work; a branch that needs more than
+ * a handful of resolutions is better escalated to a human than ground through
+ * indefinitely. Overridable per call.
+ */
+export const MAX_AGENT_CONFLICT_RESOLUTIONS = 10;
+
 export class WorktreeError extends Error {}
 
 /**
@@ -404,6 +413,90 @@ export class WorktreeManager {
       }
       await this.git(["push", "--force-with-lease", "origin", wt.branch], wt.path);
       return { ok: true };
+    });
+  }
+
+  /**
+   * Like {@link rebaseOntoBase}, but when the rebase stops on a content conflict
+   * it hands the conflicted paths to `resolve` (typically an agent) instead of
+   * aborting (issue #327). After the resolver returns, the worktree is staged
+   * and checked for leftover conflict markers; if clean, `git rebase --continue`
+   * advances to the next replayed commit — which may itself conflict, up to
+   * `maxResolutions`. Any failure — the resolver throws, conflict markers
+   * survive, the rebase stops for a non-conflict reason, or the budget runs out
+   * — aborts the rebase and reports `{ ok: false }`, leaving the remote branch
+   * untouched for a human. A fully resolved rebase is force-pushed with a lease
+   * (so a branch that moved on the remote aborts the push instead of being
+   * clobbered), exactly as the plain rebase does. The only history rewritten is
+   * what the rebase itself replays; nothing else is force-pushed, and the PR is
+   * never merged.
+   *
+   * The whole sequence — including the resolver/agent call — runs under the
+   * per-repo lock, since the rebase state lives in this worktree and the
+   * force-push touches the shared branch ref. Per-repo execution is sequential
+   * by default, so holding the lock across the (rare, opt-in) agent session does
+   * not stall concurrent work in practice.
+   */
+  async rebaseOntoBaseWithResolver(
+    wt: Worktree,
+    baseBranch: string,
+    repoPath: string,
+    resolve: (conflicts: string[]) => Promise<void>,
+    maxResolutions = MAX_AGENT_CONFLICT_RESOLUTIONS,
+  ): Promise<{ ok: boolean; resolvedConflicts: number }> {
+    return this.withRepoLock(repoPath, async () => {
+      await this.git(["fetch", "origin", baseBranch], wt.path);
+      let res = await this.run("git", ["rebase", `origin/${baseBranch}`], wt.path);
+      let resolvedConflicts = 0;
+
+      const abort = async (): Promise<{ ok: false; resolvedConflicts: number }> => {
+        await this.run("git", ["rebase", "--abort"], wt.path);
+        return { ok: false, resolvedConflicts };
+      };
+
+      while (res.exitCode !== 0) {
+        if (resolvedConflicts >= maxResolutions) return abort();
+
+        const conflicts = (await this.git(["diff", "--name-only", "--diff-filter=U"], wt.path))
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean);
+        // A non-zero rebase with no unmerged paths stopped for some reason other
+        // than a content conflict (e.g. a hook, an empty commit); there is
+        // nothing for the resolver to do, so fall back to the safe abort.
+        if (conflicts.length === 0) return abort();
+
+        try {
+          await resolve(conflicts);
+        } catch {
+          return abort();
+        }
+
+        await this.git(["add", "-A"], wt.path);
+        // `git diff --cached --check` also flags whitespace errors, so the exit
+        // code alone is too blunt: key on the "conflict marker" phrase so a
+        // legitimate resolution that happens to carry trailing whitespace is not
+        // discarded, while a surviving `<<<<<<<`/`>>>>>>>` marker still aborts.
+        // A genuine command failure (index lock, etc.) writes to stderr and must
+        // also abort — otherwise an empty stdout would be misread as "clean" and
+        // continue the rebase over an unresolved staging area. Whitespace-only
+        // findings go to stdout with an empty stderr, so they still pass.
+        const check = await this.run("git", ["diff", "--cached", "--check"], wt.path);
+        if (
+          check.stdout.includes("conflict marker") ||
+          (check.exitCode !== 0 && check.stderr.trim() !== "")
+        ) {
+          return abort();
+        }
+
+        resolvedConflicts++;
+        // `-c core.editor=true` keeps the replayed commit's message without
+        // opening an interactive editor (which would hang headlessly).
+        res = await this.run("git", ["-c", "core.editor=true", "rebase", "--continue"], wt.path);
+      }
+
+      await this.git(["push", "--force-with-lease", "origin", wt.branch], wt.path);
+      return { ok: true, resolvedConflicts };
     });
   }
 
