@@ -1,6 +1,8 @@
 import { and, eq } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { issues, type Repo } from "@/lib/db/schema";
+import { upsertMarkerComment } from "@/lib/forge/comment-upsert";
+import type { IssueCommentRef } from "@/lib/forge/types";
 import type { GhIssue, IssueDetail } from "@/lib/github/gh";
 import { logError } from "@/lib/log/logger";
 import { authorAllowed, repoAutomation } from "@/lib/repos/automation";
@@ -13,6 +15,20 @@ export interface TriageForge {
   ensureLabel(name: string, opts?: { color?: string; description?: string }): Promise<void>;
   addLabels(issueNumber: number, labels: string[]): Promise<void>;
   commentIssue(issueNumber: number, body: string): Promise<void>;
+  /** Optional idempotency seam: list comments to find a prior marker. */
+  listIssueComments?(issueNumber: number): Promise<IssueCommentRef[]>;
+  /** Optional idempotency seam: edit the prior marker comment in place. */
+  updateIssueComment?(issueNumber: number, commentId: string, body: string): Promise<void>;
+}
+
+/**
+ * Hidden marker keyed by issue number so a re-triage (the issue's title or
+ * labels changed) edits the same comment in place instead of stacking a fresh
+ * one (idempotency, ADR 019). Triage runs before any job exists, so the issue
+ * number — not a job id — is the stable key (issue #289).
+ */
+export function triageCommentMarker(issueNumber: number): string {
+  return `<!-- drydock:triage:${issueNumber} -->`;
 }
 
 export interface TriageResult {
@@ -140,11 +156,10 @@ export async function triageIssue(
   if (applied.length > 0) {
     for (const label of applied) await forge.ensureLabel(label);
     await forge.addLabels(listed.number, applied);
+    const marker = triageCommentMarker(listed.number);
     const labelList = applied.map((l) => `\`${l}\``).join(", ");
-    await forge.commentIssue(
-      listed.number,
-      `auto-triage: applied ${labelList} — reasons: ${reasons.join("; ")}.`,
-    );
+    const body = `${marker}\n\nauto-triage: applied ${labelList} — reasons: ${reasons.join("; ")}.`;
+    await upsertMarkerComment(forge, listed.number, marker, body, "triage");
     mirrorLabelsLocal(repo.id, listed.number, applied, [], db);
   }
 
