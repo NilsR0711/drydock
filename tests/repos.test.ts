@@ -240,6 +240,19 @@ describe("repos service", () => {
     expect(off.dailyCostLimitUsd).toBe(10);
   });
 
+  it("defaults agent-assisted conflict resolution OFF and lets a repo opt in (issue #327)", () => {
+    const repo = addRepo({ path: "/agentconf", name: "agentconf" }, db);
+    // Off by default: resolving genuine content conflicts with an agent is
+    // riskier than the plain rebase, so it is a deliberate per-repo choice and
+    // independent of autoResolveMergeConflicts (which stays on by default).
+    expect(repo.resolveConflictsWithAgent).toBe(false);
+    expect(repo.autoResolveMergeConflicts).toBe(true);
+    expect(repoAutomation(repo).resolveConflictsWithAgent).toBe(false);
+    const on = updateRepo(repo.id, { resolveConflictsWithAgent: true }, db);
+    expect(on.resolveConflictsWithAgent).toBe(true);
+    expect(repoAutomation(on).resolveConflictsWithAgent).toBe(true);
+  });
+
   it("defaults model escalation on retry to off and lets a repo opt in (issue #179)", () => {
     const repo = addRepo({ path: "/esc", name: "esc" }, db);
     expect(repo.escalateModelOnRetry).toBe(false);

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Repo } from "@/lib/db/schema";
 import type { CommandResult, CommandRunner } from "@/lib/exec/runner";
 import { spawnRunner } from "@/lib/exec/runner";
@@ -260,6 +260,227 @@ describe("WorktreeManager", () => {
     expect(ran).toContain("rebase --abort");
     // A failed rebase must never push: the conflict is left for a human.
     expect(ran.some((a) => a.startsWith("push"))).toBe(false);
+  });
+
+  describe("rebaseOntoBaseWithResolver (issue #327)", () => {
+    /**
+     * A programmable git fake: maps each invocation to a scripted result by its
+     * leading args, so a multi-step rebase (rebase → diff → add → continue) can
+     * be driven deterministically without real git. Unmatched commands succeed.
+     */
+    function scriptedRunner(
+      script: Array<{ match: (a: string[]) => boolean; result: CommandResult }>,
+    ) {
+      const calls: { args: string[]; cwd?: string }[] = [];
+      const run: CommandRunner = async (_cmd, args, cwd) => {
+        calls.push({ args, cwd });
+        const hit = script.find((s) => s.match(args));
+        return hit?.result ?? { stdout: "", stderr: "", exitCode: 0 };
+      };
+      return { calls, run };
+    }
+    const wt: Worktree = { path: "/wt", branch: "drydock/issue-9-job-3" };
+    const isRebaseStart = (a: string[]): boolean => a[0] === "rebase" && a[1] === "origin/main";
+    const isContinue = (a: string[]): boolean => a.includes("rebase") && a.includes("--continue");
+    const isDiffU = (a: string[]): boolean => a[0] === "diff" && a.includes("--diff-filter=U");
+    const conflict: CommandResult = { stdout: "", stderr: "CONFLICT", exitCode: 1 };
+    const clean: CommandResult = { stdout: "", stderr: "", exitCode: 0 };
+
+    it("clean rebase never invokes the resolver and force-pushes (issue #327)", async () => {
+      const { calls, run } = scriptedRunner([]);
+      const resolve = vi.fn(async () => {});
+      const m = new WorktreeManager(run);
+      await expect(m.rebaseOntoBaseWithResolver(wt, "main", repo.path, resolve)).resolves.toEqual({
+        ok: true,
+        resolvedConflicts: 0,
+      });
+      expect(resolve).not.toHaveBeenCalled();
+      const ran = calls.map((c) => c.args.join(" "));
+      expect(ran).toContain("push --force-with-lease origin drydock/issue-9-job-3");
+    });
+
+    it("hands the conflicted paths to the resolver, then stages, continues and pushes (issue #327)", async () => {
+      const { calls, run } = scriptedRunner([
+        { match: isRebaseStart, result: conflict },
+        { match: isDiffU, result: { stdout: "a.txt\nb.pbxproj\n", stderr: "", exitCode: 0 } },
+        { match: isContinue, result: clean },
+      ]);
+      const seen: string[][] = [];
+      const resolve = vi.fn(async (paths: string[]) => {
+        seen.push(paths);
+      });
+      const m = new WorktreeManager(run);
+      await expect(m.rebaseOntoBaseWithResolver(wt, "main", repo.path, resolve)).resolves.toEqual({
+        ok: true,
+        resolvedConflicts: 1,
+      });
+      expect(seen).toEqual([["a.txt", "b.pbxproj"]]);
+      const ran = calls.map((c) => c.args.join(" "));
+      expect(ran).toContain("add -A");
+      expect(ran.some((a) => a.includes("rebase") && a.includes("--continue"))).toBe(true);
+      expect(ran).toContain("push --force-with-lease origin drydock/issue-9-job-3");
+      expect(ran).not.toContain("rebase --abort");
+    });
+
+    it("aborts without pushing when conflict markers remain after the resolver (issue #327)", async () => {
+      const { calls, run } = scriptedRunner([
+        { match: isRebaseStart, result: conflict },
+        { match: isDiffU, result: { stdout: "a.txt\n", stderr: "", exitCode: 0 } },
+        // `git diff --cached --check` reports a leftover marker → resolution invalid.
+        {
+          match: (a) => a.includes("--check"),
+          result: { stdout: "a.txt:3: leftover conflict marker\n", stderr: "", exitCode: 2 },
+        },
+      ]);
+      const resolve = vi.fn(async () => {});
+      const m = new WorktreeManager(run);
+      await expect(m.rebaseOntoBaseWithResolver(wt, "main", repo.path, resolve)).resolves.toEqual({
+        ok: false,
+        resolvedConflicts: 0,
+      });
+      const ran = calls.map((c) => c.args.join(" "));
+      expect(ran).toContain("rebase --abort");
+      expect(ran.some((a) => a.startsWith("push"))).toBe(false);
+    });
+
+    it("aborts when the conflict-marker check itself fails with a command error (issue #327)", async () => {
+      // A genuine failure of `git diff --cached --check` (e.g. an index lock)
+      // exits non-zero with output on stderr and an empty stdout. That must not
+      // be misread as "no markers" and continue the rebase over an unresolved
+      // staging area — it has to abort, the safe default.
+      const { calls, run } = scriptedRunner([
+        { match: isRebaseStart, result: conflict },
+        { match: isDiffU, result: { stdout: "a.txt\n", stderr: "", exitCode: 0 } },
+        {
+          match: (a) => a.includes("--check"),
+          result: { stdout: "", stderr: "fatal: unable to read index\n", exitCode: 128 },
+        },
+      ]);
+      const m = new WorktreeManager(run);
+      await expect(
+        m.rebaseOntoBaseWithResolver(wt, "main", repo.path, async () => {}),
+      ).resolves.toEqual({ ok: false, resolvedConflicts: 0 });
+      const ran = calls.map((c) => c.args.join(" "));
+      expect(ran).toContain("rebase --abort");
+      expect(ran.some((a) => a.startsWith("push"))).toBe(false);
+    });
+
+    it("ignores whitespace-only --check warnings and still continues (issue #327)", async () => {
+      // `git diff --check` flags trailing whitespace too; only leftover conflict
+      // markers are disqualifying, so a whitespace warning must not abort.
+      const { calls, run } = scriptedRunner([
+        { match: isRebaseStart, result: conflict },
+        { match: isDiffU, result: { stdout: "a.txt\n", stderr: "", exitCode: 0 } },
+        {
+          match: (a) => a.includes("--check"),
+          result: { stdout: "a.txt:3: trailing whitespace.\n", stderr: "", exitCode: 2 },
+        },
+        { match: isContinue, result: clean },
+      ]);
+      const m = new WorktreeManager(run);
+      await expect(
+        m.rebaseOntoBaseWithResolver(wt, "main", repo.path, async () => {}),
+      ).resolves.toEqual({ ok: true, resolvedConflicts: 1 });
+      expect(calls.map((c) => c.args.join(" "))).toContain(
+        "push --force-with-lease origin drydock/issue-9-job-3",
+      );
+    });
+
+    it("aborts when an internal git command fails inside the loop, never rejecting (issue #327)", async () => {
+      // `git add -A` exits non-zero (this.git throws). The method must honour its
+      // contract — abort the rebase and return { ok: false } — rather than reject
+      // and leave the worktree mid-rebase for the caller to untangle. (CodeRabbit)
+      const { calls, run } = scriptedRunner([
+        { match: isRebaseStart, result: conflict },
+        { match: isDiffU, result: { stdout: "a.txt\n", stderr: "", exitCode: 0 } },
+        {
+          match: (a) => a[0] === "add" && a[1] === "-A",
+          result: { stdout: "", stderr: "fatal: unable to write index", exitCode: 128 },
+        },
+      ]);
+      const m = new WorktreeManager(run);
+      await expect(
+        m.rebaseOntoBaseWithResolver(wt, "main", repo.path, async () => {}),
+      ).resolves.toEqual({ ok: false, resolvedConflicts: 0 });
+      const ran = calls.map((c) => c.args.join(" "));
+      expect(ran).toContain("rebase --abort");
+      expect(ran.some((a) => a.startsWith("push"))).toBe(false);
+    });
+
+    it("aborts when the resolver throws (issue #327)", async () => {
+      const { calls, run } = scriptedRunner([
+        { match: isRebaseStart, result: conflict },
+        { match: isDiffU, result: { stdout: "a.txt\n", stderr: "", exitCode: 0 } },
+      ]);
+      const m = new WorktreeManager(run);
+      await expect(
+        m.rebaseOntoBaseWithResolver(wt, "main", repo.path, async () => {
+          throw new Error("agent exited non-zero");
+        }),
+      ).resolves.toEqual({ ok: false, resolvedConflicts: 0 });
+      const ran = calls.map((c) => c.args.join(" "));
+      expect(ran).toContain("rebase --abort");
+      expect(ran.some((a) => a.startsWith("push"))).toBe(false);
+    });
+
+    it("aborts when the rebase stops for a non-conflict reason (no unmerged paths) (issue #327)", async () => {
+      const { calls, run } = scriptedRunner([
+        { match: isRebaseStart, result: conflict },
+        // No unmerged paths: the rebase failed for some other reason.
+        { match: isDiffU, result: { stdout: "\n", stderr: "", exitCode: 0 } },
+      ]);
+      const resolve = vi.fn(async () => {});
+      const m = new WorktreeManager(run);
+      await expect(m.rebaseOntoBaseWithResolver(wt, "main", repo.path, resolve)).resolves.toEqual({
+        ok: false,
+        resolvedConflicts: 0,
+      });
+      expect(resolve).not.toHaveBeenCalled();
+      expect(calls.map((c) => c.args.join(" "))).toContain("rebase --abort");
+    });
+
+    it("resolves conflicts across multiple replayed commits (issue #327)", async () => {
+      // First continue still conflicts (next commit), second continue completes.
+      let continues = 0;
+      const { calls, run } = scriptedRunner([
+        { match: isRebaseStart, result: conflict },
+        { match: isDiffU, result: { stdout: "a.txt\n", stderr: "", exitCode: 0 } },
+        {
+          match: isContinue,
+          get result() {
+            continues++;
+            return continues < 2 ? conflict : clean;
+          },
+        } as { match: (a: string[]) => boolean; result: CommandResult },
+      ]);
+      const resolve = vi.fn(async () => {});
+      const m = new WorktreeManager(run);
+      await expect(m.rebaseOntoBaseWithResolver(wt, "main", repo.path, resolve)).resolves.toEqual({
+        ok: true,
+        resolvedConflicts: 2,
+      });
+      expect(resolve).toHaveBeenCalledTimes(2);
+      expect(calls.map((c) => c.args.join(" "))).toContain(
+        "push --force-with-lease origin drydock/issue-9-job-3",
+      );
+    });
+
+    it("gives up and aborts once the resolution budget is exhausted (issue #327)", async () => {
+      // Every continue keeps conflicting; the bounded budget must stop the loop.
+      const { calls, run } = scriptedRunner([
+        { match: isRebaseStart, result: conflict },
+        { match: isDiffU, result: { stdout: "a.txt\n", stderr: "", exitCode: 0 } },
+        { match: isContinue, result: conflict },
+      ]);
+      const resolve = vi.fn(async () => {});
+      const m = new WorktreeManager(run);
+      const out = await m.rebaseOntoBaseWithResolver(wt, "main", repo.path, resolve, 3);
+      expect(out).toEqual({ ok: false, resolvedConflicts: 3 });
+      expect(resolve).toHaveBeenCalledTimes(3);
+      const ran = calls.map((c) => c.args.join(" "));
+      expect(ran).toContain("rebase --abort");
+      expect(ran.some((a) => a.startsWith("push"))).toBe(false);
+    });
   });
 
   it("commitAndPush stages, commits and pushes the branch", async () => {

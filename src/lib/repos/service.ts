@@ -64,6 +64,10 @@ export const repoInputSchema = z.object({
   // with the trustedBots defaults below, since the loop is inert without them.
   autoReviewFeedback: z.boolean().default(true),
   autoResolveMergeConflicts: z.boolean().default(true),
+  // Opt-in agent-assisted resolution of genuine conflicts (issue #327), separate
+  // from the plain-rebase flag above and default OFF: it is riskier, so a repo
+  // turns it on deliberately. Kept in sync with the schema column default.
+  resolveConflictsWithAgent: z.boolean().default(false),
   includeProgressReplies: z.boolean().default(false),
   // Opt-in (issue #285): decomposition fires slow `claude -p` one-shots across
   // the backlog and can stall the driver loop, so it must be a deliberate choice.

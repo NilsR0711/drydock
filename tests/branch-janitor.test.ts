@@ -362,6 +362,170 @@ describe("runBranchJanitorSweep — auto-resolve merge conflicts (issue #287)", 
   });
 });
 
+describe("runBranchJanitorSweep — agent conflict resolution (issue #327)", () => {
+  /** A janitor event of a given action recorded on a job, if any. */
+  function janitorAction(jobId: number, action: string): Record<string, unknown> | undefined {
+    return db
+      .select()
+      .from(jobEvents)
+      .where(eq(jobEvents.jobId, jobId))
+      .all()
+      .filter((e) => e.type === "janitor")
+      .map((e) => JSON.parse(e.payload ?? "{}") as Record<string, unknown>)
+      .find((p) => p.action === action);
+  }
+
+  it("resolves a genuine conflict with an agent instead of parking when opted in", async () => {
+    const repo = makeRepo({ resolveConflictsWithAgent: true });
+    const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    const forge = janitorForge({
+      prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
+    });
+    const agentResolveBranch = vi.fn(async () => ({ ok: true, resolvedConflicts: 2 }));
+
+    await runBranchJanitorSweep({
+      db,
+      forgeFor: () => forge,
+      rebaseBranch: failRebase, // the plain rebase cannot clear a genuine conflict
+      agentResolveBranch,
+    });
+
+    expect(agentResolveBranch).toHaveBeenCalledWith(
+      expect.objectContaining({ id: repo.id }),
+      expect.objectContaining({ id: job.id }),
+      12,
+    );
+    // The PR is left in place for the merge gate — not parked.
+    expect(getJob(job.id, db)?.status).toBe("ci_running");
+    // The resolution is stamped for the timeline + idempotency.
+    expect(janitorAction(job.id, "agent_resolved")).toMatchObject({
+      prNumber: 12,
+      resolvedConflicts: 2,
+    });
+  });
+
+  it("posts an auditable comment on the PR describing the agent resolution (issue #327)", async () => {
+    const repo = makeRepo({ resolveConflictsWithAgent: true });
+    openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    const forge = janitorForge({
+      prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
+    });
+    const agentResolveBranch = vi.fn(async () => ({ ok: true, resolvedConflicts: 1 }));
+
+    await runBranchJanitorSweep({
+      db,
+      forgeFor: () => forge,
+      rebaseBranch: failRebase,
+      agentResolveBranch,
+    });
+
+    // The audit comment lands on the PR itself (number 12), not the issue (7).
+    expect(forge.commentIssue).toHaveBeenCalledOnce();
+    const [target, body] = (forge.commentIssue as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      number,
+      string,
+    ];
+    expect(target).toBe(12);
+    expect(body).toContain("automatically resolved");
+  });
+
+  it("attempts agent resolution even when autoResolveMergeConflicts is off (independent flag)", async () => {
+    const repo = makeRepo({ autoResolveMergeConflicts: false, resolveConflictsWithAgent: true });
+    const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    const forge = janitorForge({
+      prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
+    });
+    const rebaseBranch = vi.fn(async () => ({ ok: true }));
+    const agentResolveBranch = vi.fn(async () => ({ ok: true, resolvedConflicts: 1 }));
+
+    await runBranchJanitorSweep({ db, forgeFor: () => forge, rebaseBranch, agentResolveBranch });
+
+    // The plain rebase is skipped (its flag is off); the agent path still runs.
+    expect(rebaseBranch).not.toHaveBeenCalled();
+    expect(agentResolveBranch).toHaveBeenCalledOnce();
+    expect(getJob(job.id, db)?.status).toBe("ci_running");
+  });
+
+  it("does not attempt agent resolution when the plain rebase already cleared it", async () => {
+    const repo = makeRepo({ resolveConflictsWithAgent: true });
+    openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    // Conflicted on the refresh probe and the repair's first hasConflicts check,
+    // clean once the rebase pushed — so the plain rebase clears it (issue #287).
+    const prMergeState = vi
+      .fn<() => Promise<PrMergeState>>()
+      .mockResolvedValueOnce("conflicted")
+      .mockResolvedValueOnce("conflicted")
+      .mockResolvedValue("clean");
+    const forge = janitorForge({ prMergeState });
+    const rebaseBranch = vi.fn(async () => ({ ok: true }));
+    const agentResolveBranch = vi.fn(async () => ({ ok: true, resolvedConflicts: 1 }));
+
+    await runBranchJanitorSweep({ db, forgeFor: () => forge, rebaseBranch, agentResolveBranch });
+
+    expect(rebaseBranch).toHaveBeenCalledOnce();
+    expect(agentResolveBranch).not.toHaveBeenCalled();
+  });
+
+  it("never attempts agent resolution when the flag is off (default)", async () => {
+    const repo = makeRepo(); // resolveConflictsWithAgent defaults off
+    const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    const forge = janitorForge({
+      prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
+    });
+    const agentResolveBranch = vi.fn(async () => ({ ok: true, resolvedConflicts: 1 }));
+
+    await runBranchJanitorSweep({
+      db,
+      forgeFor: () => forge,
+      rebaseBranch: failRebase,
+      agentResolveBranch,
+    });
+
+    expect(agentResolveBranch).not.toHaveBeenCalled();
+    expect(getJob(job.id, db)?.status).toBe("needs_human");
+  });
+
+  it("parks for a human when the agent cannot resolve the conflict", async () => {
+    const repo = makeRepo({ resolveConflictsWithAgent: true });
+    const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    const forge = janitorForge({
+      prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
+    });
+    const agentResolveBranch = vi.fn(async () => ({ ok: false, resolvedConflicts: 0 }));
+
+    await runBranchJanitorSweep({
+      db,
+      forgeFor: () => forge,
+      rebaseBranch: failRebase,
+      agentResolveBranch,
+    });
+
+    expect(agentResolveBranch).toHaveBeenCalledOnce();
+    expect(getJob(job.id, db)?.status).toBe("needs_human");
+    expect(getJob(job.id, db)?.errorMessage).toBe("rebase needed: conflicts with main");
+  });
+
+  it("parks for a human when the agent resolution throws (safe default)", async () => {
+    const repo = makeRepo({ resolveConflictsWithAgent: true });
+    const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    const forge = janitorForge({
+      prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
+    });
+    const agentResolveBranch = vi.fn(async () => {
+      throw new Error("agent exploded");
+    });
+
+    await runBranchJanitorSweep({
+      db,
+      forgeFor: () => forge,
+      rebaseBranch: failRebase,
+      agentResolveBranch,
+    });
+
+    expect(getJob(job.id, db)?.status).toBe("needs_human");
+  });
+});
+
 describe("runBranchJanitorSweep — isolation", () => {
   it("a failing repo does not stop the sweep for other repos", async () => {
     const a = addRepo({ path: "/a", name: "a" }, db);

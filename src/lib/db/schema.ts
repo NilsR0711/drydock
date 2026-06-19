@@ -42,6 +42,14 @@ export const repos = sqliteTable("repos", {
   autoResolveMergeConflicts: integer("auto_resolve_merge_conflicts", { mode: "boolean" })
     .notNull()
     .default(true),
+  // Opt-in agent-assisted resolution of *genuine* merge conflicts (issue #327).
+  // Independent of and riskier than autoResolveMergeConflicts (a plain rebase):
+  // when the rebase stops on real content conflicts, an agent resolves the
+  // markers in the worktree before continuing. Default OFF — semantic conflict
+  // resolution is a deliberate per-repo choice. Bounded and never auto-merges.
+  resolveConflictsWithAgent: integer("resolve_conflicts_with_agent", { mode: "boolean" })
+    .notNull()
+    .default(false),
   // Post incremental "working on it" replies (default off, to avoid noise).
   includeProgressReplies: integer("include_progress_replies", { mode: "boolean" })
     .notNull()

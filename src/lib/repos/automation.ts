@@ -8,6 +8,7 @@ export interface RepoAutomation {
   autoReviewFeedback: boolean;
   mergeWithoutChecks: boolean;
   autoResolveMergeConflicts: boolean;
+  resolveConflictsWithAgent: boolean;
   includeProgressReplies: boolean;
   autoDecompose: boolean;
   planFirst: boolean;
@@ -53,6 +54,7 @@ export function repoAutomation(repo: Repo): RepoAutomation {
     autoReviewFeedback: repo.autoReviewFeedback,
     mergeWithoutChecks: repo.mergeWithoutChecks,
     autoResolveMergeConflicts: repo.autoResolveMergeConflicts,
+    resolveConflictsWithAgent: repo.resolveConflictsWithAgent,
     includeProgressReplies: repo.includeProgressReplies,
     autoDecompose: repo.autoDecompose,
     planFirst: repo.planFirst,
