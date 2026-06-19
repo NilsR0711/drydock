@@ -54,6 +54,9 @@
     "backup": "tsx scripts/backup.ts",
     "db:prune": "tsx scripts/prune.ts",
     "mcp": "tsx scripts/drydock.ts mcp",
+    "desktop:install": "npm --prefix desktop install",
+    "tauri:dev": "npm --prefix desktop run dev",
+    "tauri:build": "npm --prefix desktop run build",
     "prepublishOnly": "pnpm test && pnpm build && pnpm smoke && pnpm smoke:mcp"
   },
   "bin": {
