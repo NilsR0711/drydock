@@ -218,6 +218,35 @@ describe("WorktreeManager", () => {
     ]);
   });
 
+  it("rebaseOntoBase fetches the base, rebases and force-pushes with a lease on success (issue #287)", async () => {
+    const { calls, run } = recordingRunner();
+    const m = new WorktreeManager(run);
+    const wt: Worktree = { path: "/wt", branch: "drydock/issue-9-job-3" };
+    await expect(m.rebaseOntoBase(wt, "main", repo.path)).resolves.toEqual({ ok: true });
+    expect(calls.map((c) => `${c.args.join(" ")} @${c.cwd}`)).toEqual([
+      "fetch origin main @/wt",
+      "rebase origin/main @/wt",
+      "push --force-with-lease origin drydock/issue-9-job-3 @/wt",
+    ]);
+  });
+
+  it("rebaseOntoBase aborts the rebase and reports failure without pushing when it conflicts (issue #287)", async () => {
+    const calls: { args: string[] }[] = [];
+    const run: CommandRunner = async (_cmd, args) => {
+      calls.push({ args });
+      // The rebase itself hits a conflict it cannot resolve automatically.
+      const exitCode = args[0] === "rebase" && args[1] === "origin/main" ? 1 : 0;
+      return { stdout: "", stderr: exitCode ? "CONFLICT" : "", exitCode } satisfies CommandResult;
+    };
+    const m = new WorktreeManager(run);
+    const wt: Worktree = { path: "/wt", branch: "drydock/issue-9-job-3" };
+    await expect(m.rebaseOntoBase(wt, "main", repo.path)).resolves.toEqual({ ok: false });
+    const ran = calls.map((c) => c.args.join(" "));
+    expect(ran).toContain("rebase --abort");
+    // A failed rebase must never push: the conflict is left for a human.
+    expect(ran.some((a) => a.startsWith("push"))).toBe(false);
+  });
+
   it("commitAndPush stages, commits and pushes the branch", async () => {
     const calls: { cmd: string; args: string[]; cwd?: string }[] = [];
     const run: CommandRunner = async (cmd, args, cwd) => {
