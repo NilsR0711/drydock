@@ -44,7 +44,7 @@ All optional; sensible defaults target a local foreground server.
 
 | Env var                        | Default                 | Purpose                                                   |
 | ------------------------------ | ----------------------- | -------------------------------------------------------- |
-| `DRYDOCK_DESKTOP_URL`          | `http://127.0.0.1:3737` | Dashboard origin to wrap and poll.                       |
+| `DRYDOCK_DESKTOP_URL`          | `http://127.0.0.1:3737` | Dashboard origin to wrap and poll. Loopback-only (`127.0.0.1` / `localhost` / `::1`); a non-loopback value falls back to the default. |
 | `DRYDOCK_DESKTOP_POLL_SECONDS` | `4`                     | Tray refresh interval.                                   |
 | `DRYDOCK_CONTROL_TOKEN`        | _(unset)_               | Only needed when the server was started with one (daemon/headless lockdown). |
 

@@ -81,4 +81,15 @@ describe("POST /api/control/pause", () => {
     expect(ok.status).toBe(200);
     expect(getSettings().paused).toBe(true);
   });
+
+  it("matches a token despite surrounding whitespace on env and header", async () => {
+    // A trailing newline (e.g. from `$(cat tokenfile)`) on either side must not
+    // cause a spurious 403 — both are trimmed before the constant-time compare.
+    process.env.DRYDOCK_CONTROL_TOKEN = "secret\n";
+    const res = await POST(
+      req({ paused: true }, { ...GUARD, "x-drydock-control-token": "  secret " }),
+    );
+    expect(res.status).toBe(200);
+    expect(getSettings().paused).toBe(true);
+  });
 });

@@ -41,8 +41,12 @@ pub fn build(app: &AppHandle, config: DesktopConfig) -> tauri::Result<TrayHandle
         .build()?;
 
     let cfg = config.clone();
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
     let tray = TrayIconBuilder::with_id("drydock")
-        .icon(app.default_window_icon().expect("bundled window icon").clone())
+        .icon(icon)
         .menu(&menu)
         .show_menu_on_left_click(true)
         .title("⚓ …")
@@ -90,11 +94,21 @@ fn checked(app: &AppHandle, pick: impl Fn(&TrayHandles) -> &CheckMenuItem<Wry>) 
     pick(&handles).is_checked().ok()
 }
 
+/// A loopback HTTP client with a bounded timeout, so a hung connection can never
+/// freeze a toggle or the poll loop indefinitely. Falls back to a default client
+/// if the builder ever fails (it does not for this minimal config).
+fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 /// POST a toggle to the control API, then refresh once so the menu reflects the
 /// server even when the request was rejected. Runs on the async runtime.
 fn spawn_toggle(app: AppHandle, cfg: DesktopConfig, toggle: Toggle) {
     tauri::async_runtime::spawn(async move {
-        let client = reqwest::Client::new();
+        let client = http_client();
         let (url, body) = match toggle {
             Toggle::Pause(value) => (cfg.pause_url(), serde_json::json!({ "paused": value })),
             Toggle::Drain(value) => (cfg.drain_url(), serde_json::json!({ "draining": value })),
@@ -125,7 +139,7 @@ pub fn apply(app: &AppHandle, snapshot: &Snapshot) {
 /// reused client keeps connections warm; failures fold into an `unreachable`
 /// snapshot inside {@link health::fetch}, so the loop itself never errors out.
 pub async fn poll_loop(app: AppHandle, cfg: DesktopConfig) {
-    let client = reqwest::Client::new();
+    let client = http_client();
     loop {
         let snapshot = health::fetch(&client, &cfg.health_url()).await;
         apply(&app, &snapshot);

@@ -104,9 +104,14 @@ export function authorizeControlRequest(
   request: Request,
   env: Record<string, string | undefined> = process.env,
 ): ControlDecision {
+  // Trim both sides symmetrically so a token carrying a trailing newline (a
+  // common `$(cat tokenfile)` artifact) on the env, the header, or both still
+  // matches — and an all-whitespace token reads as "no token configured".
+  const token = request.headers.get("x-drydock-control-token")?.trim() ?? null;
+  const expectedToken = env.DRYDOCK_CONTROL_TOKEN?.trim() || undefined;
   return authorizeControl({
     controlHeader: request.headers.get("x-drydock-control"),
-    token: request.headers.get("x-drydock-control-token"),
-    expectedToken: env.DRYDOCK_CONTROL_TOKEN,
+    token,
+    expectedToken,
   });
 }

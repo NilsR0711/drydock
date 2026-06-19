@@ -21,6 +21,20 @@ pub fn run() {
             let handles = tray::build(&handle, config.clone())?;
             app.manage(handles);
 
+            // Point the wrapped window at the configured dashboard URL when it
+            // differs from the built-in default (DRYDOCK_DESKTOP_URL override),
+            // so the displayed dashboard matches the URL the tray polls and
+            // controls. The default is already set statically in tauri.conf.json,
+            // so the common local run skips this redundant navigation.
+            if !config.is_default_url() {
+                if let (Some(window), Ok(url)) = (
+                    handle.get_webview_window("main"),
+                    config.base_url.parse::<tauri::Url>(),
+                ) {
+                    let _ = window.navigate(url);
+                }
+            }
+
             // Background poll loop keeps the tray counts and toggle marks in sync
             // with the dashboard.
             let poll_handle = handle.clone();
