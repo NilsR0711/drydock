@@ -35,4 +35,5 @@
 - [032](adr/032-openrouter-backend.md) — OpenRouter as an HTTP agent backend with an auto-syncing model catalog (incl. free models)
 - [033](adr/033-sandboxed-agent-execution.md) — Opt-in sandboxed agent execution in a container (Docker/Podman, worktree-only mount, reliable teardown)
 - [034](adr/034-agent-driven-release.md) — Manual agent-driven release (new job kind + `released` state, full-shell-access session, agent discovers & performs the repo's release)
-- [035](adr/035-tracked-pr-babysitting.md) — Babysit arbitrary PRs added by URL (decoupled `tracked_prs` record + driver-loop sweep; auto-merge opt-in & owned-only; never touches fork branches)
+- [035](adr/035-structured-server-logging.md) — Structured server-log sink (rotating file + stdout + SSE fan-out, secret-redacted) with a global Logs page (filter, search, live tail)
+- [036](adr/036-tracked-pr-babysitting.md) — Babysit arbitrary PRs added by URL (decoupled `tracked_prs` record + driver-loop sweep; auto-merge opt-in & owned-only; never touches fork branches)

@@ -50,18 +50,24 @@ export const repoInputSchema = z.object({
   dailyCostLimitUsd: z.number().nonnegative().default(0),
   adrGating: z.boolean().default(false),
   sequential: z.boolean().default(true),
-  // Fully-autonomous defaults (issue #254): the whole queue -> implement ->
-  // commit -> PR -> CI heal -> review feedback -> merge pipeline runs with no
-  // manual toggles. Every flag stays overridable per repo and in Settings.
-  autoTriageEnabled: z.boolean().default(true),
-  autoProcessEnabled: z.boolean().default(true),
+  // Backlog-driving automation is opt-in (issue #285): a freshly added repo
+  // does nothing to its whole backlog until the user turns these on per repo.
+  // Default-on here meant registering a repo could silently auto-triage and
+  // mass-enqueue every `ready` issue in one tick (cost + dozens of PRs). The
+  // in-flight pipeline (CI heal, review feedback, verify) stays on below — it
+  // only acts on work the user already started. Kept in sync with the schema
+  // column defaults.
+  autoTriageEnabled: z.boolean().default(false),
+  autoProcessEnabled: z.boolean().default(false),
   autoHealCi: z.boolean().default(true),
   // Defaults ON for autonomous operation (issue #213); opt-out per repo. Paired
   // with the trustedBots defaults below, since the loop is inert without them.
   autoReviewFeedback: z.boolean().default(true),
   autoResolveMergeConflicts: z.boolean().default(true),
   includeProgressReplies: z.boolean().default(false),
-  autoDecompose: z.boolean().default(true),
+  // Opt-in (issue #285): decomposition fires slow `claude -p` one-shots across
+  // the backlog and can stall the driver loop, so it must be a deliberate choice.
+  autoDecompose: z.boolean().default(false),
   planFirst: z.boolean().default(false),
   verifyPr: z.boolean().default(true),
   autoHealDeployments: z.boolean().default(false),
@@ -128,6 +134,13 @@ export const repoInputSchema = z.object({
   // Opt-in claude-mem worktree adoption (issue #274). Off by default: it depends
   // on the external claude-mem plugin being installed. See the schema column.
   adoptClaudeMem: z.boolean().default(false),
+  // Quiet mode for the issue thread (issue #289). Off by default: existing repos
+  // keep the full audit trail. See the schema column for what it suppresses.
+  quietComments: z.boolean().default(false),
+  // Opt-in unrestricted shell access (issue #283). Off by default — it runs the
+  // agent with `--dangerously-skip-permissions`, granting full shell access. See
+  // the schema column for the full rationale and security trade-off.
+  bypassPermissions: z.boolean().default(false),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 

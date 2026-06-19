@@ -1,4 +1,4 @@
-# ADR 035: Babysit arbitrary PRs added by URL
+# ADR 036: Babysit arbitrary PRs added by URL
 
 - **Status:** accepted
 - **Date:** 2026-06-19

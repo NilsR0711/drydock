@@ -12,6 +12,7 @@ import {
   applyVerification,
   buildVerificationGenerator,
   runVerificationPass,
+  verifyCommentMarker,
 } from "@/lib/orchestrator/verify-driver";
 import { addRepo } from "@/lib/repos/service";
 
@@ -211,10 +212,16 @@ interface FakeForge {
   prDiff: ReturnType<typeof vi.fn>;
   viewIssue: ReturnType<typeof vi.fn>;
   commentIssue: ReturnType<typeof vi.fn>;
+  listIssueComments: ReturnType<typeof vi.fn>;
+  updateIssueComment: ReturnType<typeof vi.fn>;
+  store: { id: string; body: string }[];
 }
 
 function fakeForge(over: Partial<Record<keyof FakeForge, unknown>> = {}): FakeForge {
+  const store: { id: string; body: string }[] = [];
+  let nextId = 1;
   return {
+    store,
     prDiff: vi.fn(async () => "diff --git a/x b/x\n+y"),
     viewIssue: vi.fn(
       async (): Promise<IssueDetail> => ({
@@ -226,7 +233,14 @@ function fakeForge(over: Partial<Record<keyof FakeForge, unknown>> = {}): FakeFo
         comments: [],
       }),
     ),
-    commentIssue: vi.fn(async () => {}),
+    commentIssue: vi.fn(async (_n: number, body: string) => {
+      store.push({ id: `c${nextId++}`, body });
+    }),
+    listIssueComments: vi.fn(async () => store.map((c) => ({ ...c }))),
+    updateIssueComment: vi.fn(async (_n: number, id: string, body: string) => {
+      const found = store.find((c) => c.id === id);
+      if (found) found.body = body;
+    }),
     ...over,
   } as FakeForge;
 }
@@ -321,5 +335,51 @@ describe("runVerificationPass", () => {
     await runVerificationPass(passDeps(forge, async () => result, repo, job));
     const body = forge.commentIssue.mock.calls[0]?.[1] as string;
     expect(body).not.toContain("ghp_0123456789012345678901234567890123456789");
+  });
+
+  it("embeds the job marker and collapses the summary behind <details>", async () => {
+    const forge = fakeForge();
+    const { repo, job } = setup();
+    const result = vResult({
+      summary: "API done, UI missing",
+      verdicts: [{ ordinal: 0, status: "done", reason: "" }],
+    });
+    await runVerificationPass(passDeps(forge, async () => result, repo, job));
+    const body = forge.commentIssue.mock.calls[0]?.[1] as string;
+    expect(body).toContain(verifyCommentMarker(job.id));
+    expect(body).toContain("<details>");
+    expect(body).toContain("API done, UI missing");
+  });
+
+  it("updates subtasks but posts no comment when quietComments is on", async () => {
+    const forge = fakeForge();
+    const repo = addRepo(
+      { path: "/q", name: "q", verifyPr: true, quietComments: true },
+      db,
+    ) as Repo;
+    syncIssuesFromGh(repo.id, [{ number: 1, title: "Big", labels: [] }], db);
+    replaceSubtasks(repo.id, 1, ["Add API", "Wire UI"], "h", db);
+    const j = createJob({ repoId: repo.id, issueNumber: 1 }, db);
+    const job = getJob(j.id, db) as Job;
+    const result = vResult({ verdicts: [{ ordinal: 0, status: "done", reason: "" }] });
+    const out = await runVerificationPass(passDeps(forge, async () => result, repo, job));
+    expect(out).not.toBeNull();
+    expect(listSubtasks(repo.id, 1, db)[0]?.status).toBe("done");
+    expect(forge.commentIssue).not.toHaveBeenCalled();
+  });
+
+  it("edits the prior verification comment in place on a second pass", async () => {
+    const forge = fakeForge();
+    const { repo, job } = setup();
+    await runVerificationPass(
+      passDeps(forge, async () => vResult({ summary: "first" }), repo, job),
+    );
+    await runVerificationPass(
+      passDeps(forge, async () => vResult({ summary: "second" }), repo, job),
+    );
+    expect(forge.commentIssue).toHaveBeenCalledTimes(1);
+    expect(forge.updateIssueComment).toHaveBeenCalledTimes(1);
+    expect(forge.store).toHaveLength(1);
+    expect(forge.store[0]?.body).toContain("second");
   });
 });

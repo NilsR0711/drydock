@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { type Job, jobEvents, jobs } from "@/lib/db/schema";
 import type { ForgeClient } from "@/lib/forge/types";
+import { driveDecompose } from "@/lib/orchestrator/decompose-driver";
 import { driveTick } from "@/lib/orchestrator/driver-loop";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { clearProviderLimit, latchProviderLimit } from "@/lib/orchestrator/provider-limit";
@@ -137,6 +138,8 @@ describe("driveTick claude-limit gating (issue #166)", () => {
   });
 
   it("skips decomposition for a repo whose agent is limit-latched (issue #167)", async () => {
+    // The decompose sweep now runs decoupled from the tick (issue #284); the
+    // limit-latch skip moved with it, so drive the sweep directly here.
     latchProviderLimit(
       { agent: "codex", kind: "usage_limit", rawSnippet: "limit", resetAt: nowSec() + 3600 },
       db,
@@ -146,8 +149,9 @@ describe("driveTick claude-limit gating (issue #166)", () => {
       db,
     );
     const decompose = vi.fn(async () => {});
-    const started: number[] = [];
-    const d = deps(started, {
+    const decomposeDeps = {
+      db,
+      forgeFor: () => ({ refreshRateLimit: vi.fn(async () => {}) }) as unknown as ForgeClient,
       decompose,
       fetchIssues: vi.fn(async (path: string) =>
         path === "/dec"
@@ -161,13 +165,13 @@ describe("driveTick claude-limit gating (issue #166)", () => {
             ]
           : [],
       ),
-    });
-    await driveTick(d as never);
+    };
+    await driveDecompose(decomposeDeps);
     expect(decompose).not.toHaveBeenCalled();
 
     // Once the latch clears, the sweep decomposes again.
     clearProviderLimit("codex", db);
-    await driveTick(d as never);
+    await driveDecompose(decomposeDeps);
     expect(decompose).toHaveBeenCalledWith(
       expect.objectContaining({ id: decomposing.id }),
       expect.anything(),

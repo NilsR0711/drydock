@@ -4,7 +4,13 @@ import { createDb, type DB } from "@/lib/db/client";
 import { issues, type Repo } from "@/lib/db/schema";
 import type { IssueDetail } from "@/lib/github/gh";
 import { syncIssuesFromGh } from "@/lib/issues/service";
-import { classifyLabels, computeTriageHash, triageIssue, triageRepo } from "@/lib/issues/triage";
+import {
+  classifyLabels,
+  computeTriageHash,
+  triageCommentMarker,
+  triageIssue,
+  triageRepo,
+} from "@/lib/issues/triage";
 import { addRepo } from "@/lib/repos/service";
 
 let db: DB;
@@ -14,11 +20,18 @@ beforeEach(() => {
   repo = addRepo({ path: "/r", name: "r", autoTriageEnabled: true }, db);
 });
 
-/** A fake forge capturing writes; viewIssue returns a canned detail. */
+/**
+ * A fake forge capturing writes; viewIssue returns a canned detail. The upsert
+ * seams (listIssueComments/updateIssueComment) are backed by a real comment
+ * store so re-triage edits a prior marker comment in place (issue #289).
+ */
 function fakeForge(detail: Partial<IssueDetail> = {}) {
   const calls = { labels: [] as string[], comments: [] as string[], ensured: [] as string[] };
+  const store: { id: string; body: string }[] = [];
+  let nextId = 1;
   return {
     calls,
+    store,
     viewIssue: vi.fn(
       async (n: number): Promise<IssueDetail> => ({
         number: n,
@@ -37,6 +50,12 @@ function fakeForge(detail: Partial<IssueDetail> = {}) {
     }),
     commentIssue: vi.fn(async (_n: number, body: string) => {
       calls.comments.push(body);
+      store.push({ id: `c${nextId++}`, body });
+    }),
+    listIssueComments: vi.fn(async () => store.map((c) => ({ ...c }))),
+    updateIssueComment: vi.fn(async (_n: number, id: string, body: string) => {
+      const found = store.find((c) => c.id === id);
+      if (found) found.body = body;
     }),
   };
 }
@@ -139,6 +158,41 @@ describe("triageIssue", () => {
     const second = await triageIssue(repo, forge, listed(), db);
     expect(second.skipped).toBe("unchanged");
     expect(forge.viewIssue).toHaveBeenCalledOnce();
+  });
+
+  it("embeds the per-issue triage marker in the comment", async () => {
+    const forge = fakeForge();
+    await triageIssue(repo, forge, listed(), db);
+    expect(forge.calls.comments[0]).toContain(triageCommentMarker(1));
+  });
+
+  it("applies labels but posts no comment when quietComments is on", async () => {
+    const quiet = addRepo(
+      { path: "/q", name: "q", autoTriageEnabled: true, quietComments: true },
+      db,
+    );
+    syncIssuesFromGh(quiet.id, [listed()], db);
+    const forge = fakeForge();
+    const result = await triageIssue(quiet, forge, listed(), db);
+    expect(result.applied.length).toBeGreaterThan(0);
+    expect(forge.addLabels).toHaveBeenCalled();
+    expect(forge.commentIssue).not.toHaveBeenCalled();
+  });
+
+  it("edits the prior triage comment in place on re-triage instead of stacking", async () => {
+    const forge = fakeForge();
+    await triageIssue(repo, forge, listed(), db);
+    expect(forge.commentIssue).toHaveBeenCalledOnce();
+
+    // Edit the title so the content hash changes and the issue is re-triaged.
+    syncIssuesFromGh(repo.id, [listed({ title: "Add a save button now" })], db);
+    await triageIssue(repo, forge, listed({ title: "Add a save button now" }), db);
+
+    // Still exactly one posted comment, now edited in place via the marker.
+    expect(forge.commentIssue).toHaveBeenCalledOnce();
+    expect(forge.updateIssueComment).toHaveBeenCalledOnce();
+    expect(forge.store).toHaveLength(1);
+    expect(forge.store[0]?.body).toContain(triageCommentMarker(1));
   });
 });
 

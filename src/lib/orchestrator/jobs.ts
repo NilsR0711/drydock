@@ -3,7 +3,7 @@ import { type DB, getDb } from "@/lib/db/client";
 import { issues, type Job, jobEvents, jobs } from "@/lib/db/schema";
 import { getSettings } from "@/lib/settings/service";
 import { emitDashboardChange } from "@/lib/stream/dashboard-bus";
-import { assertTransition, type JobStatus } from "./state-machine";
+import { assertTransition, type JobStatus, OPEN_STATES } from "./state-machine";
 
 export function createJob(
   input: {
@@ -89,6 +89,26 @@ export function listJobs(repoId: number, db: DB = getDb()): Job[] {
 
 export function listJobsByStatus(statuses: JobStatus[], db: DB = getDb()): Job[] {
   return db.select().from(jobs).where(inArray(jobs.status, statuses)).all();
+}
+
+/**
+ * Map each of a repo's issues to the status of its open (non-terminal) job, so
+ * the Issues board can show what is actually scheduled/running regardless of
+ * how it was queued — manual queue label or the auto `ready` path (issue #286).
+ * Issues without an open job are absent. The dedupe invariant (issue #23) means
+ * at most one open job per issue; if more than one somehow exists, the
+ * most-recently-created one wins.
+ */
+export function openJobsByIssue(repoId: number, db: DB = getDb()): Record<number, JobStatus> {
+  const open = listJobsByStatus([...OPEN_STATES], db)
+    .filter((j) => j.repoId === repoId)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const byIssue: Record<number, JobStatus> = {};
+  for (const job of open) {
+    // Later (newer) jobs overwrite earlier ones, so the freshest status wins.
+    byIssue[job.issueNumber] = job.status as JobStatus;
+  }
+  return byIssue;
 }
 
 /**

@@ -61,7 +61,7 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 ## Features
 
-🗂️ **Backlog & queue board** — drag issues from a synced backlog into a sortable, priority-ordered queue. One issue or many in flight, per repo.
+🗂️ **Backlog & queue board** — drag issues from a synced backlog into a sortable, priority-ordered queue. The board reflects actual scheduler state: an issue with a live job (queued, working, CI, …) shows in the queue with its status badge regardless of how it got there — manual queue label or the auto `ready` path. One issue or many in flight, per repo.
 
 🤖 **Autonomous implementation** — spawns a coding agent (`claude` or the `codex` CLI), streams its work, and opens a pull request. The default prompts steer **senior-level, test-driven** work: read the repo's conventions (`CLAUDE.md`/`AGENTS.md`) and match the surrounding code, write a failing test first then implement to green, update docs when behaviour changes, and **verify before finishing** (tests, typecheck, lint, build) without weakening tests or security to pass — all editable per repo in `/prompts`. The agent is steered to land focused, thematic Conventional-Commit commits with **no AI attribution**; Drydock also scrubs any `Co-Authored-By: Claude` / `Generated with Claude Code` trailer from the branch before pushing, so the guarantee holds even if a model ignores the prompt. The agent describes its own change in a `.drydock/PR.md` (a Conventional Commit subject plus a body that, by default, leads with a TL;DR and then Problem/Solution/Tests/Risks — the body shape is its own per-repo editable `PR format` template); Drydock uses it for the commit message and the PR title/body, appends `Closes #N`, and excludes the file from the commit — falling back to `Fix #N` / `Closes #N` when it's absent.
 
@@ -75,21 +75,23 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 📦 **Opt-in sandboxed execution** — per repo, run the agent CLI session **inside a container** (Docker or Podman) instead of directly on the host. The job's worktree is bind-mounted as the only writable host path, so a prompt-injected issue cannot reach host files through the test/build scripts the agent runs; networking is **off by default** (`--network none`), with optional CPU/memory caps. The image is resolved per job (explicit per-repo override → repo `devcontainer.json` → a configurable global default) and must carry the agent CLI plus the repo's toolchain. Only the minimum credentials are mounted **read-only** (the agent CLI's config; a `GH_TOKEN` via env) — git push still happens on the host, so no SSH keys enter the container. Timeout/abort **force-remove** the named container, so none is orphaned, and a missing runtime fails preflight with a clear reason. Off by default — zero behavior change for existing repos. See [ADR 033](docs/adr/033-sandboxed-agent-execution.md).
 
+⚠️ **Opt-in unrestricted shell access** — per repo, run the agent's jobs with `--dangerously-skip-permissions` instead of the default edits-only mode (`acceptEdits`). Headless jobs normally auto-accept file edits but **cannot** run Bash that isn't allowlisted — no human is there to approve it — which breaks repos whose tests/builds need shell access that can't run in a Docker sandbox (e.g. **native Xcode**: `xcodebuild` / `simctl` / `xcrun`). When enabled, the agent can execute any command unsupervised across its implement, resume, and CI-fix sessions. This is a deliberately **dangerous escape hatch** — it grants full shell access with no approval gate — so it is **off by default**, labelled as such in the repo's settings, and best combined with the container sandbox above. Reuses the same bypass plumbing as agent-driven releases (see [ADR 034](docs/adr/034-agent-driven-release.md)).
+
 🦊 **GitHub & GitLab** — choose the platform per repo. GitLab (gitlab.com or self-hosted) uses the REST API v4 with a per-repo base URL + access token — no extra CLI to install.
 
-🛂 **Autonomous triage** — per repo, let Drydock label incoming issues (deterministic keyword classifier, whitelist-only output) and auto-process the ones that are *ready* and not blocked. **On by default** (issue #254); gated by author association for public repos, a per-issue attempt limit, and all the usual cost/concurrency limits. Opt-out per repo. Never auto-merges.
+🛂 **Autonomous triage** — per repo, let Drydock label incoming issues (deterministic keyword classifier, whitelist-only output) and auto-process the ones that are *ready* and not blocked. **Off by default** — opt in per repo (issue #285), since turning either on acts on the whole backlog; gated by author association for public repos, a per-issue attempt limit, and all the usual cost/concurrency limits. Never auto-merges.
 
 🔧 **CI babysitting & auto-merge** — polls `gh pr checks`, merges on green (optionally after a per-repo **merge gate**: a settle window that holds the merge so late bot/human reviews can land and feed the review-feedback loop first; any regression re-arms the window), and on red resumes the session with a CI-fix prompt (up to **3 retries**), then files a follow-up issue and hands off. The failed log is classified by failure type (test, type error, lint, build, dependency, timeout, flaky) and reduced to a focused, line-capped evidence slice so the fix prompt targets the actual failure.
 
-🧹 **Branch & PR janitor** — a periodic background sweep keeps the remote tidy: the remote branch of a merged Drydock PR is **deleted within one sweep** (idempotent across restarts — each cleanup is stamped on the job's event log), an open PR that fell **behind** the default branch is updated automatically while conflict-free, and a **conflicted** PR parks its job as *needs a human* with an explicit “rebase needed: conflicts with `<default branch>`” reason instead of letting CI polling time out. Only branches under the `drydock/` prefix are ever deleted or updated.
+🧹 **Branch & PR janitor** — a periodic background sweep keeps the remote tidy: the remote branch of a merged Drydock PR is **deleted within one sweep** (idempotent across restarts — each cleanup is stamped on the job's event log), an open PR that fell **behind** the default branch is updated automatically while conflict-free, and a **conflicted** PR is **auto-rebased onto the default branch** when the repo's `autoResolveMergeConflicts` flag is on (a bounded, single-attempt rebase that force-pushes only what it rewrites) — only if that repair can't clear the conflict (or the flag is off) does the job park as *needs a human* with an explicit “rebase needed: conflicts with `<default branch>`” reason instead of letting CI polling time out. Only branches under the `drydock/` prefix are ever deleted or updated.
 
-🔗 **Babysit any PR by URL** — point Drydock at an *existing* pull request (yours or someone else's) and it watches its CI, runs the review-feedback loop, heals failing checks on branches it owns, and hands off to a human on a conflict or a fork it can't push to — all the machinery that backs Drydock's own PRs, now decoupled from an originating issue. Add one from the repo dashboard or the `track_pr` MCP tool; it stays tracked regardless of whether the repo's *issues* are watched. **Auto-merge is opt-in per PR and only ever applies to clean, green branches we own** — externally-authored and fork PRs are never merged or pushed to. See [ADR 035](docs/adr/035-tracked-pr-babysitting.md).
+🔗 **Babysit any PR by URL** — point Drydock at an *existing* pull request (yours or someone else's) and it watches its CI, runs the review-feedback loop, heals failing checks on branches it owns, and hands off to a human on a conflict or a fork it can't push to — all the machinery that backs Drydock's own PRs, now decoupled from an originating issue. Add one from the repo dashboard or the `track_pr` MCP tool; it stays tracked regardless of whether the repo's *issues* are watched. **Auto-merge is opt-in per PR and only ever applies to clean, green branches we own** — externally-authored and fork PRs are never merged or pushed to. See [ADR 036](docs/adr/036-tracked-pr-babysitting.md).
 
 🩹 **CI auto-heal** — per repo, turn the failure path into a structured classify → fix → verify loop: failing checks are bucketed (healable / external / flaky / unknown), only healable ones get a targeted fix, and each attempt is verified for a real, improving change. Flaky checks get a plain re-run instead of a code edit (GitHub; on forges without re-run support they escalate to a human). External and AI-review checks are never code-healed. Hard budgets (per-session and per-fingerprint attempts, a cooldown, and a concurrency cap) keep it bounded. **On by default** (issue #254); opt-out per repo; never auto-merges.
 
 💬 **PR review-feedback** — per repo, ingest review threads on a Drydock PR and run the mechanical iteration: only **trusted reviewers** and explicitly **allowlisted bots** are acted on — unlisted bots are ignored, each comment walks a lifecycle (`pending → queued → in_progress → resolved`, with `failed` / `rejected` / `flagged` branches), and the agent applies the change on the PR branch, replies, and resolves the thread. Status replies are marker-based and idempotent (updated in place, not duplicated), with bounded per-sweep and per-item budgets. **On by default** for autonomous operation, seeded with well-known review bots (`cursor[bot]`, `coderabbitai[bot]`) and opt-out per repo; never auto-merges. See [ADR 019](docs/adr/019-pr-review-feedback.md).
 
-🧩 **Issue decomposition** — per repo, split a large issue ("fix these 5 bugs", "implement X with A/B/C") into ordered, tracked subtasks. A deterministic heuristic handles GitHub task lists (`- [ ]`) and "Bug N —" headings for free; prose falls back to a one-shot agent. Decomposition is idempotent (keyed on the issue body hash, redone only when the body changes), subtasks are surfaced in the agent prompt and worked in order, and progress is reflected on the issue and in the UI. **On by default** (issue #254); opt-out per repo. See [ADR 020](docs/adr/020-issue-decomposition.md).
+🧩 **Issue decomposition** — per repo, split a large issue ("fix these 5 bugs", "implement X with A/B/C") into ordered, tracked subtasks. A deterministic heuristic handles GitHub task lists (`- [ ]`) and "Bug N —" headings for free; prose falls back to a one-shot agent. Decomposition is idempotent (keyed on the issue body hash, redone only when the body changes), subtasks are surfaced in the agent prompt and worked in order, and progress is reflected on the issue and in the UI. **Off by default** — opt in per repo (issue #285): it fires slow agent one-shots across the backlog. See [ADR 020](docs/adr/020-issue-decomposition.md).
 
 🪜 **Opt-in model escalation on retry** — per repo, retry failed jobs one rung up the model ladder: when a job parked in *needs a human* is requeued, the next attempt runs the **next-stronger model** of the repo's agent (e.g. Haiku → Sonnet → Opus), capped at the strongest. The escalated model is persisted on the job, so each attempt is **priced at the model that actually ran** and the job page shows which rung an attempt used (a `model_escalated` event on the timeline). Limit-parked jobs resuming their session and interrupted jobs are never escalated. Off by default.
 
@@ -120,6 +122,8 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 🪝 **Webhook-driven sync & nudges** — opt in per repo to receive forge events instead of waiting for the next poll. Set a secret on a repo and Drydock exposes a signature-verified receiver (`/api/webhooks/<id>`): a validated issue event triggers a targeted, debounced sync so new issues surface near-instantly; a finished `check_suite`/`check_run` (GitLab: pipeline) wakes the CI babysitter so green PRs merge within seconds instead of at the next poll; a new PR review or review comment triggers the review-feedback sweep right away. Polling stays on as the default fallback and shares the same idempotent reconcile, so a change is never double-processed. Since Drydock binds `127.0.0.1`, expose the URL through a tunnel (e.g. `cloudflared`, `ngrok`). See [ADR 029](docs/adr/029-webhook-issue-sync.md).
 
 🙋 **Needs-human visibility on the issue** — whenever a job parks for a human (timeout, cost cap, non-zero exit, ADR gate, empty diff, exhausted CI retries, merge conflict, …), Drydock makes it visible on the forge issue itself, not just the dashboard: it sets the repo's needs-human label, drops the queue label, and posts a comment with the reason. The comment is idempotent (a requeued job edits the same comment instead of stacking new ones) and every forge call is best-effort, so a forge hiccup never changes the parked job's outcome.
+
+🧵 **Readable issue threads** — every Drydock lifecycle comment is idempotent: triage, post-PR verification, PR audit, merge-conflict park and needs-human each carry a hidden per-job (or per-issue) marker, so a re-run — or a job worked twice — edits one comment in place instead of stacking a wall of bot comments. Verbose bodies collapse behind `<details>`, and a per-repo **Quiet issue comments** toggle suppresses the purely-informational notes (the auto-triage label note and the verification summary, both mirrored by labels/status already on the issue) while always keeping the high-signal ones. Builds on the [ADR 019](docs/adr/019-pr-review-feedback.md) marker pattern.
 
 🔔 **External notifications** — get pinged on Telegram, Slack (incoming webhook) and email (SMTP) for the lifecycle events you care about (job needs human, job failed, PR opened, PR merged, release published, daily cost limit reached, credentials expired/restored, automation paused/draining). Each channel is configured independently, every event has a per-event opt-in, and a one-click test button verifies setup. Delivery is best-effort and never blocks the loop; secrets are redacted from logs. See [ADR 024](docs/adr/024-external-notifications.md).
 
@@ -286,14 +290,22 @@ private/loopback/link-local addresses are refused unless you opt in with
 
 ## Configuration
 
-### Autonomous by default
+### Safe by default, autonomous on demand
 
-Out of the box Drydock is **fully autonomous**: add a repo with zero configuration and a
-queued issue runs the whole pipeline — queue → implement → commit → PR → CI heal → review
-feedback → merge — with no toggles to flip. New repos default `autoTriageEnabled`,
-`autoProcessEnabled`, `autoHealCi`, `autoResolveMergeConflicts`, `autoDecompose`,
-`verifyPr`, `autoReviewFeedback` and `autoPrAudit` **on**, and there is **no daily cost
-ceiling** by default, with an unlimited turn budget and a generous time budget
+Adding a repo does **nothing** to its backlog until you opt in. The flags that act on a
+whole backlog the moment a repo is registered are **off by default** ([issue #285]):
+`autoTriageEnabled`, `autoProcessEnabled` and `autoDecompose`. This is the deliberate
+posture for an autonomous-but-controlled tool — turning automation loose on an entire
+backlog should be an explicit choice, not the side effect of registering a repo.
+Manual **"Start now"** and the `drydock:queue` label already work without any of these
+flags, so you stay in control of what runs and when.
+
+Once you _do_ start work — queue an issue or flip on auto-processing — the **in-flight
+pipeline runs autonomously**: implement → commit → PR → CI heal → review feedback →
+merge, with no further toggles. New repos default `autoHealCi`, `autoResolveMergeConflicts`,
+`verifyPr`, `autoReviewFeedback` and `autoPrAudit` **on** — these only act on work you
+already started (a queued job's PR), never on the backlog at large. There is **no daily
+cost ceiling** by default, with an unlimited turn budget and a generous time budget
 (`dailyCostLimitUsd = 0`, `maxTurns = 0` (unlimited), `maxJobMinutes = 120`; set
 `maxTurns` to a positive value to cap turns per job). When a positive turn budget _is_
 set and a session hits it, Drydock recognises the `error_max_turns` abort and — with
@@ -303,15 +315,16 @@ retries) instead of parking it in `needs_human`; either way the escalation reads
 management stays **off** — cutting a release is hard to reverse and is triggered manually.
 
 [issue #277]: https://github.com/NilsR0711/drydock/issues/277
+[issue #285]: https://github.com/NilsR0711/drydock/issues/285
 
-> ⚠️ **Spend trade-off.** With auto-merge on and no cost ceiling, a new repo can incur
-> **unbounded API spend on its first run** — including on prompt-injected or low-quality
-> issues. This is the intended default, but every value stays editable: set a positive
-> **daily cost limit** and/or **max job cost** in **Settings** (global) or per repo to cap
-> spend, raise `minAuthorAssociation` to `approved` (the default) on public repos, and flip
-> any automation flag off per repo. Reverting a field to its default restores the
-> autonomous behavior. Existing repos keep their stored values and are **not** silently
-> switched to the new defaults.
+> ⚠️ **Spend trade-off.** Once you enable auto-processing, a repo with auto-merge on and
+> no cost ceiling can incur **unbounded API spend** — including on prompt-injected or
+> low-quality issues — and enabling it on a large `ready` backlog enqueues every eligible
+> issue. Every value stays editable: set a positive **daily cost limit** and/or **max job
+> cost** in **Settings** (global) or per repo to cap spend, raise `minAuthorAssociation`
+> to `approved` (the default) on public repos, and flip any automation flag on or off per
+> repo. Existing repos keep their stored values and are **not** silently switched to the
+> new defaults.
 
 Drydock is configured at runtime from the **Settings** page and per-repo controls — no
 `.env` required. The environment variables, all optional:
@@ -321,13 +334,17 @@ Drydock is configured at runtime from the **Settings** page and per-repo control
 | `DRYDOCK_DATA_DIR` | `~/.drydock` | Directory for the database and local state (packaged runs) |
 | `DRYDOCK_DB` | `<data dir>/drydock.db`¹ | SQLite file path (use `:memory:` for ephemeral runs); overrides the data dir |
 | `DRYDOCK_MIGRATIONS` | `./drizzle` | Folder of generated SQL migrations (set automatically by the `drydock` launcher) |
+| `DRYDOCK_LOG_FILE` | `<data dir>/logs/drydock.log` | Structured server-log file (NDJSON, secret-redacted, rotating); shown on the **Logs** page. A `:memory:`/unset database disables the file sink |
+| `DRYDOCK_LOG_LEVEL` | `info` | Bootstrap log level (`debug`/`info`/`warn`/`error`); the saved **Settings** value takes over at runtime |
+| `DRYDOCK_LOG_MAX_BYTES` | `5000000` | Rotate the active log file once it would exceed this many bytes |
+| `DRYDOCK_LOG_MAX_FILES` | `5` | How many rotated log files to keep (`<file>.1` … `<file>.N`) |
 | `DRYDOCK_ALLOW_PRIVATE_FORGE` | _unset_ | Set to `1` to allow a GitLab base URL on a private/loopback network (self-hosted); otherwise such targets are refused as an SSRF safeguard |
 | `DRYDOCK_OPENROUTER_API_KEY` | _unset_ | Overrides the OpenRouter API key stored in settings (headless deployments keep the secret out of SQLite) |
 
 ¹ A source checkout (`pnpm dev`/`pnpm start`) defaults `DRYDOCK_DB` to `data/drydock.db` in the
 project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 
-**Settings (global):** pause switch · release management kill-switch (master on/off for the opt-in release pipeline) · daily cost limit (0 = off / unlimited) · max job cost (per-job USD ceiling that aborts a runaway session mid-stream; 0 = off) · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · auto-wait on Claude and Codex provider limits (per-agent toggles: park jobs hit by usage/rate limits or overloads and resume them automatically when the window resets; default on) · auto-resume on turn budget (resume a session that exhausts a positive `maxTurns` budget to continue its work, bounded, instead of escalating; default on) · `claude`/`gh` CLI paths · OpenRouter backend (enable switch, API key, catalog refresh interval, default model, free-models-only policy, attribution headers, limit auto-wait, plus test-connection and refresh-models actions) · notification channels (Telegram / Slack / email) and per-event opt-in.
+**Settings (global):** pause switch · release management kill-switch (master on/off for the opt-in release pipeline) · daily cost limit (0 = off / unlimited) · max job cost (per-job USD ceiling that aborts a runaway session mid-stream; 0 = off) · log retention (days) · max job minutes (per-agent session timeout) · max CI wait minutes (how long the babysitter waits for checks to settle before escalating to needs-human) · auto-wait on Claude and Codex provider limits (per-agent toggles: park jobs hit by usage/rate limits or overloads and resume them automatically when the window resets; default on) · auto-resume on turn budget (resume a session that exhausts a positive `maxTurns` budget to continue its work, bounded, instead of escalating; default on) · server log level (minimum severity written to the structured server log; the **Logs** page filters on top of this) · `claude`/`gh` CLI paths · OpenRouter backend (enable switch, API key, catalog refresh interval, default model, free-models-only policy, attribution headers, limit auto-wait, plus test-connection and refresh-models actions) · notification channels (Telegram / Slack / email) and per-event opt-in.
 **Per repo:** platform (GitHub / GitLab, with base URL + token for GitLab) · agent (`claude`, `codex`, or `openrouter` once enabled) · default model (validated against the synced catalog for OpenRouter) · serial vs. parallel processing · queue label (default `drydock:queue`) · optional job/CI timeout overrides.
 
 ## Screens
@@ -342,6 +359,7 @@ project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 | `/prompts` | Versioned prompt editor |
 | `/adrs` | ADR review queue |
 | `/costs` | Cost dashboard — daily, by model, top jobs, CSV/JSON export |
+| `/logs` | Server logs — structured records with level filter, text search, and live tail |
 | `/settings` | Global settings |
 
 ## Project layout
@@ -475,13 +493,21 @@ Without a global install, use `"command": "npx"` with `"args": ["-y", "@nilsr071
 | Repos  | `list_repos`, `add_repo`, `sync_repo_issues`                          |
 | Issues | `list_issues`, `add_to_queue`, `remove_from_queue`, `set_issue_labels`|
 | Jobs   | `list_jobs`, `get_job`, `requeue_job`, `resume_job_with_instruction`, `abort_job` |
+| PR     | `run_pr_audit`, `ask_pr_question`                                     |
 | Tracked PRs | `track_pr`, `list_tracked_prs`, `untrack_pr`                     |
 | System | `get_settings`, `update_settings`, `set_drain_mode`, `get_logs`       |
 
 **Safety** — work-initiating tools (`add_to_queue`, `requeue_job`, `resume_job_with_instruction`, `track_pr`) honor the same gates as the
 UI: they refuse while draining, globally paused, or over the daily/per-repo cost limit.
-`get_settings` redacts credential fields and `update_settings` cannot set them. See
-[ADR 025](docs/adr/025-mcp-server.md).
+`get_settings` redacts credential fields and `update_settings` cannot set them. `ask_pr_question`
+runs the same read-only "Ask about this PR" assistant as the job page (issue #296), blocking until
+the answer is ready; like the dashboard's ask path it is an on-demand read-only query, never edits
+files, and never touches job state. See [ADR 025](docs/adr/025-mcp-server.md).
+
+The same PR Q&A is also reachable over REST for non-MCP HTTP clients: `POST
+/api/jobs/<id>/questions` with `{"question": "…"}` creates a question (returns it in the
+`answering` state) and `GET /api/jobs/<id>/questions` lists a job's questions newest-first — poll
+it for the terminal `answered`/`error` state, mirroring how the dashboard polls.
 
 ## Roadmap
 

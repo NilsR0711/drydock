@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { type Job, jobEvents, type Repo } from "@/lib/db/schema";
 import type { ForgeClient, PrMergeState } from "@/lib/forge/types";
-import { runBranchJanitorSweep } from "@/lib/orchestrator/branch-janitor";
+import { conflictCommentMarker, runBranchJanitorSweep } from "@/lib/orchestrator/branch-janitor";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { addRepo } from "@/lib/repos/service";
 
@@ -30,6 +30,13 @@ function openPrJob(repo: Repo, issue: number, pr: number, branch: string): Job {
   transitionJob(j.id, "working", {}, db);
   return transitionJob(j.id, "ci_running", { prNumber: pr, branch }, db);
 }
+
+/**
+ * A rebase stub that never clears the conflict, so the sweep falls through to
+ * the park path. Lets the escalation tests exercise the flag-on default
+ * (rebase attempted, fails) without touching real git.
+ */
+const failRebase = async (): Promise<{ ok: boolean }> => ({ ok: false });
 
 function janitorForge(over: Partial<ForgeClient> = {}): ForgeClient {
   return {
@@ -134,13 +141,13 @@ describe("runBranchJanitorSweep — stale/conflicted PR refresh", () => {
     expect(forge.updatePrBranch).toHaveBeenCalledWith(12);
   });
 
-  it("escalates a conflicted PR to needs_human with an explicit rebase reason", async () => {
+  it("escalates a conflicted PR to needs_human when auto-rebase cannot clear it", async () => {
     const repo = makeRepo();
     const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
     const forge = janitorForge({
       prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
     });
-    await runBranchJanitorSweep({ db, forgeFor: () => forge });
+    await runBranchJanitorSweep({ db, forgeFor: () => forge, rebaseBranch: failRebase });
     const fresh = getJob(job.id, db);
     expect(fresh?.status).toBe("needs_human");
     expect(fresh?.errorMessage).toBe("rebase needed: conflicts with main");
@@ -153,7 +160,7 @@ describe("runBranchJanitorSweep — stale/conflicted PR refresh", () => {
     const forge = janitorForge({
       prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
     });
-    await runBranchJanitorSweep({ db, forgeFor: () => forge });
+    await runBranchJanitorSweep({ db, forgeFor: () => forge, rebaseBranch: failRebase });
     expect(getJob(job.id, db)?.errorMessage).toBe("rebase needed: conflicts with develop");
   });
 
@@ -163,7 +170,7 @@ describe("runBranchJanitorSweep — stale/conflicted PR refresh", () => {
     const forge = janitorForge({
       prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
     });
-    await runBranchJanitorSweep({ db, forgeFor: () => forge });
+    await runBranchJanitorSweep({ db, forgeFor: () => forge, rebaseBranch: failRebase });
     expect(forge.commentIssue).toHaveBeenCalledOnce();
     const [issueNumber, body] = (forge.commentIssue as ReturnType<typeof vi.fn>).mock.calls[0] as [
       number,
@@ -172,6 +179,17 @@ describe("runBranchJanitorSweep — stale/conflicted PR refresh", () => {
     expect(issueNumber).toBe(7);
     expect(body).toContain("#12");
     expect(body).toContain("main");
+  });
+
+  it("embeds the conflict marker so a re-escalation edits in place", async () => {
+    const repo = makeRepo();
+    const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    const forge = janitorForge({
+      prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
+    });
+    await runBranchJanitorSweep({ db, forgeFor: () => forge });
+    const body = (forge.commentIssue as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    expect(body).toContain(conflictCommentMarker(job.id));
   });
 
   it("still escalates when the issue comment fails (best-effort)", async () => {
@@ -183,7 +201,7 @@ describe("runBranchJanitorSweep — stale/conflicted PR refresh", () => {
         throw new Error("offline");
       }),
     });
-    await runBranchJanitorSweep({ db, forgeFor: () => forge });
+    await runBranchJanitorSweep({ db, forgeFor: () => forge, rebaseBranch: failRebase });
     expect(getJob(job.id, db)?.status).toBe("needs_human");
   });
 
@@ -193,7 +211,7 @@ describe("runBranchJanitorSweep — stale/conflicted PR refresh", () => {
     const forge = janitorForge({
       prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
     });
-    await runBranchJanitorSweep({ db, forgeFor: () => forge });
+    await runBranchJanitorSweep({ db, forgeFor: () => forge, rebaseBranch: failRebase });
     expect(forge.addLabels).toHaveBeenCalledWith(7, ["drydock:needs-human"]);
     expect(forge.removeLabels).toHaveBeenCalledWith(7, ["drydock:queue"]);
   });
@@ -250,7 +268,9 @@ describe("runBranchJanitorSweep — stale/conflicted PR refresh", () => {
   });
 
   it("swallows an escalation race when the job settled concurrently", async () => {
-    const repo = makeRepo();
+    // Flag off so the single merge-state probe drives straight to the park path,
+    // isolating the race mechanic from the auto-rebase branch.
+    const repo = makeRepo({ autoResolveMergeConflicts: false });
     const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
     const forge = janitorForge({
       prMergeState: vi.fn(async (): Promise<PrMergeState> => {
@@ -261,6 +281,84 @@ describe("runBranchJanitorSweep — stale/conflicted PR refresh", () => {
     });
     await expect(runBranchJanitorSweep({ db, forgeFor: () => forge })).resolves.toBeUndefined();
     expect(getJob(job.id, db)?.status).toBe("merged");
+  });
+});
+
+describe("runBranchJanitorSweep — auto-resolve merge conflicts (issue #287)", () => {
+  it("rebases a conflicted PR instead of parking when the repair clears it", async () => {
+    const repo = makeRepo(); // autoResolveMergeConflicts defaults on
+    const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    // Conflicted on the initial probes, clean once the rebase has been pushed.
+    const prMergeState = vi
+      .fn<() => Promise<PrMergeState>>()
+      .mockResolvedValueOnce("conflicted")
+      .mockResolvedValueOnce("conflicted")
+      .mockResolvedValue("clean");
+    const forge = janitorForge({ prMergeState });
+    const rebaseBranch = vi.fn(async () => ({ ok: true }));
+
+    await runBranchJanitorSweep({ db, forgeFor: () => forge, rebaseBranch });
+
+    expect(rebaseBranch).toHaveBeenCalledWith(
+      expect.objectContaining({ id: repo.id }),
+      "drydock/issue-7-job-1",
+      12,
+    );
+    // The job is left in place for the merge gate; it is not parked.
+    expect(getJob(job.id, db)?.status).toBe("ci_running");
+    expect(forge.commentIssue).not.toHaveBeenCalled();
+    expect(forge.addLabels).not.toHaveBeenCalled();
+    // A janitor event records the successful rebase for the timeline + idempotency.
+    const events = db.select().from(jobEvents).where(eq(jobEvents.jobId, job.id)).all();
+    const rebased = events
+      .filter((e) => e.type === "janitor")
+      .map((e) => JSON.parse(e.payload ?? "{}"))
+      .find((p) => p.action === "rebased");
+    expect(rebased).toMatchObject({ action: "rebased", prNumber: 12 });
+  });
+
+  it("parks the PR when the bounded rebase repair cannot clear the conflict", async () => {
+    const repo = makeRepo();
+    const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    const forge = janitorForge({
+      prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
+    });
+    const rebaseBranch = vi.fn(async () => ({ ok: false }));
+
+    await runBranchJanitorSweep({ db, forgeFor: () => forge, rebaseBranch });
+
+    expect(rebaseBranch).toHaveBeenCalledTimes(1);
+    expect(getJob(job.id, db)?.status).toBe("needs_human");
+    expect(getJob(job.id, db)?.errorMessage).toBe("rebase needed: conflicts with main");
+  });
+
+  it("parks immediately without attempting a rebase when the flag is off", async () => {
+    const repo = makeRepo({ autoResolveMergeConflicts: false });
+    const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    const forge = janitorForge({
+      prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
+    });
+    const rebaseBranch = vi.fn(async () => ({ ok: true }));
+
+    await runBranchJanitorSweep({ db, forgeFor: () => forge, rebaseBranch });
+
+    expect(rebaseBranch).not.toHaveBeenCalled();
+    expect(getJob(job.id, db)?.status).toBe("needs_human");
+  });
+
+  it("parks when the rebase attempt throws (safe default)", async () => {
+    const repo = makeRepo();
+    const job = openPrJob(repo, 7, 12, "drydock/issue-7-job-1");
+    const forge = janitorForge({
+      prMergeState: vi.fn(async (): Promise<PrMergeState> => "conflicted"),
+    });
+    const rebaseBranch = vi.fn(async () => {
+      throw new Error("git exploded");
+    });
+
+    await runBranchJanitorSweep({ db, forgeFor: () => forge, rebaseBranch });
+
+    expect(getJob(job.id, db)?.status).toBe("needs_human");
   });
 });
 

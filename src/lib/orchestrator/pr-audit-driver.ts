@@ -8,6 +8,7 @@ import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
 import type { CommandRunner } from "@/lib/exec/runner";
+import { upsertMarkerComment } from "@/lib/forge/comment-upsert";
 import { getForge } from "@/lib/forge/registry";
 import type { IssueCommentRef, IssueDetail, PrCheck } from "@/lib/github/gh";
 import {
@@ -155,21 +156,7 @@ export async function upsertAuditComment(
   marker: string,
   body: string,
 ): Promise<"created" | "updated"> {
-  if (forge.listIssueComments && forge.updateIssueComment) {
-    try {
-      const existing = (await forge.listIssueComments(issueNumber)).find((c) =>
-        c.body.includes(marker),
-      );
-      if (existing) {
-        await forge.updateIssueComment(issueNumber, existing.id, body);
-        return "updated";
-      }
-    } catch (err) {
-      logError(`[pr-audit] comment upsert degraded to a fresh post on #${issueNumber}`, err);
-    }
-  }
-  await forge.commentIssue(issueNumber, body);
-  return "created";
+  return upsertMarkerComment(forge, issueNumber, marker, body, "pr-audit");
 }
 
 /**

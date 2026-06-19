@@ -3,6 +3,8 @@ import { z } from "zod";
 import { type DB, getDb } from "@/lib/db/client";
 import { todayCost } from "@/lib/db/cost-queries";
 import { repos, settings } from "@/lib/db/schema";
+import { setServerLogLevel } from "@/lib/log/server-log";
+import { LOG_LEVELS } from "@/lib/log/types";
 import { isKnownModelId } from "@/lib/models";
 import { NOTIFICATION_EVENTS } from "@/lib/notify/events";
 import { getCredentialFailures } from "@/lib/orchestrator/credential-status";
@@ -133,6 +135,11 @@ export const settingsSchema = z.object({
   // Finished jobs older than this many days have their verbose job_events
   // pruned (their cost summary rows are kept). See issue #24.
   retentionDays: z.number().int().positive().default(30),
+  // Minimum severity written to the structured server-log sink (issue #294, ADR
+  // 035). The sink also seeds its level from DRYDOCK_LOG_LEVEL before the DB is
+  // available (bootstrap), then this saved value takes over at runtime. The
+  // Logs page has its own independent level *filter* on top of what is written.
+  logLevel: z.enum(LOG_LEVELS).default("info"),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
@@ -157,6 +164,9 @@ export function saveSettings(patch: Partial<Settings>, db: DB = getDb()): Settin
   } else {
     db.insert(settings).values({ key: KEY, value }).run();
   }
+  // Apply the persisted log level to the live sink so a Settings change takes
+  // effect immediately, without a restart (issue #294).
+  setServerLogLevel(merged.logLevel);
   return merged;
 }
 

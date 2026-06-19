@@ -40,8 +40,35 @@ const TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
 
 export const TERMINAL_STATES: readonly JobStatus[] = ["merged", "released", "aborted"];
 
+/**
+ * Terminal *success* states: the issue's work landed — a PR merged, or an
+ * agent-driven release published (issue #256). Distinct from the terminal
+ * failure state `aborted`, these mark an issue as done. Re-enqueuing such an
+ * issue would redo already-merged work, so issue-level dedupe consults this to
+ * block a stale fetched snapshot from reworking a just-merged issue (issue #288).
+ */
+export const TERMINAL_SUCCESS_STATES: readonly JobStatus[] = ["merged", "released"];
+
+/**
+ * Every non-terminal state — the set the driver loop uses for issue-level
+ * dedupe (an issue with such a job is already scheduled/running and must not be
+ * enqueued again) and the Issues board uses to decide what counts as "in the
+ * queue", regardless of how it got there (manual queue label vs. auto `ready`
+ * path, issue #286). Derived from JOB_STATES so it stays in lockstep with the
+ * state machine. Includes the parked states (needs_human/interrupted): work
+ * exists for those issues even though it waits on an operator.
+ */
+export const OPEN_STATES: readonly JobStatus[] = JOB_STATES.filter(
+  (s) => !TERMINAL_STATES.includes(s),
+);
+
 export function isJobStatus(s: string): s is JobStatus {
   return (JOB_STATES as readonly string[]).includes(s);
+}
+
+/** True when `s` is a non-terminal job state (see {@link OPEN_STATES}). */
+export function isOpenStatus(s: JobStatus): boolean {
+  return OPEN_STATES.includes(s);
 }
 
 export function canTransition(from: JobStatus, to: JobStatus): boolean {
