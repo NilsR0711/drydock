@@ -9,7 +9,7 @@ import { logError } from "@/lib/log/logger";
 import { commandForAgent } from "./agent-command";
 import { getJob } from "./jobs";
 import { runPrQuestion } from "./pr-question-driver";
-import { createPrQuestion } from "./pr-questions";
+import { createPrQuestion, markQuestionError } from "./pr-questions";
 
 /**
  * The capability layer for "Ask about this PR" (issue #55), shared by every
@@ -90,6 +90,17 @@ export function startPrQuestion(
     generate: answerGeneratorOverride ?? undefined,
   }).catch((err) => {
     logError(`[pr-question] background run failed for question ${record.id}`, err);
+    // runPrQuestion is contracted never to throw (it persists its own terminal
+    // state), but if it ever does the record would be stranded in `answering` —
+    // MCP awaits `done` and returns the row, and REST pollers would wait
+    // forever. Force a terminal error so the answering → answered | error
+    // contract always holds once `done` resolves.
+    const message = err instanceof Error ? err.message : String(err);
+    try {
+      markQuestionError(record.id, `Answering failed: ${message}`.slice(0, 500), db);
+    } catch (markErr) {
+      logError(`[pr-question] failed to mark question ${record.id} as errored`, markErr);
+    }
   });
 
   return { record, done };

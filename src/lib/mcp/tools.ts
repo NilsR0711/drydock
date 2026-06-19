@@ -13,7 +13,7 @@ import { isKnownModelId } from "@/lib/models";
 import { requeueJobWithEscalation } from "@/lib/orchestrator/escalation";
 import { getJob, listJobs, transitionJob } from "@/lib/orchestrator/jobs";
 import { startPrAudit } from "@/lib/orchestrator/pr-audit-driver";
-import { startPrQuestion } from "@/lib/orchestrator/pr-question-service";
+import { questionSchema, startPrQuestion } from "@/lib/orchestrator/pr-question-service";
 import { getPrQuestion } from "@/lib/orchestrator/pr-questions";
 import { resumeJobWithInstruction } from "@/lib/orchestrator/resume-instruction";
 import { isGitRepoPath } from "@/lib/repos/path";
@@ -118,7 +118,9 @@ const getLogsShape = {
 
 const askPrQuestionShape = {
   jobId: z.number().int().positive(),
-  question: z.string().min(1),
+  // Reuse the shared validator (trim + min + MAX_QUESTION_CHARS) so the
+  // advertised MCP input schema never drifts from what startPrQuestion enforces.
+  question: questionSchema,
 } satisfies ZodRawShape;
 
 const drainShape = { on: z.boolean() } satisfies ZodRawShape;
