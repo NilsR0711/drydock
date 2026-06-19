@@ -304,3 +304,68 @@ describe("processPrFeedback — crash recovery", () => {
     expect(listFeedbackItems(job.id, db)[0]?.status).toBe("flagged");
   });
 });
+
+describe("processPrFeedback — bot threads get no chat-triggering replies (#226)", () => {
+  // CodeRabbit is a *trusted* bot here: Drydock must still fix its findings
+  // itself, but never write a reply into the bot's thread — an interactive bot
+  // treats any reply as a chat turn and would open its own PR (the #226 bug).
+  const botGate = { trustedReviewers: [], trustedBots: ["coderabbitai[bot]"], ignoredBots: [] };
+
+  function botThread(id = "B1"): ReviewThread {
+    return {
+      id,
+      isResolved: false,
+      isOutdated: false,
+      path: "src/a.ts",
+      line: 1,
+      comments: [
+        {
+          id: `${id}C`,
+          databaseId: 900,
+          author: "coderabbitai",
+          authorIsBot: true,
+          body: "Please fix the rounded comparison.",
+        },
+      ],
+    };
+  }
+
+  it("fixes and resolves a bot thread silently — no reply, no comment update", async () => {
+    const t = botThread();
+    const { forge, calls } = fakeForge([t]);
+    const apply = vi.fn<() => Promise<FeedbackApplyResult>>(async () => ({ ok: true }));
+    const summary = await processPrFeedback(job.id, 7, {
+      forge,
+      db,
+      gate: botGate,
+      applyFeedback: apply,
+    });
+
+    expect(apply).toHaveBeenCalledOnce(); // Drydock still does the work itself
+    expect(summary.resolved).toBe(1);
+    expect(calls.replies).toHaveLength(0); // the key: nothing posted into the thread
+    expect(calls.updates).toHaveLength(0);
+    expect(calls.resolved).toEqual([t.id]); // thread resolved via the silent mutation
+    expect(listFeedbackItems(job.id, db)[0]?.status).toBe("resolved");
+  });
+
+  it("leaves an unfixable bot thread unresolved and silent (human still sees it open)", async () => {
+    const t = botThread("B2");
+    const { forge, calls } = fakeForge([t]);
+    const apply = vi.fn<() => Promise<FeedbackApplyResult>>(async () => ({
+      ok: false,
+      detail: "no fix",
+    }));
+    const summary = await processPrFeedback(job.id, 7, {
+      forge,
+      db,
+      gate: botGate,
+      applyFeedback: apply,
+      budgets: { maxItemsPerSweep: 5, maxAttemptsPerItem: 1 },
+    });
+
+    expect(summary.failed).toBe(1);
+    expect(calls.replies).toHaveLength(0); // no "flagging for a human" reply to trigger the bot
+    expect(calls.resolved).not.toContain(t.id); // left open so a human notices it
+  });
+});
