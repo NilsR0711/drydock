@@ -381,9 +381,12 @@ export const reviewFeedbackItems = sqliteTable(
   "review_feedback_items",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    jobId: integer("job_id")
-      .notNull()
-      .references(() => jobs.id, { onDelete: "cascade" }),
+    // A feedback item belongs to EITHER an issue→PR job OR a URL-tracked PR
+    // (issue #293): exactly one of these is set. jobId became nullable so the
+    // review-feedback lifecycle can be reused against externally-authored PRs
+    // that have no originating job. The service layer enforces the xor.
+    jobId: integer("job_id").references(() => jobs.id, { onDelete: "cascade" }),
+    trackedPrId: integer("tracked_pr_id").references(() => trackedPrs.id, { onDelete: "cascade" }),
     prNumber: integer("pr_number").notNull(),
     threadId: text("thread_id").notNull(),
     reviewer: text("reviewer").notNull(),
@@ -396,7 +399,64 @@ export const reviewFeedbackItems = sqliteTable(
   },
   (t) => ({
     jobIdx: index("review_feedback_job_idx").on(t.jobId),
+    trackedIdx: index("review_feedback_tracked_idx").on(t.trackedPrId),
+    // A thread is unique within its owner. NULLs are distinct in SQLite, so the
+    // job-owned and tracked-PR-owned rows never collide across the two indexes.
     jobThreadUnique: uniqueIndex("review_feedback_job_thread_unique").on(t.jobId, t.threadId),
+    trackedThreadUnique: uniqueIndex("review_feedback_tracked_thread_unique").on(
+      t.trackedPrId,
+      t.threadId,
+    ),
+  }),
+);
+
+/**
+ * A pull request Drydock babysits independently of any issue→PR job (issue
+ * #293). An operator adds an existing PR by URL; from then on Drydock watches
+ * its CI, runs review-feedback, heals/merges (when the branch is ours and
+ * auto-merge is opted in) and hands off to a human otherwise. Decoupled from
+ * `jobs`/`issues` on purpose: a tracked PR may be authored by anyone and live
+ * regardless of whether the repo's issues are watched.
+ */
+export const trackedPrs = sqliteTable(
+  "tracked_prs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repos.id, { onDelete: "cascade" }),
+    prNumber: integer("pr_number").notNull(),
+    url: text("url").notNull(),
+    platform: text("platform").notNull(),
+    // Head branch name; null until the first reconciliation fills it in.
+    branch: text("branch"),
+    // `owner/name` of the head and base repositories. A head that differs from
+    // base is a fork PR: we cannot push fixes to it, so heal/auto-merge are
+    // disabled and review-feedback that needs an edit escalates to a human.
+    headSlug: text("head_slug"),
+    baseSlug: text("base_slug"),
+    isFork: integer("is_fork", { mode: "boolean" }).notNull().default(false),
+    // True when the branch lives in the base repo AND carries our `drydock/`
+    // prefix — the only case the branch janitor may ever delete/force-update.
+    owned: integer("owned", { mode: "boolean" }).notNull().default(false),
+    // Off by default (issue #293): externally-authored PRs are never merged
+    // unless an operator opts this PR in. Even then we only merge our own
+    // branches with a clean merge state.
+    autoMerge: integer("auto_merge", { mode: "boolean" }).notNull().default(false),
+    // tracking | needs_human | merged | closed | stopped (see tracked-prs/service).
+    status: text("status").notNull().default("tracking"),
+    title: text("title"),
+    author: text("author"),
+    headSha: text("head_sha"),
+    ciRetryCount: integer("ci_retry_count").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    repoIdx: index("tracked_prs_repo_idx").on(t.repoId),
+    statusIdx: index("tracked_prs_status_idx").on(t.status),
+    repoPrUnique: uniqueIndex("tracked_prs_repo_pr_unique").on(t.repoId, t.prNumber),
   }),
 );
 
