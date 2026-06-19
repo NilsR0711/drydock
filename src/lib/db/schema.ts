@@ -206,6 +206,15 @@ export const repos = sqliteTable("repos", {
   // it grants the agent full shell access — so it is off by default and only
   // affects new rows; existing repos keep their stored value.
   bypassPermissions: integer("bypass_permissions", { mode: "boolean" }).notNull().default(false),
+  // Per-repo command allowlist (issue #329), JSON string array; parsed via
+  // repoAutomation(). A safer middle ground than the all-or-nothing
+  // bypassPermissions above: each entry `cmd` becomes a Claude Code
+  // `--allowedTools "Bash(cmd:*)"` rule, pre-approving that command headlessly
+  // while everything else stays in the default edits-only mode. Empty by default
+  // (no headless Bash). Orthogonal to bypassPermissions — when that is on, the
+  // agent already has full shell access and this list is ignored. Caveat:
+  // `Bash(git:*)` allows every git subcommand (including `git push --force`).
+  allowedCommands: text("allowed_commands").notNull().default("[]"),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 

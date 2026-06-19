@@ -150,6 +150,11 @@ export const repoInputSchema = z.object({
   // agent with `--dangerously-skip-permissions`, granting full shell access. See
   // the schema column for the full rationale and security trade-off.
   bypassPermissions: z.boolean().default(false),
+  // Per-repo command allowlist (issue #329). Each entry is pre-approved for
+  // headless Bash via Claude Code's --allowedTools while everything else stays
+  // edits-only. Empty by default; orthogonal to bypassPermissions. See the
+  // schema column for the security trade-off (e.g. Bash(git:*) allows force-push).
+  allowedCommands: jsonStringArray("[]"),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 
