@@ -4,6 +4,7 @@ import type {
   IssueCommentRef,
   IssueDetail,
   PrCheck,
+  PrInfo,
   PrMergeState,
   ReactionContent,
   ReviewThread,
@@ -21,6 +22,7 @@ export type {
   IssueCommentRef,
   IssueDetail,
   PrCheck,
+  PrInfo,
   PrMergeState,
   ReactionContent,
   ReviewThread,
@@ -59,6 +61,12 @@ export interface ForgeClient {
   prChecks(prNumber: number): Promise<PrCheck[]>;
   /** Current head commit SHA of the PR/MR (binds CI auto-heal sessions). */
   prHeadSha(prNumber: number): Promise<string>;
+  /**
+   * Resolve a PR/MR's coordinates for URL-tracked babysitting (issue #293):
+   * state, head branch + SHA, fork flag, and head/base repo slugs. Optional —
+   * the tracked-PR feature is gated on a forge implementing it.
+   */
+  prInfo?(prNumber: number): Promise<PrInfo>;
   /**
    * The commit a merged PR/MR landed as on the target branch, or null when the
    * PR is not merged (or the forge reports none). PRs are squash-merged, so

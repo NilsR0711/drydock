@@ -37,3 +37,4 @@
 - [034](adr/034-agent-driven-release.md) — Manual agent-driven release (new job kind + `released` state, full-shell-access session, agent discovers & performs the repo's release)
 - [035](adr/035-structured-server-logging.md) — Structured server-log sink (rotating file + stdout + SSE fan-out, secret-redacted) with a global Logs page (filter, search, live tail)
 - [036](adr/036-desktop-menu-bar-shell.md) — Native macOS menu-bar shell (Tauri) wrapping the dashboard + HTTP control endpoints (pause/drain) with a custom-header CSRF guard; separate crate, not in the npm package, Rust out of CI
+- [037](adr/037-tracked-pr-babysitting.md) — Babysit arbitrary PRs added by URL (decoupled `tracked_prs` record + driver-loop sweep; auto-merge opt-in & owned-only; never touches fork branches)

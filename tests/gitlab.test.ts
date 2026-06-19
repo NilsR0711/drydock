@@ -884,3 +884,72 @@ describe("GitlabForge SSRF guard (issue #110)", () => {
     expect(calls.length).toBeGreaterThan(0);
   });
 });
+
+describe("GitlabForge.prInfo", () => {
+  const mr = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      iid: 7,
+      title: "Add thing",
+      state: "opened",
+      sha: "cafe",
+      source_branch: "feature/x",
+      source_project_id: 1,
+      target_project_id: 1,
+      author: { username: "dev" },
+      ...over,
+    });
+
+  it("resolves an in-project MR", async () => {
+    const { forge } = makeForge([
+      { method: "GET", match: "/merge_requests/7", response: { body: mr() } },
+    ]);
+    const info = await forge.prInfo(7);
+    expect(info).toEqual({
+      number: 7,
+      title: "Add thing",
+      author: "dev",
+      state: "open",
+      merged: false,
+      isCrossRepository: false,
+      headRefName: "feature/x",
+      headSha: "cafe",
+      headSlug: "group/proj",
+      baseSlug: "group/proj",
+    });
+  });
+
+  it("flags a fork MR as cross-repository with a null head slug", async () => {
+    const { forge } = makeForge([
+      {
+        method: "GET",
+        match: "/merge_requests/7",
+        response: { body: mr({ source_project_id: 2 }) },
+      },
+    ]);
+    const info = await forge.prInfo(7);
+    expect(info.isCrossRepository).toBe(true);
+    expect(info.headSlug).toBeNull();
+  });
+
+  it("maps a merged MR to merged=true", async () => {
+    const { forge } = makeForge([
+      { method: "GET", match: "/merge_requests/7", response: { body: mr({ state: "merged" }) } },
+    ]);
+    const info = await forge.prInfo(7);
+    expect(info.state).toBe("merged");
+    expect(info.merged).toBe(true);
+  });
+
+  it("defaults to fork (unowned) when project ownership is unknown", async () => {
+    const { forge } = makeForge([
+      {
+        method: "GET",
+        match: "/merge_requests/7",
+        response: { body: mr({ source_project_id: null, target_project_id: null }) },
+      },
+    ]);
+    const info = await forge.prInfo(7);
+    expect(info.isCrossRepository).toBe(true);
+    expect(info.headSlug).toBeNull();
+  });
+});

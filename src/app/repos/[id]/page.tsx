@@ -26,6 +26,7 @@ import { RepoPromptsSection } from "@/components/repo-prompts-section";
 import { RepoReleasePanel } from "@/components/repo-release-panel";
 import { RepoSettingsBar } from "@/components/repo-settings-bar";
 import { RepoWebhookPanel } from "@/components/repo-webhook-panel";
+import { TrackedPrsPanel } from "@/components/tracked-prs-panel";
 import { Badge } from "@/components/ui/badge";
 import { Section } from "@/components/ui/section";
 import { StatCard } from "@/components/ui/stat-card";
@@ -40,6 +41,7 @@ import { recentDeploymentHealingSessions } from "@/lib/orchestrator/deployment-h
 import { openJobsByIssue } from "@/lib/orchestrator/jobs";
 import { recentReleaseRuns } from "@/lib/release/release-service";
 import { getSettings } from "@/lib/settings/service";
+import { listTrackedPrs } from "@/lib/tracked-prs/service";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +72,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
     ? recentDeploymentHealingSessions(ws.repo.id, db)
     : [];
   const releaseRuns = ws.repo.releaseEnabled ? recentReleaseRuns(ws.repo.id, db) : [];
+  const trackedPrs = listTrackedPrs(ws.repo.id, db);
 
   const initialLog = ws.activeJob
     ? db
@@ -176,6 +179,20 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
             defaultModel={ws.repo.defaultModel}
             defaultAgent={ws.repo.agent}
           />
+        </Section>
+
+        <Section
+          icon={<GitPullRequestArrow className="h-4 w-4" />}
+          title="Pull requests"
+          description="Babysit an existing PR by URL — Drydock watches its CI and reviews. Auto-merge is opt-in and only ever applies to branches we own."
+          defaultOpen={trackedPrs.some((p) => p.status !== "stopped")}
+          right={
+            <Badge tone="neutral">
+              {trackedPrs.filter((p) => p.status !== "stopped").length} tracked
+            </Badge>
+          }
+        >
+          <TrackedPrsPanel repoId={ws.repo.id} initialPrs={trackedPrs} />
         </Section>
 
         <Section

@@ -72,6 +72,7 @@ describe("MCP tool registry", () => {
         "list_issues",
         "list_jobs",
         "list_repos",
+        "list_tracked_prs",
         "remove_from_queue",
         "requeue_job",
         "resume_job_with_instruction",
@@ -79,6 +80,8 @@ describe("MCP tool registry", () => {
         "set_drain_mode",
         "set_issue_labels",
         "sync_repo_issues",
+        "track_pr",
+        "untrack_pr",
         "update_settings",
       ].sort(),
     );

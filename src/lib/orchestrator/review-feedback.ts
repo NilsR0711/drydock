@@ -110,26 +110,44 @@ export function hasOurReply(comments: { body: string }[], threadId: string): boo
 
 // --- Persistence -----------------------------------------------------------
 
+/**
+ * The owner a feedback item belongs to: an issue→PR job, or a URL-tracked PR
+ * (issue #293). Exactly one is set. A bare `number` is accepted as shorthand
+ * for `{ jobId }` so existing job-based callers stay unchanged.
+ */
+export type FeedbackOwner = { jobId: number } | { trackedPrId: number };
+
+function toOwner(owner: number | FeedbackOwner): FeedbackOwner {
+  return typeof owner === "number" ? { jobId: owner } : owner;
+}
+
+function ownerCondition(owner: FeedbackOwner) {
+  return "jobId" in owner
+    ? eq(reviewFeedbackItems.jobId, owner.jobId)
+    : eq(reviewFeedbackItems.trackedPrId, owner.trackedPrId);
+}
+
 export function getFeedbackItem(
-  jobId: number,
+  owner: number | FeedbackOwner,
   threadId: string,
   db: DB = getDb(),
 ): ReviewFeedbackItem | undefined {
   return db
     .select()
     .from(reviewFeedbackItems)
-    .where(and(eq(reviewFeedbackItems.jobId, jobId), eq(reviewFeedbackItems.threadId, threadId)))
+    .where(and(ownerCondition(toOwner(owner)), eq(reviewFeedbackItems.threadId, threadId)))
     .get();
 }
 
 /**
- * Insert (or fetch) the item tracking one review thread for a job. The
- * `(jobId, threadId)` pair is unique, so a thread seen on a later sweep reuses
+ * Insert (or fetch) the item tracking one review thread for its owner. The
+ * `(owner, threadId)` pair is unique, so a thread seen on a later sweep reuses
  * its existing row and current lifecycle state.
  */
 export function openFeedbackItem(
   input: {
-    jobId: number;
+    jobId?: number;
+    trackedPrId?: number;
     prNumber: number;
     threadId: string;
     reviewer: string;
@@ -137,12 +155,17 @@ export function openFeedbackItem(
   },
   db: DB = getDb(),
 ): ReviewFeedbackItem {
-  const existing = getFeedbackItem(input.jobId, input.threadId, db);
+  const owner: FeedbackOwner =
+    input.trackedPrId != null
+      ? { trackedPrId: input.trackedPrId }
+      : { jobId: input.jobId as number };
+  const existing = getFeedbackItem(owner, input.threadId, db);
   if (existing) return existing;
   return db
     .insert(reviewFeedbackItems)
     .values({
-      jobId: input.jobId,
+      jobId: input.jobId ?? null,
+      trackedPrId: input.trackedPrId ?? null,
       prNumber: input.prNumber,
       threadId: input.threadId,
       reviewer: input.reviewer,
@@ -175,8 +198,15 @@ export function transitionFeedbackItem(
     .get();
 }
 
-export function listFeedbackItems(jobId: number, db: DB = getDb()): ReviewFeedbackItem[] {
-  return db.select().from(reviewFeedbackItems).where(eq(reviewFeedbackItems.jobId, jobId)).all();
+export function listFeedbackItems(
+  owner: number | FeedbackOwner,
+  db: DB = getDb(),
+): ReviewFeedbackItem[] {
+  return db
+    .select()
+    .from(reviewFeedbackItems)
+    .where(ownerCondition(toOwner(owner)))
+    .all();
 }
 
 function isTerminal(status: string): boolean {
@@ -297,11 +327,12 @@ async function postReply(forge: ReviewForge, thread: ReviewThread, message: stri
  * idempotent, threads are resolved when handled, and the PR is never merged.
  */
 export async function processPrFeedback(
-  jobId: number,
+  owner: number | FeedbackOwner,
   prNumber: number,
   deps: ProcessFeedbackDeps,
 ): Promise<FeedbackSummary> {
   const db = deps.db ?? getDb();
+  const ownerFields = toOwner(owner);
   const budgets = deps.budgets ?? DEFAULT_FEEDBACK_BUDGETS;
   const summary: FeedbackSummary = {
     processed: 0,
@@ -332,7 +363,7 @@ export async function processPrFeedback(
 
     const classification = classifyFeedback(first.body);
     let item = openFeedbackItem(
-      { jobId, prNumber, threadId: thread.id, reviewer: first.author, classification },
+      { ...ownerFields, prNumber, threadId: thread.id, reviewer: first.author, classification },
       db,
     );
 

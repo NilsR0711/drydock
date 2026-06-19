@@ -46,6 +46,7 @@ import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
 import { reconcileExternalAborts } from "./singleton";
 import { OPEN_STATES, TERMINAL_SUCCESS_STATES } from "./state-machine";
+import { driveTrackedPrs } from "./tracked-pr-driver";
 
 /** Latch so the daily cost-limit notification fires once per breach, not per tick. */
 const costLimitState: EdgeState = { active: false };
@@ -76,6 +77,8 @@ export interface DriveTickDeps {
   releaseManagement?: (db: DB) => Promise<void>;
   /** Branch & PR janitor sweep entry point (issue #181, injectable for tests). */
   branchJanitor?: (db: DB) => Promise<void>;
+  /** URL-tracked PR babysitting sweep entry point (issue #293, injectable for tests). */
+  trackedPrs?: (db: DB) => Promise<void>;
   /** OpenRouter catalog sync entry point (issue #169, injectable for tests). */
   openrouterCatalogSync?: (db: DB) => Promise<unknown>;
   /** Credential watchdog probe round (issue #177, injectable for tests). */
@@ -533,6 +536,17 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
     );
   } catch (err) {
     logError("[driver] decomposition sweep dispatch failed", err);
+  }
+
+  // URL-tracked PR babysitting (issue #293): reconcile every PR an operator
+  // added by URL — CI status, auto-merge (opt-in), review feedback, needs-human
+  // handoff. Low priority like the other background sweeps; not gated on a
+  // repo's watch scope (a direct-URL PR stays tracked regardless).
+  const trackedPrs = deps.trackedPrs ?? ((d: DB) => driveTrackedPrs({ db: d }));
+  try {
+    await withPriority("low", () => trackedPrs(db));
+  } catch (err) {
+    logError("[driver] tracked-pr sweep failed", err);
   }
 
   // Mirror the OpenRouter model catalog (issue #169) when a refresh is due.

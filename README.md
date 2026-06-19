@@ -86,6 +86,8 @@ It's the difference between *driving* an agent and *operating a dock* of them.
 
 🧹 **Branch & PR janitor** — a periodic background sweep keeps the remote tidy: the remote branch of a merged Drydock PR is **deleted within one sweep** (idempotent across restarts — each cleanup is stamped on the job's event log), an open PR that fell **behind** the default branch is updated automatically while conflict-free, and a **conflicted** PR is **auto-rebased onto the default branch** when the repo's `autoResolveMergeConflicts` flag is on (a bounded, single-attempt rebase that force-pushes only what it rewrites) — only if that repair can't clear the conflict (or the flag is off) does the job park as *needs a human* with an explicit “rebase needed: conflicts with `<default branch>`” reason instead of letting CI polling time out. Only branches under the `drydock/` prefix are ever deleted or updated.
 
+🔗 **Babysit any PR by URL** — point Drydock at an *existing* pull request (yours or someone else's) and it watches its CI, runs the review-feedback loop, heals failing checks on branches it owns, and hands off to a human on a conflict or a fork it can't push to — all the machinery that backs Drydock's own PRs, now decoupled from an originating issue. Add one from the repo dashboard or the `track_pr` MCP tool; it stays tracked regardless of whether the repo's *issues* are watched. **Auto-merge is opt-in per PR and only ever applies to clean, green branches we own** — externally-authored and fork PRs are never merged or pushed to. See [ADR 037](docs/adr/037-tracked-pr-babysitting.md).
+
 🩹 **CI auto-heal** — per repo, turn the failure path into a structured classify → fix → verify loop: failing checks are bucketed (healable / external / flaky / unknown), only healable ones get a targeted fix, and each attempt is verified for a real, improving change. Flaky checks get a plain re-run instead of a code edit (GitHub; on forges without re-run support they escalate to a human). External and AI-review checks are never code-healed. Hard budgets (per-session and per-fingerprint attempts, a cooldown, and a concurrency cap) keep it bounded. **On by default** (issue #254); opt-out per repo; never auto-merges.
 
 💬 **PR review-feedback** — per repo, ingest review threads on a Drydock PR and run the mechanical iteration: only **trusted reviewers** and explicitly **allowlisted bots** are acted on — unlisted bots are ignored, each comment walks a lifecycle (`pending → queued → in_progress → resolved`, with `failed` / `rejected` / `flagged` branches), and the agent applies the change on the PR branch, replies, and resolves the thread. Status replies are marker-based and idempotent (updated in place, not duplicated), with bounded per-sweep and per-item budgets. **On by default** for autonomous operation, seeded with well-known review bots (`cursor[bot]`, `coderabbitai[bot]`) and opt-out per repo; never auto-merges. See [ADR 019](docs/adr/019-pr-review-feedback.md).
@@ -503,9 +505,10 @@ Without a global install, use `"command": "npx"` with `"args": ["-y", "@nilsr071
 | Issues | `list_issues`, `add_to_queue`, `remove_from_queue`, `set_issue_labels`|
 | Jobs   | `list_jobs`, `get_job`, `requeue_job`, `resume_job_with_instruction`, `abort_job` |
 | PR     | `run_pr_audit`, `ask_pr_question`                                     |
+| Tracked PRs | `track_pr`, `list_tracked_prs`, `untrack_pr`                     |
 | System | `get_settings`, `update_settings`, `set_drain_mode`, `get_logs`       |
 
-**Safety** — work-initiating tools (`add_to_queue`, `requeue_job`, `resume_job_with_instruction`) honor the same gates as the
+**Safety** — work-initiating tools (`add_to_queue`, `requeue_job`, `resume_job_with_instruction`, `track_pr`) honor the same gates as the
 UI: they refuse while draining, globally paused, or over the daily/per-repo cost limit.
 `get_settings` redacts credential fields and `update_settings` cannot set them. `ask_pr_question`
 runs the same read-only "Ask about this PR" assistant as the job page (issue #296), blocking until
