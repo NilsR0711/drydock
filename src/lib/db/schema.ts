@@ -691,3 +691,5 @@ export type PrQuestion = typeof prQuestions.$inferSelect;
 export type NewPrQuestion = typeof prQuestions.$inferInsert;
 export type ReleaseRun = typeof releaseRuns.$inferSelect;
 export type NewReleaseRun = typeof releaseRuns.$inferInsert;
+export type TrackedPr = typeof trackedPrs.$inferSelect;
+export type NewTrackedPr = typeof trackedPrs.$inferInsert;
