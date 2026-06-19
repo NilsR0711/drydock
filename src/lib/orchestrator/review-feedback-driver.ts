@@ -148,14 +148,31 @@ export function buildAgentApply(
  * Run a sweep serialized against every other sweep (issue #180): the cadence
  * sweep in the driver loop and webhook-triggered sweeps share one promise
  * chain, so two sweeps can never process the same PR's feedback concurrently
- * (which would double-spawn agent side sessions for the same thread). A
+ * (which would double-spawn agent side sessions for the same thread, and race a
+ * stale `failed` transition against a successful `resolved` — issue #326). A
  * rejection propagates to its own caller but never breaks the chain.
+ *
+ * The chain lives on `globalThis`, not in a module-local closure, for the same
+ * reason as the orchestrator's abort registry (issue #232): Next.js compiles
+ * the background orchestrator, Route Handlers, and Server Actions into separate
+ * bundle layers that each evaluate this module independently. The cadence sweep
+ * runs in the orchestrator layer; webhook-triggered sweeps run in a route layer.
+ * A module-local chain would give each layer its own, so the two sweeps would
+ * overlap on the same PR's threads — exactly the race in #326. A process-global
+ * chain is shared across every layer, restoring mutual exclusion.
  */
-let sweepChain: Promise<void> = Promise.resolve();
+const SWEEP_CHAIN_KEY = Symbol.for("drydock.review-feedback.sweep-chain");
+type GlobalWithChain = typeof globalThis & { [SWEEP_CHAIN_KEY]?: Promise<void> };
+const globalWithChain = globalThis as GlobalWithChain;
+globalWithChain[SWEEP_CHAIN_KEY] ??= Promise.resolve();
 
 export function runReviewFeedbackSweep(deps: DriveFeedbackDeps = {}): Promise<void> {
-  const run = sweepChain.then(() => driveReviewFeedback(deps));
-  sweepChain = run.catch(() => {});
+  // Read and write the chain through globalThis on every call so two module
+  // instances (distinct bundle layers) extend the same chain rather than each
+  // their own — a module-local cache would defeat the cross-layer sharing.
+  const chain = globalWithChain[SWEEP_CHAIN_KEY] ?? Promise.resolve();
+  const run = chain.then(() => driveReviewFeedback(deps));
+  globalWithChain[SWEEP_CHAIN_KEY] = run.catch(() => {});
   return run;
 }
 
