@@ -352,6 +352,16 @@ export function IssueBoard({
     return () => clearInterval(t);
   }, [repoId, pollIntervalSec]);
 
+  // Removing an issue from the queue may abort a not-yet-started job server-side
+  // (see removeFromQueueAction). The job map must be refetched or the stale open
+  // job would keep the issue pinned in the Queue zone instead of letting it fall
+  // back to the backlog (#311).
+  function refreshOpenJobs() {
+    listOpenIssueJobsAction(repoId)
+      .then(setOpenJobs)
+      .catch((e) => setError(e.message));
+  }
+
   function manualSync() {
     setError(null);
     start(() => {
@@ -415,7 +425,10 @@ export function IssueBoard({
     if (!moved || !labelQueued(moved)) return;
     start(() => {
       removeFromQueueAction(repoId, moved.number)
-        .then(setIssues)
+        .then((next) => {
+          setIssues(next);
+          refreshOpenJobs();
+        })
         .catch((e) => setError(e.message));
     });
   }
@@ -491,6 +504,10 @@ export function IssueBoard({
         .then((next) => {
           setIssues(next);
           clearSelection();
+          // A bulk "Remove from queue" may abort queued jobs server-side; resync
+          // the job map so those issues fall back to the backlog (harmless no-op
+          // for add/label bulk actions).
+          refreshOpenJobs();
         })
         .catch((e) => setError(e.message));
     });
@@ -523,7 +540,10 @@ export function IssueBoard({
   function removeIssue(number: number) {
     start(() => {
       removeFromQueueAction(repoId, number)
-        .then(setIssues)
+        .then((next) => {
+          setIssues(next);
+          refreshOpenJobs();
+        })
         .catch((err: Error) => setError(err.message));
     });
   }

@@ -16,7 +16,7 @@ import {
   startIssueAction,
   viewIssueAction,
 } from "@/lib/issues/actions";
-import { transitionJob } from "@/lib/orchestrator/jobs";
+import { abortIfQueued, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { enqueueJob } from "@/lib/orchestrator/queue";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -102,6 +102,49 @@ describe("issue server actions", () => {
     const repoId = seedRepoWithIssue(3);
     await bulkRemoveFromQueueAction(repoId, [3]);
     expect(gh.removeLabels).toHaveBeenCalledWith(3, ["drydock:queue"]);
+  });
+
+  describe("removeFromQueueAction also aborts a not-yet-started job", () => {
+    it("aborts a queued job so the issue actually leaves the queue zone", async () => {
+      const repoId = seedRepoWithIssue(30);
+      const job = enqueueJob({ repoId, issueNumber: 30 });
+      expect(job?.status).toBe("queued");
+      await removeFromQueueAction(repoId, 30);
+      expect(getJob(job?.id ?? -1)?.status).toBe("aborted");
+    });
+
+    it("leaves a working job untouched — it is real in-flight work", async () => {
+      const repoId = seedRepoWithIssue(31);
+      const job = enqueueJob({ repoId, issueNumber: 31 });
+      transitionJob(job?.id ?? -1, "working");
+      await removeFromQueueAction(repoId, 31);
+      expect(getJob(job?.id ?? -1)?.status).toBe("working");
+    });
+
+    it("abortIfQueued only aborts a still-queued row — its WHERE guard skips working jobs", () => {
+      const repoId = seedRepoWithIssue(40);
+      const queued = enqueueJob({ repoId, issueNumber: 40 });
+      // A row that raced to `working` must survive the conditional update.
+      const working = enqueueJob({ repoId, issueNumber: 41 });
+      transitionJob(working?.id ?? -1, "working");
+
+      expect(abortIfQueued(queued?.id ?? -1)?.status).toBe("aborted");
+      expect(abortIfQueued(working?.id ?? -1)).toBeUndefined();
+      expect(getJob(working?.id ?? -1)?.status).toBe("working");
+    });
+
+    it("bulkRemoveFromQueueAction aborts each issue's queued job", async () => {
+      const repoId = seedRepoWithIssue(32);
+      getDb()
+        .insert(issues)
+        .values({ repoId, number: 33, title: "seed", labels: "[]", priority: 1 })
+        .run();
+      const a = enqueueJob({ repoId, issueNumber: 32 });
+      const b = enqueueJob({ repoId, issueNumber: 33 });
+      await bulkRemoveFromQueueAction(repoId, [32, 33]);
+      expect(getJob(a?.id ?? -1)?.status).toBe("aborted");
+      expect(getJob(b?.id ?? -1)?.status).toBe("aborted");
+    });
   });
 
   it("bulkApplyLabelAction applies the label to every selected issue", async () => {

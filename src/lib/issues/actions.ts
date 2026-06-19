@@ -16,7 +16,7 @@ import {
 } from "@/lib/issues/service";
 import { listSubtasks } from "@/lib/issues/subtasks";
 import { isKnownModelId } from "@/lib/models";
-import { openJobsByIssue } from "@/lib/orchestrator/jobs";
+import { abortIfQueued, openJobForIssue, openJobsByIssue } from "@/lib/orchestrator/jobs";
 import { enqueueJob } from "@/lib/orchestrator/queue";
 import type { JobStatus } from "@/lib/orchestrator/state-machine";
 
@@ -84,9 +84,24 @@ export async function addToQueueAction(
   return result;
 }
 
+/**
+ * Since #286 an open job keeps an issue pinned in the Queue zone regardless of
+ * the queue label, so removing only the label leaves the issue stuck up top.
+ * When dequeuing, also abort a job that has NOT started yet (`queued`) so the
+ * issue actually drops to the backlog. A `working` job (or any later state) is
+ * left untouched — it is real in-flight work, not a stale queue entry (#311).
+ */
+function abortQueuedJobForIssue(repoId: number, issueNumber: number) {
+  const job = openJobForIssue(repoId, issueNumber);
+  // abortIfQueued re-checks the status atomically in its UPDATE guard, so a job
+  // claimed to `working` between this read and the write is left running.
+  if (job) abortIfQueued(job.id);
+}
+
 /** Remove the repo's queue label from an issue (GitHub + local cache). */
 export async function removeFromQueueAction(repoId: number, issueNumber: number) {
   const result = await dequeueIssue(repoId, issueNumber);
+  abortQueuedJobForIssue(repoId, issueNumber);
   revalidatePath(`/repos/${repoId}`);
   return result;
 }
@@ -101,6 +116,7 @@ export async function bulkAddToQueueAction(repoId: number, issueNumbers: number[
 /** Remove the queue label from several issues at once (issue #111). Returns issues. */
 export async function bulkRemoveFromQueueAction(repoId: number, issueNumbers: number[]) {
   const result = await bulkDequeueIssues(repoId, issueNumbers);
+  for (const number of issueNumbers) abortQueuedJobForIssue(repoId, number);
   revalidatePath(`/repos/${repoId}`);
   return result;
 }
