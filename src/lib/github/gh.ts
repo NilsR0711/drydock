@@ -111,6 +111,37 @@ export type PrCheck = z.infer<typeof prCheckSchema>;
  */
 export type PrMergeState = "clean" | "behind" | "conflicted" | "unknown";
 
+/** Normalized PR/MR coordinates for URL-tracked PR babysitting (issue #293). */
+export interface PrInfo {
+  number: number;
+  title: string;
+  /** Author login, or "" when the forge omits it. */
+  author: string;
+  state: "open" | "closed" | "merged";
+  merged: boolean;
+  /** True for a fork PR — the head branch lives in a different repo. */
+  isCrossRepository: boolean;
+  headRefName: string;
+  headSha: string;
+  /** `owner/name` of the head repo, or null when it was deleted. */
+  headSlug: string | null;
+  /** `owner/name` of the base repo (the repo this client is bound to). */
+  baseSlug: string;
+}
+
+const prInfoSchema = z.object({
+  number: z.number(),
+  title: z.string().default(""),
+  state: z.string(),
+  author: z.object({ login: z.string() }).nullish(),
+  isCrossRepository: z.boolean().default(false),
+  headRefName: z.string().default(""),
+  headRefOid: z.string().default(""),
+  headRepositoryOwner: z.object({ login: z.string() }).nullish(),
+  headRepository: z.object({ name: z.string() }).nullish(),
+  mergedAt: z.string().nullish(),
+});
+
 /** A single comment within a PR review thread. */
 export interface ReviewThreadComment {
   /** GraphQL node id (used as a reaction subject). */
@@ -493,6 +524,43 @@ export class GhClient {
       .safeParse(JSON.parse(res.stdout || "{}"));
     if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
     return parsed.data.mergeCommit?.oid ?? null;
+  }
+
+  /**
+   * Resolve a PR's coordinates for URL-tracked babysitting (issue #293): its
+   * state, head branch + SHA, and head/base repo slugs (so a fork can be told
+   * apart from an in-repo branch). The base slug is the repo this client is
+   * bound to.
+   */
+  async prInfo(prNumber: number): Promise<PrInfo> {
+    const { owner, name } = await this.repoSlug();
+    const res = await this.exec([
+      "pr",
+      "view",
+      String(prNumber),
+      "--json",
+      "number,title,state,author,isCrossRepository,headRefName,headRefOid,headRepositoryOwner,headRepository,mergedAt",
+    ]);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr view failed");
+    const parsed = prInfoSchema.safeParse(JSON.parse(res.stdout || "{}"));
+    if (!parsed.success) throw new GhError(`unexpected gh output: ${parsed.error.message}`);
+    const d = parsed.data;
+    const headOwner = d.headRepositoryOwner?.login;
+    const headName = d.headRepository?.name;
+    const headSlug = headOwner && headName ? `${headOwner}/${headName}` : null;
+    const state = d.state.toLowerCase();
+    return {
+      number: d.number,
+      title: d.title,
+      author: d.author?.login ?? "",
+      state: state === "merged" ? "merged" : state === "closed" ? "closed" : "open",
+      merged: state === "merged" || d.mergedAt != null,
+      isCrossRepository: d.isCrossRepository,
+      headRefName: d.headRefName,
+      headSha: d.headRefOid,
+      headSlug,
+      baseSlug: `${owner}/${name}`,
+    };
   }
 
   async commentIssue(issueNumber: number, body: string): Promise<void> {

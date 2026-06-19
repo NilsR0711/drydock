@@ -10,6 +10,7 @@ import {
   type IssueCommentRef,
   type IssueDetail,
   type PrCheck,
+  type PrInfo,
   type PrMergeState,
 } from "./types";
 import { assertSafeForgeUrl, privateForgeAllowedFromEnv } from "./url-guard";
@@ -372,6 +373,49 @@ export class GitlabForge implements ForgeClient {
   async prHeadSha(prNumber: number): Promise<string> {
     const res = await this.mutate("GET", `/merge_requests/${prNumber}`);
     return z.object({ sha: z.string() }).parse(safeJson(res.body, {})).sha;
+  }
+
+  /**
+   * Resolve an MR's coordinates for URL-tracked babysitting (issue #293). The
+   * base slug is this client's project path; a fork is detected by comparing
+   * the MR's source and target project ids. We deliberately leave `headSlug`
+   * null for a fork — its source project path needs a separate lookup, and a
+   * null slug already pins the PR as unowned (no push, no auto-merge), the
+   * safe default for a branch we do not control.
+   */
+  async prInfo(prNumber: number): Promise<PrInfo> {
+    const { encodedPath } = await this.resolveProject();
+    const res = await this.mutate("GET", `/merge_requests/${prNumber}`);
+    const mr = z
+      .object({
+        iid: z.number(),
+        title: z.string().default(""),
+        state: z.string(),
+        sha: z.string().default(""),
+        source_branch: z.string().default(""),
+        source_project_id: z.number().nullish(),
+        target_project_id: z.number().nullish(),
+        author: z.object({ username: z.string() }).nullish(),
+      })
+      .parse(safeJson(res.body, {}));
+    const baseSlug = decodeURIComponent(encodedPath);
+    const isFork =
+      mr.source_project_id != null &&
+      mr.target_project_id != null &&
+      mr.source_project_id !== mr.target_project_id;
+    const state = mr.state === "merged" ? "merged" : mr.state === "opened" ? "open" : "closed";
+    return {
+      number: mr.iid,
+      title: mr.title,
+      author: mr.author?.username ?? "",
+      state,
+      merged: mr.state === "merged",
+      isCrossRepository: isFork,
+      headRefName: mr.source_branch,
+      headSha: mr.sha,
+      headSlug: isFork ? null : baseSlug,
+      baseSlug,
+    };
   }
 
   /**
