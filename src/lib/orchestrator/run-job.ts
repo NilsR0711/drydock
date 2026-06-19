@@ -1142,14 +1142,19 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     const spunOffLine =
       spunOff.length > 0 ? `Spun off: ${spunOff.map((n) => `#${n}`).join(", ")}` : "";
     const body = [prMeta?.body, closes, spunOffLine].filter(Boolean).join("\n\n");
-    const prNumber = await createPr({
-      head: wt.branch,
-      base: repo.defaultBranch,
-      title,
-      body,
-    });
+    // On a human-instruction resume the branch already has an open PR
+    // (job.prNumber is set). Re-running createPr there errors with "already
+    // exists" and falsely parks the job back in needs_human even though the
+    // work succeeded (issue #331). Reuse the existing PR and go straight back
+    // to CI; createPr is also idempotent now as a safety net against the race.
+    const reusedPr = job.prNumber != null;
+    const prNumber =
+      job.prNumber ?? (await createPr({ head: wt.branch, base: repo.defaultBranch, title, body }));
     transitionJob(job.id, "ci_running", { branch: wt.branch, prNumber }, db);
-    await send("pr_opened", `🔀 PR opened: ${repo.id}#${job.issueNumber} (PR #${prNumber}).`);
+    await send(
+      "pr_opened",
+      `🔀 PR ${reusedPr ? "updated" : "opened"}: ${repo.id}#${job.issueNumber} (PR #${prNumber}).`,
+    );
 
     // Opt-in read-only verification of the opened PR (issue #54). Wrapped so a
     // failure is logged but never flips the job or blocks the merge path.
