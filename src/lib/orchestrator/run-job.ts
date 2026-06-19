@@ -23,6 +23,7 @@ import { dispatch } from "@/lib/notify/notifier";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, resolveTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
 import { agentInstructionsPromptSection } from "@/lib/repos/agent-instructions";
+import { repoAutomation } from "@/lib/repos/automation";
 import { isSandboxEnabled, resolveSandboxConfig } from "@/lib/sandbox/config";
 import {
   type PrepareSandboxInput,
@@ -86,6 +87,7 @@ export interface RunJobDeps {
     prompt: string,
     cwd: string,
     bypassPermissions?: boolean,
+    allowedCommands?: string[],
   ) => Promise<AgentSessionResult>;
   createPr?: (input: {
     head: string;
@@ -436,6 +438,11 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   // default. 0 disables it. Bounds the blast radius of one runaway session so a
   // single long loop cannot drain the whole daily budget by itself.
   const maxJobCostUsd = repo.maxJobCostUsd ?? settings.maxJobCostUsd;
+  // Per-repo command allowlist (issue #329): the commands pre-approved for
+  // headless Bash on every session path (implement, CI-fix/limit/instruction
+  // resume), independent of bypassPermissions. Parsed once from the JSON column;
+  // empty by default, so no behaviour change for repos that don't opt in.
+  const allowedCommands = repoAutomation(repo).allowedCommands;
   // Sandboxed execution (issue #182, ADR 033). Resolved up front but only
   // *applied* after the worktree exists (the image may come from its
   // devcontainer.json) and only for CLI agents — HTTP providers have no
@@ -449,7 +456,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   const sessionEnv: { command: string; runner?: StreamRunner } = { command };
   const runSession =
     deps.runSession ??
-    ((j, prompt, cwd, bypassPermissions) =>
+    ((j, prompt, cwd, bypassPermissions, allowed) =>
       spawnAgentSession(j, prompt, cwd, {
         db,
         provider,
@@ -458,6 +465,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         timeoutMs,
         costCapUsd: maxJobCostUsd,
         bypassPermissions,
+        allowedCommands: allowed,
       }));
   const createPr = deps.createPr ?? ((input) => forge.createPr(input));
   // Plan stage runner (issue #160): a read-only, cost-tracked one-shot in the
@@ -523,6 +531,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       // needs `xcodebuild`/etc. to make progress needs it when resuming its main
       // work too, not just on the first run. Off by default — see the repo column.
       bypassPermissions: repo.bypassPermissions,
+      // Likewise carry the per-repo command allowlist (issue #329) so a resumed
+      // main session can still run its pre-approved build/test commands.
+      allowedCommands,
     });
   };
   const resumeLimitSession = deps.resumeLimitSession ?? resumeStoredSession;
@@ -660,6 +671,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
               // access as the implement run (issue #283) — e.g. re-running the
               // native build to verify the fix. Off by default; see the repo column.
               bypassPermissions: repo.bypassPermissions,
+              // Same for the per-repo command allowlist (issue #329): a CI-fix
+              // resume re-running the native build needs its pre-approved commands.
+              allowedCommands,
             }),
         }),
         // Opt-in structured CI auto-healing (issue #16, ADR 017).
@@ -898,11 +912,18 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         }
       }
 
-      // Pass the repo's opt-in unrestricted-shell flag (issue #283): when set,
-      // the implement session runs with --dangerously-skip-permissions so the
-      // headless agent can execute Bash (e.g. xcodebuild/simctl) that the
-      // default edits-only mode blocks. Off by default — see the repo column.
-      return runSession(getJob(job.id, db) as Job, prompt, worktree.path, repo.bypassPermissions);
+      // Pass the repo's opt-in unrestricted-shell flag (issue #283) and the
+      // per-repo command allowlist (issue #329): when bypass is set the implement
+      // session runs with --dangerously-skip-permissions, otherwise the allowlist
+      // pre-approves specific Bash commands (e.g. xcodebuild/simctl) on top of the
+      // default edits-only mode. Both off/empty by default — see the repo columns.
+      return runSession(
+        getJob(job.id, db) as Job,
+        prompt,
+        worktree.path,
+        repo.bypassPermissions,
+        allowedCommands,
+      );
     };
 
     let session: AgentSessionResult;
