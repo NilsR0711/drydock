@@ -81,8 +81,12 @@ export interface ForgeClient {
   listIssueComments?(issueNumber: number): Promise<IssueCommentRef[]>;
   /** Edit one of our prior issue comments in place (idempotent upsert). */
   updateIssueComment?(issueNumber: number, commentId: string, body: string): Promise<void>;
-  /** Post a comment on the PR/MR itself (the optional audit mirror). */
+  /** Post a comment on the PR/MR itself (the canonical audit thread, #317). */
   commentPr?(prNumber: number, body: string): Promise<void>;
+  /** List a PR/MR's comments with stable ids (idempotent PR comment upsert). */
+  listPrComments?(prNumber: number): Promise<IssueCommentRef[]>;
+  /** Edit one of our prior PR/MR comments in place (idempotent upsert). */
+  updatePrComment?(prNumber: number, commentId: string, body: string): Promise<void>;
   createIssue(title: string, body: string): Promise<number>;
   failedRunLog(prNumber: number): Promise<string>;
   /** The PR/MR's unified diff, or an empty string on any failure (best-effort). */
