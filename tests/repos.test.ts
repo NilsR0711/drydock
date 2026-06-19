@@ -229,6 +229,17 @@ describe("repos service", () => {
     expect(updated.escalateModelOnRetry).toBe(true);
   });
 
+  it("defaults bypass-permissions to off and lets a repo opt in (issue #283)", () => {
+    const repo = addRepo({ path: "/byp", name: "byp" }, db);
+    // Off by default: granting unrestricted shell access is dangerous and must
+    // be an explicit per-repo opt-in, never the default.
+    expect(repo.bypassPermissions).toBe(false);
+    const updated = updateRepo(repo.id, { bypassPermissions: true }, db);
+    expect(updated.bypassPermissions).toBe(true);
+    const back = updateRepo(updated.id, { bypassPermissions: false }, db);
+    expect(back.bypassPermissions).toBe(false);
+  });
+
   it("defaults release management to off and parses it (issue #59)", () => {
     const repo = addRepo({ path: "/rel", name: "rel" }, db);
     expect(repo.releaseEnabled).toBe(false);

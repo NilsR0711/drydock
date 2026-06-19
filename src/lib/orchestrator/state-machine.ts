@@ -40,6 +40,15 @@ const TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
 
 export const TERMINAL_STATES: readonly JobStatus[] = ["merged", "released", "aborted"];
 
+/**
+ * Terminal *success* states: the issue's work landed — a PR merged, or an
+ * agent-driven release published (issue #256). Distinct from the terminal
+ * failure state `aborted`, these mark an issue as done. Re-enqueuing such an
+ * issue would redo already-merged work, so issue-level dedupe consults this to
+ * block a stale fetched snapshot from reworking a just-merged issue (issue #288).
+ */
+export const TERMINAL_SUCCESS_STATES: readonly JobStatus[] = ["merged", "released"];
+
 export function isJobStatus(s: string): s is JobStatus {
   return (JOB_STATES as readonly string[]).includes(s);
 }

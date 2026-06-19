@@ -230,6 +230,56 @@ describe("driveTick", () => {
     expect(started).toEqual([]);
   });
 
+  it("does not re-enqueue an issue that already has a merged job (issue #288)", async () => {
+    // Job 1 merged & closed the issue. A long tick (#284) can run the enqueue
+    // loop minutes later against a stale fetched snapshot that still lists the
+    // issue as open. enqueueJob only dedupes non-terminal jobs (it frees the
+    // dedupe key on merge), so without a success guard a redundant, guaranteed-
+    // conflicting second job is created. The merged job must block re-enqueue.
+    db.insert(jobs).values({ repoId, issueNumber: 136, status: "merged" }).run();
+    const started: number[] = [];
+    const d = deps(started, {
+      fetchIssues: vi.fn(async () => [
+        { number: 136, title: "stale-open", labels: [{ name: "drydock:queue" }] },
+      ]),
+    });
+    await driveTick(d as never);
+    expect(db.select().from(jobs).where(eq(jobs.issueNumber, 136)).all()).toHaveLength(1);
+    expect(started).toEqual([]);
+  });
+
+  it("does not re-enqueue an issue that already has a released job (issue #288)", async () => {
+    // `released` is the agent-release terminal success (issue #256); like merged
+    // it means the work landed, so the issue must not be reworked.
+    db.insert(jobs).values({ repoId, issueNumber: 137, status: "released" }).run();
+    const started: number[] = [];
+    const d = deps(started, {
+      fetchIssues: vi.fn(async () => [
+        { number: 137, title: "released", labels: [{ name: "drydock:queue" }] },
+      ]),
+    });
+    await driveTick(d as never);
+    expect(db.select().from(jobs).where(eq(jobs.issueNumber, 137)).all()).toHaveLength(1);
+    expect(started).toEqual([]);
+  });
+
+  it("still re-enqueues an issue whose only prior job aborted (issue #288)", async () => {
+    // The success guard must dedupe on terminal *success* only. An aborted job
+    // is a terminal *failure*; re-queuing it is the intended retry path, so it
+    // must not be blocked.
+    db.insert(jobs).values({ repoId, issueNumber: 138, status: "aborted" }).run();
+    const started: number[] = [];
+    const d = deps(started, {
+      fetchIssues: vi.fn(async () => [
+        { number: 138, title: "retryable", labels: [{ name: "drydock:queue" }] },
+      ]),
+    });
+    await driveTick(d as never);
+    // A fresh job was enqueued alongside the aborted one and started.
+    expect(db.select().from(jobs).where(eq(jobs.issueNumber, 138)).all()).toHaveLength(2);
+    expect(started).toHaveLength(1);
+  });
+
   it("does not re-enqueue an issue whose job is interrupted", async () => {
     const job = createJob({ repoId, issueNumber: 8 }, db);
     transitionJob(job.id, "interrupted", {}, db);

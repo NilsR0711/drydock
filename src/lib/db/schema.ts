@@ -173,6 +173,14 @@ export const repos = sqliteTable("repos", {
   // human-actionable comments (PR audit, needs-human, merge-conflict park) are
   // never silenced. Off by default, so existing repos keep the full audit trail.
   quietComments: integer("quiet_comments", { mode: "boolean" }).notNull().default(false),
+  // Opt-in unrestricted shell access (issue #283, default off). When on, this
+  // repo's agent jobs run with `--dangerously-skip-permissions` instead of the
+  // default edits-only `acceptEdits` mode, so the headless agent can execute any
+  // Bash command (e.g. `xcodebuild`/`simctl` for native Xcode repos that can't
+  // run in a Docker sandbox). This is a deliberately dangerous escape hatch —
+  // it grants the agent full shell access — so it is off by default and only
+  // affects new rows; existing repos keep their stored value.
+  bypassPermissions: integer("bypass_permissions", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 });
 

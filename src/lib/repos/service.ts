@@ -131,6 +131,10 @@ export const repoInputSchema = z.object({
   // Quiet mode for the issue thread (issue #289). Off by default: existing repos
   // keep the full audit trail. See the schema column for what it suppresses.
   quietComments: z.boolean().default(false),
+  // Opt-in unrestricted shell access (issue #283). Off by default — it runs the
+  // agent with `--dangerously-skip-permissions`, granting full shell access. See
+  // the schema column for the full rationale and security trade-off.
+  bypassPermissions: z.boolean().default(false),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 
