@@ -208,8 +208,21 @@ function hasOpenJob(db: DB, repoId: number, issueNumber: number): boolean {
  * so the retry path stays open.
  */
 function hasSuccessfulJob(db: DB, repoId: number, issueNumber: number): boolean {
-  return listJobsByStatus([...TERMINAL_SUCCESS_STATES], db).some(
-    (j) => j.repoId === repoId && j.issueNumber === issueNumber,
+  // Targeted lookup (mirrors failedAttempts) rather than scanning every
+  // historical success job: the merged/released set grows unbounded over the
+  // repo's lifetime, and this runs per fetched issue in the enqueue loop.
+  return (
+    db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.repoId, repoId),
+          eq(jobs.issueNumber, issueNumber),
+          inArray(jobs.status, [...TERMINAL_SUCCESS_STATES]),
+        ),
+      )
+      .get() !== undefined
   );
 }
 
