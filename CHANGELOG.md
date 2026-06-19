@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.13](https://github.com/NilsR0711/drydock/compare/v0.1.12...v0.1.13) (2026-06-19)
+
+
+### Features
+
+* **branch-janitor:** agent-based merge-conflict resolution, opt-in ([#327](https://github.com/NilsR0711/drydock/issues/327)) ([aff0db8](https://github.com/NilsR0711/drydock/commit/aff0db8b7e173dd21edb05c0a0d8e00eb985e49a))
+* **repos:** per-repo command allowlist (--allowedTools) for headless git/xcodebuild/simctl ([#329](https://github.com/NilsR0711/drydock/issues/329)) ([#335](https://github.com/NilsR0711/drydock/issues/335)) ([ce1875a](https://github.com/NilsR0711/drydock/commit/ce1875a9f4cb7f1c02785a014b4c78b0cea65eb6))
+
+
+### Bug Fixes
+
+* **orchestrator:** reuse the existing PR on resume instead of re-running createPr ([#331](https://github.com/NilsR0711/drydock/issues/331)) ([#334](https://github.com/NilsR0711/drydock/issues/334)) ([5bb07b2](https://github.com/NilsR0711/drydock/commit/5bb07b22dd933f8cfc91f8ff5895c818cad2d2be))
+* **review-feedback:** forward repo.bypassPermissions to the side session ([#333](https://github.com/NilsR0711/drydock/issues/333)) ([93d4d19](https://github.com/NilsR0711/drydock/commit/93d4d19c0cadb736e87e0aee00016f4ff5102e82)), closes [#328](https://github.com/NilsR0711/drydock/issues/328)
+* **review-feedback:** share the sweep chain across bundle layers ([#326](https://github.com/NilsR0711/drydock/issues/326)) ([#330](https://github.com/NilsR0711/drydock/issues/330)) ([827bf5e](https://github.com/NilsR0711/drydock/commit/827bf5eb194bc267914fad66734c13eaf0ab5def))
+
 ## [0.1.12](https://github.com/NilsR0711/drydock/compare/v0.1.11...v0.1.12) (2026-06-19)
 
 
