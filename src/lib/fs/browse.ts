@@ -80,9 +80,13 @@ export function browseDirectory(target?: string): BrowseResult {
     const full = join(path, name);
     try {
       // statSync/readdirSync follow symlinks, so confine by the entry's REAL
-      // path: a symlink pointing outside the browse root is not listed.
-      if (!isWithinRoot(realpathSync(full), root)) continue;
-      if (!statSync(full).isDirectory()) continue;
+      // path: a symlink pointing outside the browse root is not listed. Stat the
+      // already-resolved real path (not `full`) so the symlink is followed only
+      // once — closing the TOCTOU window where it could be swapped between the
+      // containment check and the stat.
+      const real = realpathSync(full);
+      if (!isWithinRoot(real, root)) continue;
+      if (!statSync(real).isDirectory()) continue;
     } catch {
       continue; // permission denied / vanished / broken symlink
     }
