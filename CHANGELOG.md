@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.11](https://github.com/NilsR0711/drydock/compare/v0.1.10...v0.1.11) (2026-06-19)
+
+
+### Bug Fixes
+
+* **issues:** X (remove from queue) aborts a not-yet-started job so the issue leaves the queue zone ([#312](https://github.com/NilsR0711/drydock/issues/312)) ([8f39750](https://github.com/NilsR0711/drydock/commit/8f39750d05da80dd5e827e02b50de344f6f8e8b4))
+* **review-feedback:** never post status replies into a bot's review thread ([#313](https://github.com/NilsR0711/drydock/issues/313)) ([5048b4e](https://github.com/NilsR0711/drydock/commit/5048b4e6bd5519187c8d9a9c9013d18983fc5b01))
+
 ## [0.1.10](https://github.com/NilsR0711/drydock/compare/v0.1.9...v0.1.10) (2026-06-19)
 
 
