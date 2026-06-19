@@ -270,6 +270,11 @@ export class WorktreeManager {
     return (await this.git(["-C", repoPath, "rev-parse", branch])).trim();
   }
 
+  /** The worktree's current HEAD commit SHA (issue #318). */
+  async headSha(wt: Worktree): Promise<string> {
+    return (await this.git(["rev-parse", "HEAD"], wt.path)).trim();
+  }
+
   /** Whether HEAD carries commits the agent made on top of the worktree base. */
   private async hasNewCommits(wt: Worktree): Promise<boolean> {
     if (!wt.base) return false;
