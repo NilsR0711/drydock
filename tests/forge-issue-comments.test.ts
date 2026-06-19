@@ -89,6 +89,55 @@ describe("GhClient.commentPr", () => {
   });
 });
 
+describe("GhClient.listPrComments", () => {
+  it("returns comment node ids and bodies from gh pr view", async () => {
+    const runner = fakeRunner({
+      stdout: JSON.stringify({
+        comments: [
+          { id: "IC_abc", body: "first" },
+          { id: "IC_def", body: "<!-- drydock:pr-audit:5 -->\naudit" },
+        ],
+      }),
+    });
+    const gh = new GhClient("/repo", runner);
+    const comments = await gh.listPrComments(7);
+    expect(comments).toEqual([
+      { id: "IC_abc", body: "first" },
+      { id: "IC_def", body: "<!-- drydock:pr-audit:5 -->\naudit" },
+    ]);
+    const [, args] = runner.mock.calls[0] as [string, string[]];
+    expect(args).toContain("pr");
+    expect(args).toContain("view");
+    expect(args).toContain("7");
+    expect(args).toContain("comments");
+  });
+
+  it("throws GhError on a failed gh call", async () => {
+    const runner = fakeRunner({ exitCode: 1, stderr: "boom" });
+    const gh = new GhClient("/repo", runner);
+    await expect(gh.listPrComments(7)).rejects.toThrow(GhError);
+  });
+});
+
+describe("GhClient.updatePrComment", () => {
+  it("edits the comment in place via the updateIssueComment mutation", async () => {
+    const runner = fakeRunner({ stdout: "{}" });
+    const gh = new GhClient("/repo", runner);
+    await gh.updatePrComment(7, "IC_abc", "new body");
+    const args = runner.mock.calls[0]?.[1] as string[];
+    expect(args).toContain("graphql");
+    expect(args.join(" ")).toContain("updateIssueComment");
+    expect(args).toContain("id=IC_abc");
+    expect(args).toContain("body=new body");
+  });
+
+  it("throws GhError on failure", async () => {
+    const runner = fakeRunner({ exitCode: 1, stderr: "denied" });
+    const gh = new GhClient("/repo", runner);
+    await expect(gh.updatePrComment(7, "IC_abc", "x")).rejects.toThrow(GhError);
+  });
+});
+
 // --- GitLab ----------------------------------------------------------------
 
 interface Route {
@@ -171,5 +220,40 @@ describe("GitlabForge.commentPr", () => {
     const call = calls.find((c) => c.method === "POST");
     expect(call?.url).toContain("/merge_requests/7/notes");
     expect(call?.init?.body).toContain("audit mirror");
+  });
+});
+
+describe("GitlabForge.listPrComments", () => {
+  it("lists MR notes as string ids with bodies", async () => {
+    const { forge, calls } = makeForge([
+      {
+        method: "GET",
+        match: "/merge_requests/7/notes",
+        response: {
+          body: JSON.stringify([
+            { id: 21, body: "first" },
+            { id: 22, body: "<!-- drydock:pr-audit:5 -->\naudit" },
+          ]),
+        },
+      },
+    ]);
+    const comments = await forge.listPrComments(7);
+    expect(comments).toEqual([
+      { id: "21", body: "first" },
+      { id: "22", body: "<!-- drydock:pr-audit:5 -->\naudit" },
+    ]);
+    expect(calls.some((c) => c.url.includes("/merge_requests/7/notes"))).toBe(true);
+  });
+});
+
+describe("GitlabForge.updatePrComment", () => {
+  it("PUTs the new body to the MR note endpoint", async () => {
+    const { forge, calls } = makeForge([
+      { method: "PUT", match: "/merge_requests/7/notes/21", response: { body: "{}" } },
+    ]);
+    await forge.updatePrComment(7, "21", "new body");
+    const call = calls.find((c) => c.method === "PUT");
+    expect(call?.url).toContain("/merge_requests/7/notes/21");
+    expect(call?.init?.body).toContain("new body");
   });
 });

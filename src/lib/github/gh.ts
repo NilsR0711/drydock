@@ -569,13 +569,14 @@ export class GhClient {
   }
 
   /**
-   * List an issue's comments with their GraphQL node ids (issue #168). The
-   * `viewIssue` comment shape drops ids, but the audit upsert needs a stable
-   * handle to edit a prior comment in place, so this is a dedicated call.
+   * List the comments of an issue or PR with their GraphQL node ids. The `view`
+   * subcommand is the only difference (`gh issue view` rejects a PR number and
+   * vice versa), so both the issue and PR upserts share this parser. The node
+   * ids are a stable handle to edit a prior comment in place.
    */
-  async listIssueComments(issueNumber: number): Promise<IssueCommentRef[]> {
-    const res = await this.exec(["issue", "view", String(issueNumber), "--json", "comments"]);
-    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh issue view failed");
+  private async listCommentRefs(kind: "issue" | "pr", number: number): Promise<IssueCommentRef[]> {
+    const res = await this.exec([kind, "view", String(number), "--json", "comments"]);
+    if (res.exitCode !== 0) throw new GhError(res.stderr || `gh ${kind} view failed`);
     let raw: unknown;
     try {
       raw = JSON.parse(res.stdout || "{}");
@@ -591,20 +592,48 @@ export class GhClient {
   }
 
   /**
-   * Edit one of our prior issue comments in place (GraphQL `updateIssueComment`,
-   * issue #168). The issue number is unused on GitHub — node ids are global —
-   * but kept in the signature so the forge contract works for GitLab too.
+   * List an issue's comments with their GraphQL node ids (issue #168). The
+   * `viewIssue` comment shape drops ids, but the audit upsert needs a stable
+   * handle to edit a prior comment in place, so this is a dedicated call.
    */
-  async updateIssueComment(_issueNumber: number, commentId: string, body: string): Promise<void> {
+  listIssueComments(issueNumber: number): Promise<IssueCommentRef[]> {
+    return this.listCommentRefs("issue", issueNumber);
+  }
+
+  /**
+   * List a PR's conversation comments with their GraphQL node ids (issue #317),
+   * so the canonical audit comment can be upserted on the PR itself.
+   */
+  listPrComments(prNumber: number): Promise<IssueCommentRef[]> {
+    return this.listCommentRefs("pr", prNumber);
+  }
+
+  /**
+   * Edit one of our prior comments in place (GraphQL `updateIssueComment`,
+   * issue #168). On GitHub a PR's conversation comments are `IssueComment`
+   * nodes too, so the same mutation edits both; the number is unused — node ids
+   * are global — but kept in the signature so the forge contract works for
+   * GitLab too.
+   */
+  async updateIssueComment(_number: number, commentId: string, body: string): Promise<void> {
     const query = `mutation($id:ID!,$body:String!){updateIssueComment(input:{id:$id,body:$body}){issueComment{id}}}`;
     const res = await this.exec(
       ["api", "graphql", "-F", `id=${commentId}`, "-f", `body=${body}`, "-f", `query=${query}`],
       "graphql",
     );
-    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh update issue comment failed");
+    if (res.exitCode !== 0) throw new GhError(res.stderr || "gh update comment failed");
   }
 
-  /** Post a comment on the PR itself (the optional audit mirror, issue #168). */
+  /**
+   * Edit one of our prior PR comments in place (issue #317). PR conversation
+   * comments are `IssueComment` nodes on GitHub, so this is the same mutation as
+   * {@link updateIssueComment}.
+   */
+  updatePrComment(prNumber: number, commentId: string, body: string): Promise<void> {
+    return this.updateIssueComment(prNumber, commentId, body);
+  }
+
+  /** Post a comment on the PR itself (the canonical audit thread, issue #317). */
   async commentPr(prNumber: number, body: string): Promise<void> {
     const res = await this.exec(["pr", "comment", String(prNumber), flagEq("--body", body)]);
     if (res.exitCode !== 0) throw new GhError(res.stderr || "gh pr comment failed");

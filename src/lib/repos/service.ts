@@ -120,7 +120,7 @@ export const repoInputSchema = z.object({
       message: "prAuditLanguage must be a simple or BCP 47 language code",
     })
     .default("en"),
-  prAuditPostOnPr: z.boolean().default(false),
+  prAuditPostOnIssue: z.boolean().default(false),
   // Opt-in model escalation ladder on requeue (issue #179).
   escalateModelOnRetry: z.boolean().default(false),
   // Opt-in sandboxed agent execution (issue #182, ADR 033). "docker" runs the

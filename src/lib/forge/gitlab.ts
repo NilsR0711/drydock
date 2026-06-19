@@ -353,9 +353,22 @@ export class GitlabForge implements ForgeClient {
     });
   }
 
-  /** Post a note on the MR itself (the optional audit mirror, issue #168). */
+  /** Post a note on the MR itself (the canonical audit thread, issue #317). */
   async commentPr(prNumber: number, body: string): Promise<void> {
     await this.mutate("POST", `/merge_requests/${prNumber}/notes`, { body: { body } });
+  }
+
+  /** List an MR's notes with stable ids (the canonical audit upsert, #317). */
+  async listPrComments(prNumber: number): Promise<IssueCommentRef[]> {
+    const notes = await this.listPaginated(`/merge_requests/${prNumber}/notes`, {}, parseNoteRefs);
+    return notes.map((n) => ({ id: String(n.id), body: n.body }));
+  }
+
+  /** Edit one of our prior MR notes in place (issue #317). */
+  async updatePrComment(prNumber: number, commentId: string, body: string): Promise<void> {
+    await this.mutate("PUT", `/merge_requests/${prNumber}/notes/${encodeURIComponent(commentId)}`, {
+      body: { body },
+    });
   }
 
   async createIssue(title: string, body: string): Promise<number> {
