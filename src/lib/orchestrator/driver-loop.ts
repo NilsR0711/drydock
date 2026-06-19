@@ -45,7 +45,7 @@ import { runReviewFeedbackSweep } from "./review-feedback-driver";
 import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
 import { reconcileExternalAborts } from "./singleton";
-import { JOB_STATES, TERMINAL_STATES } from "./state-machine";
+import { JOB_STATES, TERMINAL_STATES, TERMINAL_SUCCESS_STATES } from "./state-machine";
 
 /** Latch so the daily cost-limit notification fires once per breach, not per tick. */
 const costLimitState: EdgeState = { active: false };
@@ -196,6 +196,23 @@ function hasOpenJob(db: DB, repoId: number, issueNumber: number): boolean {
   );
 }
 
+/**
+ * Whether automation already completed this issue: a prior job reached terminal
+ * success (`merged`/`released`). The non-terminal dedupe — {@link hasOpenJob}
+ * and enqueueJob's partial unique index — deliberately frees the dedupe key
+ * once a job settles, so a just-merged issue resurfacing in a stale `fetched`
+ * snapshot (issue #288) would otherwise be re-enqueued and redo landed work,
+ * producing a guaranteed-conflicting second PR. This guard is the deterministic
+ * backstop that holds even when a long tick (issue #284) enqueues from a list
+ * captured minutes before the merge. `aborted` (terminal *failure*) is excluded
+ * so the retry path stays open.
+ */
+function hasSuccessfulJob(db: DB, repoId: number, issueNumber: number): boolean {
+  return listJobsByStatus([...TERMINAL_SUCCESS_STATES], db).some(
+    (j) => j.repoId === repoId && j.issueNumber === issueNumber,
+  );
+}
+
 function repoHasInFlightJob(db: DB, repoId: number): boolean {
   return listJobsByStatus([...IN_FLIGHT_STATES], db).some((j) => j.repoId === repoId);
 }
@@ -313,6 +330,11 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
             continue;
           }
           if (hasOpenJob(db, repo.id, gh.number)) continue;
+          // Issue-level success dedupe (issue #288): a prior job already
+          // merged/released this issue. enqueueJob dedupes only non-terminal
+          // jobs, so a stale `fetched` snapshot from a long tick (issue #284)
+          // could otherwise re-enqueue a now-closed, already-merged issue.
+          if (hasSuccessfulJob(db, repo.id, gh.number)) continue;
           if (auto && gh.author && cfg.priorityAuthors.includes(gh.author)) {
             boostPriority(db, repo.id, gh.number);
           }
