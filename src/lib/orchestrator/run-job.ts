@@ -77,7 +77,12 @@ interface WorktreeApi {
 export interface RunJobDeps {
   db?: DB;
   worktrees?: WorktreeApi;
-  runSession?: (job: Job, prompt: string, cwd: string) => Promise<AgentSessionResult>;
+  runSession?: (
+    job: Job,
+    prompt: string,
+    cwd: string,
+    bypassPermissions?: boolean,
+  ) => Promise<AgentSessionResult>;
   createPr?: (input: {
     head: string;
     base: string;
@@ -438,7 +443,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   const sessionEnv: { command: string; runner?: StreamRunner } = { command };
   const runSession =
     deps.runSession ??
-    ((j, prompt, cwd) =>
+    ((j, prompt, cwd, bypassPermissions) =>
       spawnAgentSession(j, prompt, cwd, {
         db,
         provider,
@@ -446,6 +451,7 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         runner: sessionEnv.runner,
         timeoutMs,
         costCapUsd: maxJobCostUsd,
+        bypassPermissions,
       }));
   const createPr = deps.createPr ?? ((input) => forge.createPr(input));
   // Plan stage runner (issue #160): a read-only, cost-tracked one-shot in the
@@ -507,6 +513,10 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       resumePrompt: prompt,
       resumeModel: j.model ?? repo.defaultModel,
       resumeMaxTurns: j.maxTurns,
+      // Keep the repo's opt-in shell access on resume (issue #283): a job that
+      // needs `xcodebuild`/etc. to make progress needs it when resuming its main
+      // work too, not just on the first run. Off by default — see the repo column.
+      bypassPermissions: repo.bypassPermissions,
     });
   };
   const resumeLimitSession = deps.resumeLimitSession ?? resumeStoredSession;
@@ -640,6 +650,10 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
               runner: sessionEnv.runner,
               timeoutMs,
               costCapUsd: maxJobCostUsd,
+              // CI-fix resumes run in the worktree and may need the same shell
+              // access as the implement run (issue #283) — e.g. re-running the
+              // native build to verify the fix. Off by default; see the repo column.
+              bypassPermissions: repo.bypassPermissions,
             }),
         }),
         // Opt-in structured CI auto-healing (issue #16, ADR 017).
@@ -849,7 +863,11 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
         }
       }
 
-      return runSession(getJob(job.id, db) as Job, prompt, worktree.path);
+      // Pass the repo's opt-in unrestricted-shell flag (issue #283): when set,
+      // the implement session runs with --dangerously-skip-permissions so the
+      // headless agent can execute Bash (e.g. xcodebuild/simctl) that the
+      // default edits-only mode blocks. Off by default — see the repo column.
+      return runSession(getJob(job.id, db) as Job, prompt, worktree.path, repo.bypassPermissions);
     };
 
     let session: AgentSessionResult;

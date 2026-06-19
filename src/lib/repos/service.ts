@@ -128,6 +128,10 @@ export const repoInputSchema = z.object({
   // Opt-in claude-mem worktree adoption (issue #274). Off by default: it depends
   // on the external claude-mem plugin being installed. See the schema column.
   adoptClaudeMem: z.boolean().default(false),
+  // Opt-in unrestricted shell access (issue #283). Off by default — it runs the
+  // agent with `--dangerously-skip-permissions`, granting full shell access. See
+  // the schema column for the full rationale and security trade-off.
+  bypassPermissions: z.boolean().default(false),
 });
 export type RepoInput = z.input<typeof repoInputSchema>;
 
