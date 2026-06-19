@@ -271,6 +271,28 @@ describe("repos service", () => {
     expect(back.bypassPermissions).toBe(false);
   });
 
+  it("defaults the command allowlist to empty and round-trips it (issue #329)", () => {
+    const repo = addRepo({ path: "/allow", name: "allow" }, db);
+    // No commands pre-approved by default: an empty allowlist leaves the agent
+    // in the default edits-only mode (no headless Bash) until a repo opts in.
+    expect(repoAutomation(repo).allowedCommands).toEqual([]);
+    const updated = updateRepo(
+      repo.id,
+      { allowedCommands: ["git", "xcodebuild", "xcrun", "swift"] },
+      db,
+    );
+    expect(repoAutomation(updated).allowedCommands).toEqual([
+      "git",
+      "xcodebuild",
+      "xcrun",
+      "swift",
+    ]);
+    // Independent of bypassPermissions — they are orthogonal opt-ins.
+    expect(updated.bypassPermissions).toBe(false);
+    const cleared = updateRepo(updated.id, { allowedCommands: [] }, db);
+    expect(repoAutomation(cleared).allowedCommands).toEqual([]);
+  });
+
   it("defaults release management to off and parses it (issue #59)", () => {
     const repo = addRepo({ path: "/rel", name: "rel" }, db);
     expect(repo.releaseEnabled).toBe(false);

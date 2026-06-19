@@ -43,6 +43,90 @@ describe("claudeProvider", () => {
     expect(args).not.toContain("acceptEdits");
   });
 
+  it("pre-approves the configured commands via --allowedTools, keeping acceptEdits (issue #329)", () => {
+    // A native repo that needs to run git/xcodebuild/simctl headlessly without
+    // the all-or-nothing bypass: each command becomes a Bash(<cmd>:*) allow rule
+    // layered on top of the default edits-only mode.
+    const args = claudeProvider.buildStartArgs({
+      prompt: "build it",
+      model: "claude-opus-4-8",
+      maxTurns: 40,
+      allowedCommands: ["git", "xcodebuild", "xcrun", "swift"],
+    });
+    expect(args).toContain("--permission-mode");
+    expect(args).toContain("acceptEdits");
+    const idx = args.indexOf("--allowedTools");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args.slice(idx + 1, idx + 5)).toEqual([
+      "Bash(git:*)",
+      "Bash(xcodebuild:*)",
+      "Bash(xcrun:*)",
+      "Bash(swift:*)",
+    ]);
+  });
+
+  it("omits --allowedTools entirely when no commands are configured (issue #329)", () => {
+    const empty = claudeProvider.buildStartArgs({
+      prompt: "do it",
+      model: "claude-opus-4-8",
+      maxTurns: 40,
+      allowedCommands: [],
+    });
+    expect(empty).not.toContain("--allowedTools");
+    // Unset behaves identically to an empty list.
+    const unset = claudeProvider.buildStartArgs({
+      prompt: "do it",
+      model: "claude-opus-4-8",
+      maxTurns: 40,
+    });
+    expect(unset).not.toContain("--allowedTools");
+  });
+
+  it("drops --allowedTools under bypass, which already grants all commands (issue #329)", () => {
+    // --dangerously-skip-permissions is a superset of any allowlist, so emitting
+    // both would be redundant (and acceptEdits is gone). Bypass wins.
+    const args = claudeProvider.buildStartArgs({
+      prompt: "release it",
+      model: "claude-opus-4-8",
+      maxTurns: 40,
+      bypassPermissions: true,
+      allowedCommands: ["git", "xcodebuild"],
+    });
+    expect(args).toContain("--dangerously-skip-permissions");
+    expect(args).not.toContain("--allowedTools");
+    expect(args).not.toContain("acceptEdits");
+  });
+
+  it("pre-approves the configured commands on resume too (issue #329)", () => {
+    // CI-fix / limit / instruction resumes re-run in the worktree and may need
+    // the same build commands, so the allowlist applies symmetrically.
+    const args = claudeProvider.buildResumeArgs({
+      prompt: "fix ci",
+      sessionId: "sess-abc",
+      model: claudeProvider.resumeModel,
+      maxTurns: 15,
+      allowedCommands: ["git", "xcodebuild"],
+    });
+    expect(args).not.toBeNull();
+    const idx = (args as string[]).indexOf("--allowedTools");
+    expect(idx).toBeGreaterThan(-1);
+    expect((args as string[]).slice(idx + 1, idx + 3)).toEqual([
+      "Bash(git:*)",
+      "Bash(xcodebuild:*)",
+    ]);
+    // Bypass on resume still suppresses the allowlist.
+    const bypassed = claudeProvider.buildResumeArgs({
+      prompt: "continue",
+      sessionId: "sess-abc",
+      model: claudeProvider.resumeModel,
+      maxTurns: 15,
+      bypassPermissions: true,
+      allowedCommands: ["git"],
+    });
+    expect(bypassed).toContain("--dangerously-skip-permissions");
+    expect(bypassed).not.toContain("--allowedTools");
+  });
+
   it("builds the SPEC §6.3 resume invocation with the recorded session id", () => {
     const args = claudeProvider.buildResumeArgs({
       prompt: "fix ci",

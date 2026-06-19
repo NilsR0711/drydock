@@ -253,6 +253,11 @@ async function defaultProcessJob(repo: Repo, job: Job, forge: ForgeClient): Prom
         // and burns its retry budget (#328). The normal and release job paths
         // already forward it — this side-session path must too.
         bypassPermissions: repo.bypassPermissions,
+        // Likewise carry the per-repo command allowlist (issue #329): a native-build
+        // repo whose feedback fix re-runs xcodebuild/git needs those commands
+        // pre-approved here too, not just on the main implement path. Inert when
+        // bypassPermissions is on (full access already covers them). Empty by default.
+        allowedCommands: cfg.allowedCommands,
       }).then((r) => ({
         exitCode: r.exitCode,
       })),

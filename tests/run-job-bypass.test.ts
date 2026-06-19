@@ -43,15 +43,27 @@ function fakeWorktrees() {
  * implement session (issue #283). It is dependency-injected as the 4th
  * positional `runSession` arg, mirroring how `runReleaseJob` threads it.
  */
-function deps(seen: { bypass?: boolean }, over: Record<string, unknown> = {}) {
+function deps(seen: { bypass?: boolean; allowed?: string[] }, over: Record<string, unknown> = {}) {
   return {
     db,
     worktrees: fakeWorktrees(),
-    runSession: vi.fn(async (job: Job, _p: string, _c: string, bypassPermissions?: boolean) => {
-      seen.bypass = bypassPermissions;
-      db.update(jobs).set({ status: "working", sessionId: "s1" }).where(eq(jobs.id, job.id)).run();
-      return { exitCode: 0, sessionId: "s1", costUsd: 0.1, inputTokens: 1, outputTokens: 1 };
-    }),
+    runSession: vi.fn(
+      async (
+        job: Job,
+        _p: string,
+        _c: string,
+        bypassPermissions?: boolean,
+        allowedCommands?: string[],
+      ) => {
+        seen.bypass = bypassPermissions;
+        seen.allowed = allowedCommands;
+        db.update(jobs)
+          .set({ status: "working", sessionId: "s1" })
+          .where(eq(jobs.id, job.id))
+          .run();
+        return { exitCode: 0, sessionId: "s1", costUsd: 0.1, inputTokens: 1, outputTokens: 1 };
+      },
+    ),
     createPr: vi.fn(async () => 55),
     viewIssue: vi.fn(async () => ({ title: "", body: "" })),
     verify: vi.fn(async () => {}),
@@ -100,6 +112,20 @@ describe("runJob --dangerously-skip-permissions wiring (issue #283)", () => {
     expect(seen.bypass).toBe(true);
   });
 
+  it("threads the repo's command allowlist into the implement session (issue #329)", async () => {
+    const repo = addRepo({ path: "/r", name: "r", allowedCommands: ["git", "xcodebuild"] }, db);
+    syncIssuesFromGh(repo.id, [{ number: 1, title: "T", labels: [] }], db);
+    const seen: { bypass?: boolean; allowed?: string[] } = {};
+    const job = createJob({ repoId: repo.id, issueNumber: 1 }, db);
+
+    const result = await runJob(job.id, deps(seen) as never);
+
+    expect(result.status).toBe("merged");
+    // Allowlist is independent of the bypass flag.
+    expect(seen.bypass).toBe(false);
+    expect(seen.allowed).toEqual(["git", "xcodebuild"]);
+  });
+
   it("carries the opt-in flag into the stored-session resume (limit/instruction resume)", async () => {
     // The limit and human-instruction resume paths share one closure
     // (resumeStoredSession), so exercising the limit-resume path covers both.
@@ -116,7 +142,10 @@ describe("runJob --dangerously-skip-permissions wiring (issue #283)", () => {
         maxTurnsReached: false,
       };
     });
-    const repo = addRepo({ path: "/r", name: "r", bypassPermissions: true }, db);
+    const repo = addRepo(
+      { path: "/r", name: "r", bypassPermissions: true, allowedCommands: ["git", "xcodebuild"] },
+      db,
+    );
     syncIssuesFromGh(repo.id, [{ number: 7, title: "T", labels: [] }], db);
     const job = limitParkedJob(repo.id, 7);
 
@@ -127,6 +156,8 @@ describe("runJob --dangerously-skip-permissions wiring (issue #283)", () => {
     expect(calls).toHaveLength(1);
     // resumeAgentSession(job, sessionId, failedLog, cwd, options)
     expect(calls[0]?.[4]?.bypassPermissions).toBe(true);
+    // The allowlist rides the same resume closure (issue #329).
+    expect(calls[0]?.[4]?.allowedCommands).toEqual(["git", "xcodebuild"]);
   });
 
   it("keeps the stored-session resume edits-only when the repo has not opted in", async () => {

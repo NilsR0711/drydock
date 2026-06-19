@@ -18,6 +18,18 @@ function turnBudgetArgs(maxTurns: number): string[] {
 }
 
 /**
+ * The `--allowedTools` flag with one `Bash(<cmd>:*)` rule per configured command
+ * (issue #329), or nothing when the list is empty/unset. Pre-approves those
+ * commands headlessly while everything else stays in the edits-only mode. Caller
+ * only emits this when NOT bypassing permissions — `--dangerously-skip-permissions`
+ * already grants every command, so an allowlist alongside it would be redundant.
+ */
+function allowedToolsArgs(allowedCommands: string[] | undefined): string[] {
+  if (!allowedCommands || allowedCommands.length === 0) return [];
+  return ["--allowedTools", ...allowedCommands.map((cmd) => `Bash(${cmd}:*)`)];
+}
+
+/**
  * The Claude Code CLI as an AgentProvider. This is the behavior-preserving move
  * of the original hardcoded claude logic behind the abstraction: the args here
  * match the SPEC §6.2 / §6.3 invocations exactly.
@@ -31,7 +43,7 @@ export const claudeProvider: AgentProvider = {
   resumeMaxTurns: 15,
   defaultModel: CLAUDE_DEFAULT_MODEL,
 
-  buildStartArgs: ({ prompt, model, maxTurns, bypassPermissions }) => [
+  buildStartArgs: ({ prompt, model, maxTurns, bypassPermissions, allowedCommands }) => [
     "-p",
     prompt,
     // 0 = unlimited (issue #254): drop the flag entirely so the CLI applies no
@@ -39,10 +51,12 @@ export const claudeProvider: AgentProvider = {
     ...turnBudgetArgs(maxTurns),
     // An agent-driven release (issue #256) must run the repo's release commands
     // itself, so it bypasses permissions entirely; every other run stays
-    // edits-only (acceptEdits), where bash/gh/git would block headlessly.
+    // edits-only (acceptEdits), where bash/gh/git would block headlessly — but a
+    // per-repo allowlist (issue #329) can pre-approve specific commands on top of
+    // acceptEdits without granting the full bypass.
     ...(bypassPermissions
       ? ["--dangerously-skip-permissions"]
-      : ["--permission-mode", "acceptEdits"]),
+      : ["--permission-mode", "acceptEdits", ...allowedToolsArgs(allowedCommands)]),
     "--model",
     model,
     "--output-format",
@@ -50,7 +64,7 @@ export const claudeProvider: AgentProvider = {
     "--verbose",
   ],
 
-  buildResumeArgs: ({ prompt, sessionId, model, maxTurns, bypassPermissions }) => [
+  buildResumeArgs: ({ prompt, sessionId, model, maxTurns, bypassPermissions, allowedCommands }) => [
     "-p",
     prompt,
     "--resume",
@@ -58,7 +72,9 @@ export const claudeProvider: AgentProvider = {
     ...turnBudgetArgs(maxTurns),
     // Symmetric with buildStartArgs (issue #256): a resumed release session keeps
     // its full shell access. Off for the CI-fix/limit resumes that never set it.
-    ...(bypassPermissions ? ["--dangerously-skip-permissions"] : []),
+    // The per-repo allowlist (issue #329) applies symmetrically too — a CI-fix
+    // resume that re-runs the native build needs the same pre-approved commands.
+    ...(bypassPermissions ? ["--dangerously-skip-permissions"] : allowedToolsArgs(allowedCommands)),
     "--model",
     model,
     "--output-format",

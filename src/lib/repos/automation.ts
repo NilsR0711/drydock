@@ -31,6 +31,9 @@ export interface RepoAutomation {
   sandboxAllowNetwork: boolean;
   sandboxCpus: string | null;
   sandboxMemory: string | null;
+  // Per-repo command allowlist (issue #329): commands pre-approved for headless
+  // Bash via Claude Code's --allowedTools, independent of bypassPermissions.
+  allowedCommands: string[];
 }
 
 /** GitHub author associations that count as "approved" (owner/member/collaborator). */
@@ -76,6 +79,7 @@ export function repoAutomation(repo: Repo): RepoAutomation {
     sandboxAllowNetwork: repo.sandboxAllowNetwork,
     sandboxCpus: repo.sandboxCpus,
     sandboxMemory: repo.sandboxMemory,
+    allowedCommands: parseStringArray(repo.allowedCommands),
   };
 }
 

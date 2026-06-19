@@ -99,6 +99,9 @@ export async function runReleaseJob(
   const timeoutMs = maxJobMinutes * 60_000;
   const maxJobCostUsd = repo.maxJobCostUsd ?? settings.maxJobCostUsd;
 
+  // No per-repo command allowlist (issue #329) is threaded here: a release
+  // session always runs with bypassPermissions=true (full shell access), which is
+  // a strict superset of any allowlist — so `--allowedTools` would be inert.
   const runSession =
     deps.runSession ??
     ((j, prompt, cwd, bypassPermissions) =>

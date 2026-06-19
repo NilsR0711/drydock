@@ -1,0 +1,1 @@
+ALTER TABLE `repos` ADD COLUMN `allowed_commands` text DEFAULT '[]' NOT NULL;

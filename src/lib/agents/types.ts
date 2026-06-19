@@ -61,6 +61,15 @@ export interface BuildArgsOptions {
    * default mode blocks headlessly. Off everywhere else, so no behaviour change.
    */
   bypassPermissions?: boolean;
+  /**
+   * Per-repo command allowlist (issue #329): each entry `cmd` is pre-approved
+   * for headless execution as a `Bash(cmd:*)` allow rule, layered on top of the
+   * default edits-only mode. A safer middle ground than `bypassPermissions` for
+   * repos that only need a real build/test step. Ignored when `bypassPermissions`
+   * is set (full shell access already covers every command) and by the http
+   * tool-loop path. Empty/unset everywhere else, so no behaviour change.
+   */
+  allowedCommands?: string[];
 }
 
 export interface ResumeArgsOptions extends BuildArgsOptions {
