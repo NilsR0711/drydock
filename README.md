@@ -475,12 +475,20 @@ Without a global install, use `"command": "npx"` with `"args": ["-y", "@nilsr071
 | Repos  | `list_repos`, `add_repo`, `sync_repo_issues`                          |
 | Issues | `list_issues`, `add_to_queue`, `remove_from_queue`, `set_issue_labels`|
 | Jobs   | `list_jobs`, `get_job`, `requeue_job`, `resume_job_with_instruction`, `abort_job` |
+| PR     | `run_pr_audit`, `ask_pr_question`                                     |
 | System | `get_settings`, `update_settings`, `set_drain_mode`, `get_logs`       |
 
 **Safety** — work-initiating tools (`add_to_queue`, `requeue_job`, `resume_job_with_instruction`) honor the same gates as the
 UI: they refuse while draining, globally paused, or over the daily/per-repo cost limit.
-`get_settings` redacts credential fields and `update_settings` cannot set them. See
-[ADR 025](docs/adr/025-mcp-server.md).
+`get_settings` redacts credential fields and `update_settings` cannot set them. `ask_pr_question`
+runs the same read-only "Ask about this PR" assistant as the job page (issue #296), blocking until
+the answer is ready; like the dashboard's ask path it is an on-demand read-only query, never edits
+files, and never touches job state. See [ADR 025](docs/adr/025-mcp-server.md).
+
+The same PR Q&A is also reachable over REST for non-MCP HTTP clients: `POST
+/api/jobs/<id>/questions` with `{"question": "…"}` creates a question (returns it in the
+`answering` state) and `GET /api/jobs/<id>/questions` lists a job's questions newest-first — poll
+it for the terminal `answered`/`error` state, mirroring how the dashboard polls.
 
 ## Roadmap
 
