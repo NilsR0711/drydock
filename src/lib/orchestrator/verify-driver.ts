@@ -5,6 +5,8 @@ import type { AgentProvider } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import type { IssueSubtask, Job, Repo } from "@/lib/db/schema";
 import type { CommandRunner } from "@/lib/exec/runner";
+import { upsertMarkerComment } from "@/lib/forge/comment-upsert";
+import type { IssueCommentRef } from "@/lib/forge/types";
 import type { IssueDetail } from "@/lib/github/gh";
 import { listSubtasks, transitionSubtask } from "@/lib/issues/subtasks";
 import {
@@ -37,6 +39,15 @@ import type { SubtaskStatus } from "./subtask-state";
 export const VERIFY_TIMEOUT_MS = 3 * 60 * 1000;
 
 const COMMENT_HEADER = "🔎 Drydock post-PR verification";
+
+/**
+ * Hidden marker keyed by job id so a re-run (a second verification pass for the
+ * same job, e.g. after CI healing pushes a new commit) edits the same comment
+ * in place instead of stacking a fresh one (idempotency, ADR 019; issue #289).
+ */
+export function verifyCommentMarker(jobId: number): string {
+  return `<!-- drydock:verify:${jobId} -->`;
+}
 
 /**
  * A {@link VerificationGenerator} backed by a one-shot agent run. The CLI shape
@@ -142,10 +153,29 @@ export function applyVerification(
   return { done, deferred, pendingTitles };
 }
 
-/** Render the issue comment summarising a verification pass. */
-function renderComment(result: VerificationResult, applied: ApplyVerificationResult): string {
-  const lines = [`${COMMENT_HEADER}`, ""];
-  if (result.summary.trim()) lines.push(result.summary.trim(), "");
+/**
+ * Render the issue comment summarising a verification pass. Carries the
+ * job-scoped idempotency marker and keeps the thread scannable: the verbose
+ * model summary is collapsed behind a `<details>` block, while the actionable
+ * pending-subtask list stays inline (issue #289).
+ */
+function renderComment(
+  jobId: number,
+  result: VerificationResult,
+  applied: ApplyVerificationResult,
+): string {
+  const lines = [verifyCommentMarker(jobId), "", `${COMMENT_HEADER}`, ""];
+  const summary = result.summary.trim();
+  if (summary) {
+    lines.push(
+      "<details><summary>Verification summary</summary>",
+      "",
+      summary,
+      "",
+      "</details>",
+      "",
+    );
+  }
   if (applied.pendingTitles.length > 0) {
     lines.push("Subtasks still pending:");
     for (const title of applied.pendingTitles) lines.push(`- ${title}`);
@@ -160,6 +190,10 @@ export interface VerifyForge {
   prDiff(prNumber: number): Promise<string>;
   viewIssue(issueNumber: number): Promise<IssueDetail>;
   commentIssue(issueNumber: number, body: string): Promise<void>;
+  /** Optional idempotency seam: list comments to find a prior marker. */
+  listIssueComments?(issueNumber: number): Promise<IssueCommentRef[]>;
+  /** Optional idempotency seam: edit the prior marker comment in place. */
+  updateIssueComment?(issueNumber: number, commentId: string, body: string): Promise<void>;
 }
 
 export interface VerificationPassDeps {
@@ -225,7 +259,18 @@ export async function runVerificationPass(
     }
 
     const applied = applyVerification(repo.id, job.issueNumber, result, db);
-    await forge.commentIssue(job.issueNumber, redactSecrets(renderComment(result, applied)));
+    // The summary mirrors subtask status already updated on the issue, so quiet
+    // repos suppress it; the verdicts are still merged above (issue #289).
+    if (!repo.quietComments) {
+      const body = redactSecrets(renderComment(job.id, result, applied));
+      await upsertMarkerComment(
+        forge,
+        job.issueNumber,
+        verifyCommentMarker(job.id),
+        body,
+        "verify",
+      );
+    }
     recordEvent(
       job.id,
       "verification",

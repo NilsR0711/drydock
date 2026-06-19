@@ -166,6 +166,13 @@ export const repos = sqliteTable("repos", {
   // project while the worktree still exists. Best-effort and depends on the
   // external claude-mem plugin being installed, so it is off by default.
   adoptClaudeMem: integer("adopt_claude_mem", { mode: "boolean" }).notNull().default(false),
+  // Quiet mode for the issue thread (issue #289, default off). When on, the
+  // purely-informational lifecycle comments — the auto-triage "applied labels"
+  // note and the post-PR verification summary — are suppressed (the labels and
+  // subtask status they mirror are visible on the issue anyway). High-signal,
+  // human-actionable comments (PR audit, needs-human, merge-conflict park) are
+  // never silenced. Off by default, so existing repos keep the full audit trail.
+  quietComments: integer("quiet_comments", { mode: "boolean" }).notNull().default(false),
   // Opt-in unrestricted shell access (issue #283, default off). When on, this
   // repo's agent jobs run with `--dangerously-skip-permissions` instead of the
   // default edits-only `acceptEdits` mode, so the headless agent can execute any
