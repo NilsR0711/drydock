@@ -334,7 +334,7 @@ project; the `drydock` launcher defaults it to `~/.drydock/drydock.db`.
 | --- | --- |
 | `/` | Dashboard — repos, status counts, recent activity |
 | `/repos/[id]` | Repo workspace — backlog/queue board with multi-select bulk actions, settings, activity, cost |
-| `/jobs` | Job history — paginated, filterable, searchable |
+| `/jobs` | Job history — paginated, filterable, searchable, live-updating |
 | `/jobs/[id]` | Job detail — live streaming log, cost & tokens |
 | `/analytics` | Analytics — merge rate, time-to-merge p50/p90, CI retries, throughput, cost-per-merge, sliceable by repo/date and groupable by model, agent, or prompt version |
 | `/prompts` | Versioned prompt editor |
