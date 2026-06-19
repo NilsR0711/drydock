@@ -4,6 +4,9 @@ import {
   canTransition,
   InvalidTransitionError,
   isJobStatus,
+  isOpenStatus,
+  JOB_STATES,
+  OPEN_STATES,
   TERMINAL_STATES,
   TERMINAL_SUCCESS_STATES,
 } from "@/lib/orchestrator/state-machine";
@@ -81,5 +84,34 @@ describe("state machine", () => {
   it("validates status strings", () => {
     expect(isJobStatus("working")).toBe(true);
     expect(isJobStatus("nonsense")).toBe(false);
+  });
+
+  describe("open (non-terminal) states (issue #286)", () => {
+    it("is exactly the non-terminal states, in lockstep with JOB_STATES", () => {
+      const expected = JOB_STATES.filter((s) => !TERMINAL_STATES.includes(s));
+      expect([...OPEN_STATES].sort()).toEqual([...expected].sort());
+    });
+
+    it("excludes every terminal state", () => {
+      for (const t of TERMINAL_STATES) {
+        expect(OPEN_STATES).not.toContain(t);
+      }
+    });
+
+    it("includes the parked states so they still count as in-flight for dedupe", () => {
+      expect(OPEN_STATES).toContain("queued");
+      expect(OPEN_STATES).toContain("working");
+      expect(OPEN_STATES).toContain("waiting_limit");
+      expect(OPEN_STATES).toContain("needs_human");
+      expect(OPEN_STATES).toContain("interrupted");
+    });
+
+    it("isOpenStatus mirrors membership of OPEN_STATES", () => {
+      expect(isOpenStatus("working")).toBe(true);
+      expect(isOpenStatus("needs_human")).toBe(true);
+      expect(isOpenStatus("merged")).toBe(false);
+      expect(isOpenStatus("released")).toBe(false);
+      expect(isOpenStatus("aborted")).toBe(false);
+    });
   });
 });

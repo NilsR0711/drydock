@@ -45,7 +45,7 @@ import { runReviewFeedbackSweep } from "./review-feedback-driver";
 import { runJob as defaultRunJob } from "./run-job";
 import { activeJobCount, isDraining, registerActiveJob, unregisterActiveJob } from "./runtime";
 import { reconcileExternalAborts } from "./singleton";
-import { JOB_STATES, TERMINAL_STATES, TERMINAL_SUCCESS_STATES } from "./state-machine";
+import { OPEN_STATES, TERMINAL_SUCCESS_STATES } from "./state-machine";
 
 /** Latch so the daily cost-limit notification fires once per breach, not per tick. */
 const costLimitState: EdgeState = { active: false };
@@ -169,12 +169,12 @@ async function routeNeedsReview(
   );
 }
 
-// Every non-terminal state counts as "open" for issue-level dedupe, including
-// the operator-gated parking states (needs_human/interrupted, ADR 005): a
-// parked issue is skipped by the tick instead of churning a no-op enqueue (or,
-// worse, auto-requeueing past the operator gate) every poll. Derived from the
-// state machine so it stays in lockstep with enqueueJob's non-terminal dedupe.
-const OPEN_STATES = JOB_STATES.filter((s) => !TERMINAL_STATES.includes(s));
+// OPEN_STATES (every non-terminal state) is the issue-level dedupe set, shared
+// with the state machine and the Issues board (issue #286). It includes the
+// operator-gated parking states (needs_human/interrupted, ADR 005): a parked
+// issue is skipped by the tick instead of churning a no-op enqueue (or, worse,
+// auto-requeueing past the operator gate) every poll.
+//
 // Non-terminal, already-started states. A repo with any such job is "in flight":
 // for sequential repos the next issue waits until this clears. Parked jobs
 // (needs_human/interrupted) are deliberately NOT in flight — they must not
