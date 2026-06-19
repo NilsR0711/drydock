@@ -242,7 +242,18 @@ async function defaultProcessJob(repo: Repo, job: Job, forge: ForgeClient): Prom
     // a normal spawn would force an invalid `working` transition and throw
     // before the agent ever starts.
     runSession: (j, prompt, cwd) =>
-      spawnAgentSession(j, prompt, cwd, { db, provider, command, sideSession: true }).then((r) => ({
+      spawnAgentSession(j, prompt, cwd, {
+        db,
+        provider,
+        command,
+        sideSession: true,
+        // Native-build repos (#283) opt out of the sandbox via this flag; without
+        // it the side session falls back to acceptEdits and bash/xcodebuild/simctl
+        // are blocked, so review feedback that needs a real build silently fails
+        // and burns its retry budget (#328). The normal and release job paths
+        // already forward it — this side-session path must too.
+        bypassPermissions: repo.bypassPermissions,
+      }).then((r) => ({
         exitCode: r.exitCode,
       })),
   });
