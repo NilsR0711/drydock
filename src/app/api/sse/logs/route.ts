@@ -51,7 +51,8 @@ export async function GET(req: NextRequest) {
           const data = JSON.stringify(record);
           controller.enqueue(encoder.encode(`id: ${record.seq}\nevent: log\ndata: ${data}\n\n`));
         } catch {
-          // Controller already closed between disconnect and cleanup — drop it.
+          // Controller already closed (client disconnected) or the record is not
+          // serializable — drop it rather than throw back into the fan-out.
         }
       };
 

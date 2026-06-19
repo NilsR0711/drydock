@@ -22,8 +22,11 @@ export default function LogsPage() {
     const config = logger.getConfig();
     sinkLevel = config.level;
     logFile = config.file;
-  } catch {
-    // Logger unavailable on first boot — render an empty live view.
+  } catch (err) {
+    // Logger snapshot failed (e.g. first boot, or a file-read error) — render an
+    // empty view and let the client open the live tail. Reported via console.error
+    // rather than the logger itself, which is the thing that just failed.
+    console.error("[logs] failed to read recent server logs", err);
   }
 
   return (
