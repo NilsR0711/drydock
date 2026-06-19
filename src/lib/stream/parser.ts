@@ -110,6 +110,8 @@ export interface ParsedEvent {
   isError: boolean;
   /** Final result text, present on `result` events that carry one (issue #166). */
   resultText?: string;
+  /** Result event subtype, e.g. `success` / `error_max_turns` (issue #277). */
+  resultSubtype?: string;
   /** Subscription rate-limit snapshot, present on `rate_limit_event`s (issue #188). */
   rateLimitInfo?: RawRateLimitInfo;
   /** The original event as emitted by the agent CLI (shape varies per agent). */
@@ -172,6 +174,7 @@ function toParsed(event: StreamEvent): ParsedEvent {
   } else {
     base.sessionId = event.session_id;
     base.resultText = event.result;
+    base.resultSubtype = event.subtype;
     base.costUsd = event.total_cost_usd;
     base.inputTokens = event.usage?.input_tokens ?? 0;
     base.outputTokens = event.usage?.output_tokens ?? 0;
@@ -217,6 +220,8 @@ export class StreamJsonParser {
   costUsd = 0;
   /** Final result text from the stream's result event, when it carried one. */
   resultText?: string;
+  /** Result event subtype from the stream, e.g. `error_max_turns` (issue #277). */
+  resultSubtype?: string;
   /** Whether the stream's result event was flagged as an error (issue #166). */
   resultIsError = false;
   /** Latest subscription rate-limit snapshot seen in the stream (issue #188). */
@@ -274,6 +279,7 @@ export class StreamJsonParser {
         this.totalCacheReadInputTokens = parsed.cacheReadInputTokens;
       if (parsed.costUsd !== undefined) this.costUsd = parsed.costUsd;
       if (parsed.resultText !== undefined) this.resultText = parsed.resultText;
+      if (parsed.resultSubtype !== undefined) this.resultSubtype = parsed.resultSubtype;
       this.resultIsError = parsed.isError;
     } else {
       this.totalInputTokens += parsed.inputTokens;

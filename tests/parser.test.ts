@@ -125,6 +125,25 @@ describe("StreamJsonParser against fixtures", () => {
     expect(p.resultIsError).toBe(false);
   });
 
+  it("exposes the result event's subtype for outcome classification (issue #277)", () => {
+    const p = new StreamJsonParser();
+    const result = JSON.stringify({
+      type: "result",
+      subtype: "error_max_turns",
+      is_error: true,
+    });
+    const events = [...p.push(`${result}\n`), ...p.flush()];
+    expect(events.at(-1)?.resultSubtype).toBe("error_max_turns");
+    expect(p.resultSubtype).toBe("error_max_turns");
+    expect(p.resultIsError).toBe(true);
+  });
+
+  it("leaves resultSubtype unset until a result arrives (issue #277)", () => {
+    const p = new StreamJsonParser();
+    p.push('{"type":"system","session_id":"s1"}\n');
+    expect(p.resultSubtype).toBeUndefined();
+  });
+
   it("handles chunk boundaries that split a line", () => {
     const raw = fixture("success.ndjson");
     const mid = Math.floor(raw.length / 2);
