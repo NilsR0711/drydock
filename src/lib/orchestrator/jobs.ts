@@ -112,6 +112,22 @@ export function openJobsByIssue(repoId: number, db: DB = getDb()): Record<number
 }
 
 /**
+ * The freshest open (non-terminal) job for a single issue, if any. Mirrors the
+ * dedupe invariant (issue #23) of {@link openJobsByIssue}: at most one open job
+ * per issue, but if several exist the most-recently-created one wins. Used to
+ * decide whether dequeuing an issue should also abort a not-yet-started job.
+ */
+export function openJobForIssue(
+  repoId: number,
+  issueNumber: number,
+  db: DB = getDb(),
+): Job | undefined {
+  return listJobsByStatus([...OPEN_STATES], db)
+    .filter((j) => j.repoId === repoId && j.issueNumber === issueNumber)
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+}
+
+/**
  * Next queued job for a repo. Ordered by the manual issue priority
  * (issues.priority, lower = sooner); jobs without a cached issue row sort
  * last, then by creation order as a stable tiebreak.
