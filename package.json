@@ -1,6 +1,6 @@
 {
   "name": "@nilsr0711/drydock",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "type": "module",
   "description": "Local-first tool that autonomously turns GitHub issues into pull requests via the Claude CLI, startable from the terminal with `npx @nilsr0711/drydock`.",
   "keywords": [
