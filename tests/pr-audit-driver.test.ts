@@ -244,6 +244,7 @@ function fakeForge(over: Partial<AuditForge> = {}) {
   const issueComments: string[] = [];
   const prComments: string[] = [];
   const updates: { id: string; body: string }[] = [];
+  const prUpdates: { id: string; body: string }[] = [];
   const forge: AuditForge = {
     prDiff: vi.fn(async () => "diff --git a/x b/x\n+1\n"),
     prChecks: vi.fn(async () => [{ name: "Verify", state: "SUCCESS" }]),
@@ -258,9 +259,13 @@ function fakeForge(over: Partial<AuditForge> = {}) {
     commentPr: vi.fn(async (_n: number, body: string) => {
       prComments.push(body);
     }),
+    listPrComments: vi.fn(async () => prComments.map((body, i) => ({ id: `p${i}`, body }))),
+    updatePrComment: vi.fn(async (_n: number, id: string, body: string) => {
+      prUpdates.push({ id, body });
+    }),
     ...over,
   };
-  return { forge, issueComments, prComments, updates };
+  return { forge, issueComments, prComments, updates, prUpdates };
 }
 
 function setupJob(repoOver: Record<string, unknown> = {}): { repo: Repo; job: Job } {
@@ -291,9 +296,9 @@ const okGenerator = async (): Promise<PrAuditResult | null> => ({
 });
 
 describe("runPrAuditPass", () => {
-  it("posts a marker comment on the issue and records started/completed events", async () => {
+  it("posts a marker comment on the PR and records started/completed events", async () => {
     const { repo, job } = setupJob();
-    const { forge, issueComments } = fakeForge();
+    const { forge, prComments, issueComments } = fakeForge();
 
     const result = await runPrAuditPass({
       job,
@@ -305,41 +310,60 @@ describe("runPrAuditPass", () => {
     });
 
     expect(result?.recommendation).toBe("approve");
-    expect(issueComments).toHaveLength(1);
-    expect(issueComments[0]).toContain(prAuditMarker(job.id));
-    expect(issueComments[0]).toContain("Drydock PR audit");
+    // The canonical review lands on the PR, not the issue (issue #317).
+    expect(prComments).toHaveLength(1);
+    expect(prComments[0]).toContain(prAuditMarker(job.id));
+    expect(prComments[0]).toContain("Drydock PR audit");
+    expect(issueComments).toHaveLength(0);
     expect(eventsOf(job.id, "pr_audit_started")).toHaveLength(1);
     expect(eventsOf(job.id, "pr_audit_completed")).toHaveLength(1);
   });
 
-  it("updates the existing marker comment on a re-run instead of duplicating", async () => {
+  it("updates the existing PR marker comment on a re-run instead of duplicating", async () => {
     const { repo, job } = setupJob();
-    const { forge, issueComments, updates } = fakeForge();
+    const { forge, prComments, prUpdates } = fakeForge();
 
     await runPrAuditPass({ job, prNumber: 7, repo, forge, db, generate: okGenerator });
     await runPrAuditPass({ job, prNumber: 7, repo, forge, db, generate: okGenerator });
 
-    expect(issueComments).toHaveLength(1);
-    expect(updates).toHaveLength(1);
-    expect(updates[0]?.body).toContain(prAuditMarker(job.id));
+    expect(prComments).toHaveLength(1);
+    expect(prUpdates).toHaveLength(1);
+    expect(prUpdates[0]?.body).toContain(prAuditMarker(job.id));
   });
 
-  it("falls back to a fresh comment when the forge lacks upsert support", async () => {
+  it("falls back to a fresh PR comment when the forge lacks upsert support", async () => {
     const { repo, job } = setupJob();
-    const { forge, issueComments } = fakeForge({
-      listIssueComments: undefined,
-      updateIssueComment: undefined,
+    const { forge, prComments } = fakeForge({
+      listPrComments: undefined,
+      updatePrComment: undefined,
     });
 
     await runPrAuditPass({ job, prNumber: 7, repo, forge, db, generate: okGenerator });
     await runPrAuditPass({ job, prNumber: 7, repo, forge, db, generate: okGenerator });
 
-    expect(issueComments).toHaveLength(2);
+    expect(prComments).toHaveLength(2);
   });
 
-  it("posts a failure comment and records pr_audit_failed when the agent yields nothing", async () => {
+  it("degrades to the issue comment when the forge cannot comment on the PR", async () => {
     const { repo, job } = setupJob();
-    const { forge, issueComments } = fakeForge();
+    // A forge with no PR comment seam at all (e.g. a capability gap): the audit
+    // still lands on the issue rather than being lost.
+    const { forge, issueComments, prComments } = fakeForge({
+      commentPr: undefined,
+      listPrComments: undefined,
+      updatePrComment: undefined,
+    });
+
+    await runPrAuditPass({ job, prNumber: 7, repo, forge, db, generate: okGenerator });
+
+    expect(prComments).toHaveLength(0);
+    expect(issueComments).toHaveLength(1);
+    expect(issueComments[0]).toContain("Drydock PR audit");
+  });
+
+  it("posts a failure comment on the PR and records pr_audit_failed when the agent yields nothing", async () => {
+    const { repo, job } = setupJob();
+    const { forge, prComments } = fakeForge();
 
     const result = await runPrAuditPass({
       job,
@@ -351,16 +375,16 @@ describe("runPrAuditPass", () => {
     });
 
     expect(result).toBeNull();
-    expect(issueComments).toHaveLength(1);
-    expect(issueComments[0]).toContain(prAuditMarker(job.id));
-    expect(issueComments[0]).toMatch(/failed/i);
+    expect(prComments).toHaveLength(1);
+    expect(prComments[0]).toContain(prAuditMarker(job.id));
+    expect(prComments[0]).toMatch(/failed/i);
     expect(eventsOf(job.id, "pr_audit_failed")).toHaveLength(1);
     expect(getJob(job.id, db)?.status).toBe("ci_running");
   });
 
   it("records a failure without commenting when the diff is empty", async () => {
     const { repo, job } = setupJob();
-    const { forge, issueComments } = fakeForge({ prDiff: vi.fn(async () => "") });
+    const { forge, issueComments, prComments } = fakeForge({ prDiff: vi.fn(async () => "") });
 
     const result = await runPrAuditPass({
       job,
@@ -373,26 +397,29 @@ describe("runPrAuditPass", () => {
 
     expect(result).toBeNull();
     expect(issueComments).toHaveLength(0);
+    expect(prComments).toHaveLength(0);
     expect(eventsOf(job.id, "pr_audit_failed")).toHaveLength(1);
   });
 
-  it("mirrors the audit on the PR when prAuditPostOnPr is enabled", async () => {
-    const { repo, job } = setupJob({ prAuditPostOnPr: true });
-    const { forge, prComments } = fakeForge();
+  it("mirrors the audit on the issue when prAuditPostOnIssue is enabled", async () => {
+    const { repo, job } = setupJob({ prAuditPostOnIssue: true });
+    const { forge, prComments, issueComments } = fakeForge();
 
     await runPrAuditPass({ job, prNumber: 7, repo, forge, db, generate: okGenerator });
 
+    // Canonical on the PR, mirrored on the issue.
     expect(prComments).toHaveLength(1);
-    expect(prComments[0]).toContain("Drydock PR audit");
+    expect(issueComments).toHaveLength(1);
+    expect(issueComments[0]).toContain("Drydock PR audit");
   });
 
-  it("does not mirror on the PR by default", async () => {
+  it("does not mirror on the issue by default", async () => {
     const { repo, job } = setupJob();
-    const { forge, prComments } = fakeForge();
+    const { forge, issueComments } = fakeForge();
 
     await runPrAuditPass({ job, prNumber: 7, repo, forge, db, generate: okGenerator });
 
-    expect(prComments).toHaveLength(0);
+    expect(issueComments).toHaveLength(0);
   });
 
   it("skips without commenting while Drydock is globally paused", async () => {
@@ -441,7 +468,7 @@ describe("runPrAuditPass", () => {
 
   it("degrades gracefully when the issue cannot be fetched", async () => {
     const { repo, job } = setupJob();
-    const { forge, issueComments } = fakeForge({
+    const { forge, prComments } = fakeForge({
       viewIssue: vi.fn(async () => {
         throw new Error("forge down");
       }),
@@ -449,13 +476,13 @@ describe("runPrAuditPass", () => {
 
     await runPrAuditPass({ job, prNumber: 7, repo, forge, db, generate: okGenerator });
 
-    expect(issueComments).toHaveLength(1);
+    expect(prComments).toHaveLength(1);
   });
 
   it("redacts secrets from the published comment", async () => {
     const token = `ghp_${"a".repeat(36)}`;
     const { repo, job } = setupJob();
-    const { forge, issueComments } = fakeForge();
+    const { forge, prComments } = fakeForge();
 
     await runPrAuditPass({
       job,
@@ -471,7 +498,7 @@ describe("runPrAuditPass", () => {
       }),
     });
 
-    expect(issueComments[0]).not.toContain(token);
+    expect(prComments[0]).not.toContain(token);
   });
 
   it("never throws even when every forge call fails", async () => {
@@ -521,13 +548,13 @@ describe("startPrAudit", () => {
   it("kicks off an audit pass against the job's PR", async () => {
     const { startPrAudit } = await import("@/lib/orchestrator/pr-audit-driver");
     const { repo: _repo, job } = setupJob();
-    const { forge, issueComments } = fakeForge();
+    const { forge, prComments } = fakeForge();
 
     const started = startPrAudit(job.id, db, { forge, generate: okGenerator });
     expect(started.prNumber).toBe(7);
     await started.done;
 
-    expect(issueComments).toHaveLength(1);
-    expect(issueComments[0]).toContain("Drydock PR audit");
+    expect(prComments).toHaveLength(1);
+    expect(prComments[0]).toContain("Drydock PR audit");
   });
 });

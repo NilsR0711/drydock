@@ -8,7 +8,11 @@ import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
 import type { CommandRunner } from "@/lib/exec/runner";
-import { upsertMarkerComment } from "@/lib/forge/comment-upsert";
+import {
+  type UpsertPrCommentForge,
+  upsertMarkerComment,
+  upsertPrMarkerComment,
+} from "@/lib/forge/comment-upsert";
 import { getForge } from "@/lib/forge/registry";
 import type { IssueCommentRef, IssueDetail, PrCheck } from "@/lib/github/gh";
 import {
@@ -59,7 +63,10 @@ export interface AuditForge {
   commentIssue(issueNumber: number, body: string): Promise<void>;
   listIssueComments?(issueNumber: number): Promise<IssueCommentRef[]>;
   updateIssueComment?(issueNumber: number, commentId: string, body: string): Promise<void>;
+  // Canonical audit thread lives on the PR itself (issue #317).
   commentPr?(prNumber: number, body: string): Promise<void>;
+  listPrComments?(prNumber: number): Promise<IssueCommentRef[]>;
+  updatePrComment?(prNumber: number, commentId: string, body: string): Promise<void>;
 }
 
 export interface AuditConfig {
@@ -145,10 +152,10 @@ export function buildPrAuditGenerator(deps: {
 }
 
 /**
- * Post `body` as the job's audit comment, editing the existing marker comment
- * in place when the forge supports it (ADR 019 idempotency pattern). Lookup
- * and edit are best-effort: any upsert failure degrades to a fresh comment,
- * since a duplicate is better than a silently lost review.
+ * Post `body` as the job's audit comment on the issue, editing the existing
+ * marker comment in place when the forge supports it (ADR 019 idempotency
+ * pattern). Lookup and edit are best-effort: any upsert failure degrades to a
+ * fresh comment, since a duplicate is better than a silently lost review.
  */
 export async function upsertAuditComment(
   forge: AuditForge,
@@ -157,6 +164,40 @@ export async function upsertAuditComment(
   body: string,
 ): Promise<"created" | "updated"> {
   return upsertMarkerComment(forge, issueNumber, marker, body, "pr-audit");
+}
+
+/**
+ * Publish the rendered audit `body` for a job (issue #317). A PR review belongs
+ * on the PR — that is where the diff, CI bots, and human reviewers are — so the
+ * canonical, idempotent comment is upserted on the PR itself. The issue comment
+ * is demoted to an opt-in mirror (`repo.prAuditPostOnIssue`). When the forge
+ * cannot comment on PRs at all, the issue is used as a clean fallback so the
+ * review is never lost. Every write is best-effort and never throws.
+ */
+async function publishAuditComment(
+  forge: AuditForge,
+  repo: Repo,
+  prNumber: number,
+  issueNumber: number,
+  marker: string,
+  body: string,
+): Promise<void> {
+  if (forge.commentPr) {
+    // The runtime guard above proves `commentPr` exists; the cast carries that
+    // to the type level without spreading (which would drop method `this`).
+    await upsertPrMarkerComment(forge as UpsertPrCommentForge, prNumber, marker, body, "pr-audit");
+    if (repo.prAuditPostOnIssue) {
+      // The mirror is idempotent on its own target but best-effort: a failed
+      // mirror must not lose the canonical PR comment already posted above.
+      await safe(async () => {
+        await upsertAuditComment(forge, issueNumber, marker, body);
+      }, undefined);
+    }
+    return;
+  }
+  // Capability gap (a forge with no PR comment seam): keep the issue comment as
+  // the fallback surface so the audit still lands somewhere.
+  await upsertAuditComment(forge, issueNumber, marker, body);
 }
 
 /**
@@ -188,7 +229,8 @@ export interface PrAuditPassDeps {
  * Run one PR audit pass (issue #168). Assembles the whole-PR context (diff,
  * CI conclusions, issue body, subtasks), asks a read-only agent for a
  * structured review in the configured language, and upserts the rendered
- * markdown on the issue (optionally mirrored on the PR). Skips while Drydock
+ * markdown on the PR itself (optionally mirrored on the issue, issue #317).
+ * Skips while Drydock
  * is globally paused, defers silently on a provider limit (the latch handles
  * resumption windows), and posts a short failure comment when the agent
  * produced nothing parseable. Never throws and never touches job state —
@@ -274,7 +316,14 @@ export async function runPrAuditPass(deps: PrAuditPassDeps): Promise<PrAuditResu
         meta,
         "the agent returned no parseable review (timeout, non-zero exit, or invalid JSON).",
       );
-      await upsertAuditComment(forge, job.issueNumber, marker, redactSecrets(failure));
+      await publishAuditComment(
+        forge,
+        repo,
+        prNumber,
+        job.issueNumber,
+        marker,
+        redactSecrets(failure),
+      );
       recordEvent(job.id, "pr_audit_failed", { reason: "unparseable output", prNumber }, db);
       return null;
     }
@@ -282,12 +331,7 @@ export async function runPrAuditPass(deps: PrAuditPassDeps): Promise<PrAuditResu
     const comment = redactSecrets(
       renderPrAuditComment(result, { ...meta, truncated: auditWasTruncated(input) }),
     );
-    await upsertAuditComment(forge, job.issueNumber, marker, comment);
-    if (repo.prAuditPostOnPr && forge.commentPr) {
-      // The mirror is best-effort and not upserted: idempotency lives on the
-      // issue comment, the canonical audit thread.
-      await safe(() => forge.commentPr?.(prNumber, comment) ?? Promise.resolve(), undefined);
-    }
+    await publishAuditComment(forge, repo, prNumber, job.issueNumber, marker, comment);
     recordEvent(
       job.id,
       "pr_audit_completed",

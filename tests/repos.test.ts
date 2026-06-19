@@ -393,9 +393,9 @@ describe("PR audit settings (issue #168)", () => {
     expect(repo.prAuditAgent).toBeNull();
     expect(repo.prAuditModel).toBeNull();
     expect(repo.prAuditLanguage).toBe("en");
-    // Posting the audit onto the PR itself stays opt-in (the issue comment is
-    // the default surface); only the audit run is enabled by default.
-    expect(repo.prAuditPostOnPr).toBe(false);
+    // The audit is posted on the PR by default (issue #317); mirroring it onto
+    // the issue stays opt-in.
+    expect(repo.prAuditPostOnIssue).toBe(false);
   });
 
   it("persists explicit audit settings", () => {
@@ -407,7 +407,7 @@ describe("PR audit settings (issue #168)", () => {
         prAuditAgent: "codex",
         prAuditModel: "gpt-5-codex",
         prAuditLanguage: "de",
-        prAuditPostOnPr: true,
+        prAuditPostOnIssue: true,
       },
       db,
     );
@@ -415,7 +415,7 @@ describe("PR audit settings (issue #168)", () => {
     expect(repo.prAuditAgent).toBe("codex");
     expect(repo.prAuditModel).toBe("gpt-5-codex");
     expect(repo.prAuditLanguage).toBe("de");
-    expect(repo.prAuditPostOnPr).toBe(true);
+    expect(repo.prAuditPostOnIssue).toBe(true);
   });
 
   it("updates audit settings and clears overrides back to inherit", () => {
