@@ -5,6 +5,7 @@ import {
   InvalidTransitionError,
   isJobStatus,
   TERMINAL_STATES,
+  TERMINAL_SUCCESS_STATES,
 } from "@/lib/orchestrator/state-machine";
 
 describe("state machine", () => {
@@ -60,6 +61,17 @@ describe("state machine", () => {
     expect(canTransition("released", "queued")).toBe(false);
     expect(TERMINAL_STATES).toContain("released");
     expect(isJobStatus("released")).toBe(true);
+  });
+
+  it("scopes terminal success to merged/released, excluding aborted (issue #288)", () => {
+    // Issue-level success dedupe keys off this set; including the terminal
+    // failure state `aborted` would wrongly block the retry path.
+    expect([...TERMINAL_SUCCESS_STATES].sort()).toEqual(["merged", "released"]);
+    expect(TERMINAL_SUCCESS_STATES).not.toContain("aborted");
+    // Success states are a subset of all terminal states.
+    for (const s of TERMINAL_SUCCESS_STATES) {
+      expect(TERMINAL_STATES).toContain(s);
+    }
   });
 
   it("throws on invalid transition", () => {
