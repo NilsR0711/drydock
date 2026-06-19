@@ -26,12 +26,19 @@ import {
   bulkAddToQueueAction,
   bulkApplyLabelAction,
   bulkRemoveFromQueueAction,
+  listOpenIssueJobsAction,
   removeFromQueueAction,
   reorderIssuesAction,
   syncRepoIssuesAction,
 } from "@/lib/issues/actions";
 import { moveIssueBefore, moveIssueDown, moveIssueUp } from "@/lib/issues/order";
+import type { JobStatus } from "@/lib/orchestrator/state-machine";
 import { cn } from "@/lib/utils";
+
+// Stable empty default so an omitted `initialOpenJobs` prop keeps a constant
+// reference across renders — a fresh `{}` each render would retrigger the
+// sync effect every render and spin an infinite update loop.
+const EMPTY_OPEN_JOBS: Record<number, JobStatus> = {};
 
 function parseLabels(raw: string): string[] {
   try {
@@ -53,6 +60,8 @@ function parseLabels(raw: string): string[] {
 interface RowProps {
   issue: Issue;
   reorderable: boolean;
+  /** Status of this issue's open job, if any — shown as a live badge (issue #286). */
+  jobStatus?: JobStatus;
   queueLabel: string;
   /** Position of this issue in the full (unfiltered) queue; -1 if not queued. */
   queueIndex: number;
@@ -77,6 +86,7 @@ interface RowProps {
 function Row({
   issue,
   reorderable,
+  jobStatus,
   queueLabel,
   queueIndex,
   queueSize,
@@ -151,6 +161,11 @@ function Row({
         <span className="shrink-0 font-mono text-xs text-muted-foreground">#{issue.number}</span>
         <span className="truncate text-sm group-hover:text-foreground">{issue.title}</span>
       </button>
+      {jobStatus && (
+        <Tooltip content={`A ${jobStatus.replace(/_/g, " ")} job exists for this issue`}>
+          <Badge status={jobStatus} className="shrink-0" />
+        </Tooltip>
+      )}
       <div className="hidden shrink-0 items-center gap-1.5 md:flex">
         {issue.triagedAt && (
           <Tooltip content="Labels applied by auto-triage — see the issue comment for reasons">
@@ -292,6 +307,7 @@ export function IssueBoard({
   repoId,
   queueLabel,
   initialIssues,
+  initialOpenJobs = EMPTY_OPEN_JOBS,
   pollIntervalSec,
   defaultModel,
   defaultAgent,
@@ -299,11 +315,14 @@ export function IssueBoard({
   repoId: number;
   queueLabel: string;
   initialIssues: Issue[];
+  /** issueNumber → open-job status, so the Queue reflects scheduler state (issue #286). */
+  initialOpenJobs?: Record<number, JobStatus>;
   pollIntervalSec: number;
   defaultModel: string;
   defaultAgent: string;
 }) {
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
+  const [openJobs, setOpenJobs] = useState<Record<number, JobStatus>>(initialOpenJobs);
   const [query, setQuery] = useState("");
   const [dragNumber, setDragNumber] = useState<number | null>(null);
   const [overNumber, setOverNumber] = useState<number | null>(null);
@@ -316,12 +335,18 @@ export function IssueBoard({
   const { success } = useToast();
 
   useEffect(() => setIssues(initialIssues), [initialIssues]);
+  useEffect(() => setOpenJobs(initialOpenJobs), [initialOpenJobs]);
 
   useEffect(() => {
     const ms = Math.max(10, pollIntervalSec) * 1000;
     const t = setInterval(() => {
+      // The GitHub sync (issues) and the local job map are refreshed together so
+      // the Queue/Backlog split and the per-row status badge never drift (#286).
       syncRepoIssuesAction(repoId)
         .then(setIssues)
+        .catch((e) => setError(e.message));
+      listOpenIssueJobsAction(repoId)
+        .then(setOpenJobs)
         .catch((e) => setError(e.message));
     }, ms);
     return () => clearInterval(t);
@@ -333,10 +358,18 @@ export function IssueBoard({
       syncRepoIssuesAction(repoId)
         .then(setIssues)
         .catch((e) => setError(e.message));
+      listOpenIssueJobsAction(repoId)
+        .then(setOpenJobs)
+        .catch((e) => setError(e.message));
     });
   }
 
-  const inQueue = (i: Issue) => parseLabels(i.labels).includes(queueLabel);
+  // The queue label is the user's manual scheduling intent; an open job is what
+  // the scheduler actually picked up (manual OR the auto `ready` path, #286).
+  const labelQueued = (i: Issue) => parseLabels(i.labels).includes(queueLabel);
+  const jobStatusFor = (i: Issue): JobStatus | undefined => openJobs[i.number];
+  // Belongs in the Queue zone if the user queued it OR work is already scheduled.
+  const inQueue = (i: Issue) => labelQueued(i) || jobStatusFor(i) !== undefined;
   const matches = (i: Issue) => {
     const q = query.toLowerCase();
     return (
@@ -362,7 +395,7 @@ export function IssueBoard({
     const num = dragNumber;
     const title = moved?.title;
     clearDragState();
-    if (!moved || inQueue(moved)) return;
+    if (!moved || labelQueued(moved)) return;
     start(() => {
       addToQueueAction(repoId, num)
         .then((next) => {
@@ -379,7 +412,7 @@ export function IssueBoard({
     if (dragNumber === null) return;
     const moved = issues.find((i) => i.number === dragNumber);
     clearDragState();
-    if (!moved || !inQueue(moved)) return;
+    if (!moved || !labelQueued(moved)) return;
     start(() => {
       removeFromQueueAction(repoId, moved.number)
         .then(setIssues)
@@ -394,12 +427,13 @@ export function IssueBoard({
     clearDragState();
     if (num === null || num === targetNumber) return;
     const moved = issues.find((i) => i.number === num);
-    if (!moved || !inQueue(moved)) return; // only reorder queued items
-    // Build the new order from the FULL queue, not the search-filtered view:
-    // sending only the visible numbers would partially update priorities and
-    // collide with the hidden issues.
+    if (!moved || !labelQueued(moved)) return; // only reorder label-queued items
+    // Build the new order from the FULL label queue, not the search-filtered
+    // view: sending only the visible numbers would partially update priorities
+    // and collide with the hidden issues. Job-only rows have no manual priority,
+    // so they are excluded from the reorder set.
     const order = moveIssueBefore(
-      issues.filter(inQueue).map((i) => i.number),
+      issues.filter(labelQueued).map((i) => i.number),
       num,
       targetNumber,
     );
@@ -414,16 +448,20 @@ export function IssueBoard({
    * drops fall through to the zone action (queue/dequeue) instead of being
    * silently swallowed by the row's stopPropagation.
    */
-  function dropOnRow(target: Issue, rowInQueue: boolean) {
+  function dropOnRow(target: Issue, zoneIsQueue: boolean) {
     const moved = dragNumber === null ? undefined : issues.find((i) => i.number === dragNumber);
     if (!moved) {
       clearDragState();
       return;
     }
-    if (inQueue(moved) === rowInQueue) {
-      if (rowInQueue) reorderWithinQueue(target.number);
+    // Drag semantics key off the queue LABEL (what add/remove mutate), not zone
+    // membership: a job-only row sits in the queue zone without carrying the
+    // label, so dragging it to the backlog must be a no-op, not a bogus dequeue.
+    const movedLabeled = labelQueued(moved);
+    if (movedLabeled === zoneIsQueue) {
+      if (zoneIsQueue) reorderWithinQueue(target.number);
       else clearDragState(); // backlog → backlog: nothing to do
-    } else if (rowInQueue) {
+    } else if (zoneIsQueue) {
       dropToQueue();
     } else {
       dropToBacklog();
@@ -469,7 +507,9 @@ export function IssueBoard({
     });
   }
 
-  const queueNumbers = issues.filter(inQueue).map((i) => i.number);
+  // Priority ordering is a property of the label queue only — job-only rows have
+  // no manual rank, so they are excluded from the numbered/reorderable set.
+  const queueNumbers = issues.filter(labelQueued).map((i) => i.number);
   const dropping = dragNumber !== null;
 
   function addIssue(number: number) {
@@ -502,12 +542,16 @@ export function IssueBoard({
     });
   }
 
-  function renderRow(issue: Issue, reorderable: boolean) {
+  function renderRow(issue: Issue, zoneIsQueue: boolean) {
+    // Only label-queued issues carry a manual priority and can be reordered or
+    // dequeued; a job-only row in the queue zone is read-only (issue #286).
+    const reorderable = labelQueued(issue);
     return (
       <Row
         key={issue.number}
         issue={issue}
         reorderable={reorderable}
+        jobStatus={jobStatusFor(issue)}
         queueLabel={queueLabel}
         queueIndex={queueNumbers.indexOf(issue.number)}
         queueSize={queueNumbers.length}
@@ -525,7 +569,7 @@ export function IssueBoard({
         onDragStartRow={() => setDragNumber(issue.number)}
         onDragEnterRow={() => setOverNumber(issue.number)}
         onDragEndRow={clearDragState}
-        onDropRow={() => dropOnRow(issue, reorderable)}
+        onDropRow={() => dropOnRow(issue, zoneIsQueue)}
       />
     );
   }
