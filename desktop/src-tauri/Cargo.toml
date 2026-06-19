@@ -1,0 +1,39 @@
+[package]
+name = "drydock-desktop"
+version = "0.1.9"
+description = "Native macOS menu-bar shell for the Drydock dashboard."
+authors = ["Nils Reeh"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77"
+
+# The library the binary links against. Tauri's mobile tooling expects a `_lib`
+# suffix to avoid a name clash with the binary crate on some targets.
+[lib]
+name = "drydock_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["time"] }
+# Plain HTTP to the loopback dashboard only — no TLS feature is enabled, so the
+# build pulls in neither OpenSSL nor a crypto provider. The shell never contacts
+# an https endpoint.
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
+
+[features]
+# Default to no custom protocol; everything is driven over HTTP from Rust.
+default = []
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Drydock</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0a1a2b;
+        color: #cde7f5;
+        font:
+          15px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        display: grid;
+        place-items: center;
+        text-align: center;
+      }
+      .card {
+        max-width: 30rem;
+        padding: 2rem;
+      }
+      code {
+        background: rgba(94, 200, 240, 0.12);
+        padding: 0.15em 0.4em;
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      The main window normally loads the live dashboard at http://127.0.0.1:3737
+      directly (see tauri.conf.json). This bundled page is only shown as a
+      fallback splash when that window is replaced or the build pipeline needs a
+      frontend root to package.
+    -->
+    <div class="card">
+      <h1>Drydock</h1>
+      <p>Connecting to the local dashboard…</p>
+      <p>If this persists, start the server with <code>drydock</code> and reopen the window from the tray.</p>
+    </div>
+  </body>
+</html>

@@ -38,6 +38,11 @@ yarn-error.log*
 .idea
 .vscode
 
+# Tauri desktop shell (Rust). Build output and codegen are regenerated; the
+# crate sources, Cargo.lock, and icons are committed. See desktop/README.md.
+desktop/src-tauri/target
+desktop/src-tauri/gen
+
 # Local-only files (not part of the public project)
 CLAUDE.md
 .claude
