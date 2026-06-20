@@ -24,6 +24,11 @@ npx @nilsr0711/drydock --open
 
 <sub><a href="#quickstart">Quickstart</a> · <a href="#how-it-works">How it works</a> · <a href="#features">Features</a> · <a href="#configuration">Configuration</a> · <a href="#cli">CLI</a> · <a href="docs/FEATURES.md">Full feature reference</a></sub>
 
+<br />
+<br />
+
+<img src="docs/dashboard.jpg" alt="Drydock dashboard — every watched repository, its in-flight jobs, today's spend, and live per-provider usage gauges" width="900">
+
 </div>
 
 > [!NOTE]
