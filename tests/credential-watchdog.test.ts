@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
-import { openrouterModels } from "@/lib/db/schema";
 import type { CommandResult, CommandRunner } from "@/lib/exec/runner";
 import type { HttpClient, HttpResponse } from "@/lib/forge/http";
 import { RateLimitGovernor } from "@/lib/github/rate-limit";
@@ -18,8 +17,6 @@ import {
 } from "@/lib/orchestrator/credential-watchdog";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
-
-const OR_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
 
 let db: DB;
 
@@ -49,23 +46,6 @@ function addGithubRepo() {
 function addGitlabRepo(name: string, baseUrl: string, token: string | null = "glpat-token") {
   return addRepo(
     { path: `/${name}`, name, platform: "gitlab", apiBaseUrl: baseUrl, apiToken: token },
-    db,
-  );
-}
-
-function addOpenrouterRepo() {
-  db.insert(openrouterModels)
-    .values({
-      id: OR_MODEL,
-      name: "Llama (free)",
-      supportedParameters: '["tools"]',
-      supportsTools: true,
-      isFree: true,
-      syncedAt: 1,
-    })
-    .run();
-  return addRepo(
-    { path: "/or-repo", name: "or-repo", agent: "openrouter", defaultModel: OR_MODEL },
     db,
   );
 }
@@ -279,45 +259,6 @@ describe("runCredentialProbeSweep — agent CLI probes (issue #177)", () => {
     expect(
       calls.filter((c) => c.cmd === "/opt/bin/codex" && c.args[0] === "--version"),
     ).toHaveLength(1);
-  });
-
-  it("flags a missing OpenRouter API key for openrouter repos", async () => {
-    addOpenrouterRepo();
-    await runCredentialProbeSweep({ db, runner: okRunner() });
-    const failures = getCredentialFailures(db);
-    expect(failures.map((f) => f.target)).toEqual(["agent:openrouter"]);
-    expect(failures[0]?.message).toMatch(/api key/i);
-  });
-
-  it("flags a rejected OpenRouter API key (HTTP 401)", async () => {
-    addOpenrouterRepo();
-    saveSettings({ openrouterApiKey: "sk-or-dead" }, db);
-    const fetchImpl = vi.fn(
-      async () => new Response("unauthorized", { status: 401 }),
-    ) as unknown as typeof fetch;
-    await runCredentialProbeSweep({ db, runner: okRunner(), fetchImpl });
-    expect(getCredentialFailures(db).map((f) => f.target)).toEqual(["agent:openrouter"]);
-  });
-
-  it("treats an OpenRouter network error as transient (healthy stays healthy)", async () => {
-    addOpenrouterRepo();
-    saveSettings({ openrouterApiKey: "sk-or-live" }, db);
-    saveCredentialStatus({ checkedAt: 1, failures: [] }, db);
-    const fetchImpl = vi.fn(async () => {
-      throw new Error("ENOTFOUND openrouter.ai");
-    }) as unknown as typeof fetch;
-    const status = await runCredentialProbeSweep({ db, runner: okRunner(), fetchImpl });
-    expect(status?.failures).toEqual([]);
-  });
-
-  it("accepts a healthy OpenRouter key", async () => {
-    addOpenrouterRepo();
-    saveSettings({ openrouterApiKey: "sk-or-live" }, db);
-    const fetchImpl = vi.fn(
-      async () => new Response("{}", { status: 200 }),
-    ) as unknown as typeof fetch;
-    const status = await runCredentialProbeSweep({ db, runner: okRunner(), fetchImpl });
-    expect(status?.failures).toEqual([]);
   });
 });
 

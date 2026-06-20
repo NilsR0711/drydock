@@ -14,7 +14,6 @@ function fixture(name: string): string {
 describe("opencodeProvider", () => {
   it("identifies itself as the opencode CLI agent", () => {
     expect(opencodeProvider.id).toBe("opencode");
-    expect(opencodeProvider.kind ?? "cli").toBe("cli");
     expect(opencodeProvider.defaultCommand).toBe("opencode");
     expect(opencodeProvider.supportsResume).toBe(true);
   });

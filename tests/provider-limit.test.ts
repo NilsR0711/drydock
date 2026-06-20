@@ -142,18 +142,4 @@ describe("agentLimitBlocked", () => {
     expect(agentLimitBlocked("claude", db, NOW + 10)?.kind).toBe("usage_limit");
     expect(agentLimitBlocked("codex", db, NOW + 10)).toBeUndefined();
   });
-
-  it("gates the openrouter latch on its own auto-wait toggle (issue #169)", () => {
-    latchProviderLimit(
-      usageLimit({ agent: "openrouter", kind: "rate_limit", rawSnippet: "HTTP 429" }),
-      db,
-      NOW,
-    );
-    expect(agentLimitBlocked("openrouter", db, NOW + 10)?.kind).toBe("rate_limit");
-    saveSettings({ openrouterLimitAutoWait: false }, db);
-    expect(agentLimitBlocked("openrouter", db, NOW + 10)).toBeUndefined();
-    // The openrouter toggle never gates the CLI agents.
-    latchProviderLimit(usageLimit(), db, NOW);
-    expect(agentLimitBlocked("claude", db, NOW + 10)?.kind).toBe("usage_limit");
-  });
 });

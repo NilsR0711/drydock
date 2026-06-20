@@ -366,9 +366,9 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               <AgentSelect
                 value={auditAgent}
                 onChange={(v) => {
-                  // PR audits run on the static-catalog CLI agents only
-                  // (issues #169/#349).
-                  if (v === "openrouter" || v === "opencode") return;
+                  // PR audits run on the static-catalog CLI agents (claude/codex)
+                  // only; opencode uses free-text provider/model ids (#349).
+                  if (v === "opencode") return;
                   const nextModel = defaultModelForAgent(v);
                   setAuditAgent(v);
                   setAuditModel(nextModel);

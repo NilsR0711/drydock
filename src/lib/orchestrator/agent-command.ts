@@ -11,9 +11,6 @@ import { getSettings } from "@/lib/settings/service";
  * repo's configured agent always shells out to the right binary.
  */
 export function commandForAgent(provider: AgentProvider, db: DB): string {
-  // HTTP providers have no binary (issue #169); the placeholder only feeds
-  // diagnostics like "failed to start openrouter: …" and is never spawned.
-  if (provider.kind === "http") return provider.id;
   const s = getSettings(db);
   if (provider.id === "codex") return s.codexPath;
   if (provider.id === "opencode") return s.opencodePath;

@@ -66,21 +66,16 @@ export interface AgentSessionDeps {
    * Run the session with full, unprompted shell access (issue #256). Only an
    * agent-driven release sets this so the agent can run the repo's release
    * commands (gh/git/npm) itself; the default edits-only mode blocks them
-   * headlessly. CLI providers only — ignored by the http tool-loop path.
+   * headlessly.
    */
   bypassPermissions?: boolean;
   /**
    * Per-repo command allowlist (issue #329): commands pre-approved for headless
    * Bash via the provider's `--allowedTools`, layered on the default edits-only
    * mode. A safer middle ground than `bypassPermissions` for repos that only
-   * need a real build/test step. CLI providers only — ignored by the http
-   * tool-loop path, and superseded by `bypassPermissions` when that is set.
+   * need a real build/test step. Superseded by `bypassPermissions` when set.
    */
   allowedCommands?: string[];
-  /** HTTP transport override for http providers like openrouter (tests, issue #169). */
-  fetchImpl?: typeof fetch;
-  /** Tool executor override for http providers' tool loops (tests, issue #169). */
-  toolExecutor?: import("@/lib/openrouter/tools").ToolExecutor;
 }
 
 export interface AgentSessionResult {
@@ -377,21 +372,6 @@ export async function spawnAgentSession(
   const runner = deps.runner ?? spawnStreamRunner;
   const broker = deps.broker ?? getBroker();
   const provider = deps.provider ?? getAgentProvider(job.agent);
-  // HTTP providers (openrouter, issue #169) have no CLI to spawn — dispatch to
-  // the API tool-loop session, which mirrors the AgentSessionResult contract
-  // including limit gating, timeout, cost cap, and usage persistence.
-  if (provider.kind === "http") {
-    const { runOpenRouterJobSession } = await import("@/lib/openrouter/session");
-    return runOpenRouterJobSession(job, prompt, cwd, {
-      db,
-      broker: deps.broker,
-      timeoutMs: deps.timeoutMs,
-      costCapUsd: deps.costCapUsd,
-      sideSession: deps.sideSession,
-      fetchImpl: deps.fetchImpl,
-      toolExecutor: deps.toolExecutor,
-    });
-  }
   const command = deps.command ?? provider.defaultCommand;
   const model = job.model ?? provider.defaultModel;
   const parser = provider.createParser();
@@ -575,23 +555,6 @@ export async function resumeAgentSession(
     renderTemplate(resolveTemplateContent(job.repoId, TEMPLATE_NAMES.ciFix, db), {
       CI_LOG: failedLog,
     });
-  // HTTP providers (openrouter, issue #169) cannot resume a session — run a
-  // fresh API tool-loop with the fix/continuation prompt instead, accumulating
-  // usage additively like every other resume.
-  if (provider.kind === "http") {
-    const { runOpenRouterJobSession } = await import("@/lib/openrouter/session");
-    return runOpenRouterJobSession(job, prompt, cwd, {
-      db,
-      broker: deps.broker,
-      timeoutMs: deps.timeoutMs,
-      costCapUsd: deps.costCapUsd,
-      sideSession: deps.sideSession,
-      additive: true,
-      maxTurns: deps.resumeMaxTurns ?? provider.resumeMaxTurns,
-      fetchImpl: deps.fetchImpl,
-      toolExecutor: deps.toolExecutor,
-    });
-  }
   const command = deps.command ?? provider.defaultCommand;
   // Price what is actually executed: resumes default to the provider's resume
   // model (see the args below), never the job's start model. Pricing job.model

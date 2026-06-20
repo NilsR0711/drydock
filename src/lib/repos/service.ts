@@ -4,11 +4,9 @@ import { type DB, getDb } from "@/lib/db/client";
 import { jobs, type Repo, repos } from "@/lib/db/schema";
 import { isValidForgeBaseUrl } from "@/lib/forge/url-guard";
 import { isKnownModelId } from "@/lib/models";
-import { getOpenRouterModel, isModelAvailable } from "@/lib/openrouter/catalog";
 import { parseReleasePlaybook } from "@/lib/orchestrator/release-playbook";
 import { TERMINAL_STATES } from "@/lib/orchestrator/state-machine";
 import { AGENT_INSTRUCTIONS_MAX_CHARS } from "@/lib/repos/agent-instructions";
-import { getSettings } from "@/lib/settings/service";
 
 /**
  * A label/author list column: callers pass a `string[]`, but we persist it as a
@@ -30,11 +28,11 @@ export const repoInputSchema = z.object({
   workingLabel: z.string().min(1).default("drydock:working"),
   needsHumanLabel: z.string().min(1).default("drydock:needs-human"),
   // Model ids are validated against the agent after parsing (see
-  // assertModelAllowedForAgent): claude/codex check the static MODELS list,
-  // openrouter checks the synced catalog (issue #169), opencode accepts any
-  // `provider/model` id since it routes through models.dev (issue #349).
+  // assertModelAllowedForAgent): claude/codex check the static MODELS list;
+  // opencode accepts any `provider/model` id since it routes through models.dev
+  // (issue #349), including OpenRouter as `openrouter/<id>` (ADR 039).
   defaultModel: z.string().min(1).default("claude-opus-4-8"),
-  agent: z.enum(["claude", "codex", "openrouter", "opencode"]).default("claude"),
+  agent: z.enum(["claude", "codex", "opencode"]).default("claude"),
   platform: z.enum(["github", "gitlab"]).default("github"),
   // A self-hosted forge API base URL. Validated as an absolute http(s) URL so a
   // bogus/attacker-influenced scheme (file:, javascript:, relative) can never be
@@ -161,13 +159,13 @@ export const repoInputSchema = z.object({
 export type RepoInput = z.input<typeof repoInputSchema>;
 
 /**
- * Validate the agent/model pair (issue #169): CLI agents must use a model
- * from the static MODELS list (issue #93); openrouter ids must exist in the
- * synced catalog, still be available (not removed/expired), and honor the
- * global free-models-only policy. Runs after Zod parsing because the check is
- * cross-field and (for openrouter) needs the database.
+ * Validate the agent/model pair: claude/codex must use a model from the static
+ * MODELS list (issue #93); opencode accepts any `provider/model` id (issue #349,
+ * including OpenRouter as `openrouter/<id>`, ADR 039) since opencode validates it
+ * against models.dev itself at spawn time. Runs after Zod parsing because the
+ * check is cross-field.
  */
-function assertModelAllowedForAgent(agent: string, model: string, db: DB): void {
+function assertModelAllowedForAgent(agent: string, model: string): void {
   if (agent === "opencode") {
     // opencode validates the model against the live models.dev catalog itself at
     // spawn time across 75+ providers (issue #349); we only enforce the
@@ -179,26 +177,12 @@ function assertModelAllowedForAgent(agent: string, model: string, db: DB): void 
     }
     return;
   }
-  if (agent === "openrouter") {
-    const row = getOpenRouterModel(model, db);
-    if (!row || !isModelAvailable(row)) {
-      throw new Error(
-        `OpenRouter model "${model}" is not in the synced catalog (or no longer available) — refresh the catalog in Settings or pick a different model`,
-      );
-    }
-    if (getSettings(db).openrouterFreeModelsOnly && !row.isFree) {
-      throw new Error(
-        `OpenRouter model "${model}" is not free and the free-models-only policy is enabled`,
-      );
-    }
-    return;
-  }
   if (!isKnownModelId(model)) throw new Error("unknown model id");
 }
 
 export function addRepo(input: RepoInput, db: DB = getDb()): Repo {
   const data = repoInputSchema.parse(input);
-  assertModelAllowedForAgent(data.agent, data.defaultModel, db);
+  assertModelAllowedForAgent(data.agent, data.defaultModel);
   const inserted = db.insert(repos).values(data).returning().get();
   return inserted;
 }
@@ -225,7 +209,6 @@ export function updateRepo(id: number, input: Partial<RepoInput>, db: DB = getDb
     assertModelAllowedForAgent(
       data.agent ?? current.agent,
       data.defaultModel ?? current.defaultModel,
-      db,
     );
   }
   if (Object.keys(data).length === 0) {

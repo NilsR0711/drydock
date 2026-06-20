@@ -20,8 +20,6 @@ import {
   notifyCredentialEdge,
   notifyProviderLimitEdge,
 } from "@/lib/notify/lifecycle";
-import { shouldSyncCatalog, syncOpenRouterCatalog } from "@/lib/openrouter/catalog";
-import { resolveOpenRouterApiKey } from "@/lib/openrouter/config";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
 import { runBranchJanitorSweep } from "./branch-janitor";
@@ -57,7 +55,6 @@ const credentialEdgeState: EdgeState = { active: false };
 const providerLimitStates: Record<LimitAgentId, EdgeState> = {
   claude: { active: false },
   codex: { active: false },
-  openrouter: { active: false },
 };
 
 export interface DriveTickDeps {
@@ -80,8 +77,6 @@ export interface DriveTickDeps {
   branchJanitor?: (db: DB) => Promise<void>;
   /** URL-tracked PR babysitting sweep entry point (issue #293, injectable for tests). */
   trackedPrs?: (db: DB) => Promise<void>;
-  /** OpenRouter catalog sync entry point (issue #169, injectable for tests). */
-  openrouterCatalogSync?: (db: DB) => Promise<unknown>;
   /** Credential watchdog probe round (issue #177, injectable for tests). */
   credentialProbe?: (db: DB) => Promise<unknown>;
 }
@@ -247,12 +242,7 @@ async function resumeLimitParkedJobs(
   deps: DriveTickDeps,
   db: DB,
 ): Promise<void> {
-  const label =
-    agent === "codex"
-      ? "Codex capacity"
-      : agent === "openrouter"
-        ? "OpenRouter window"
-        : "Claude quota";
+  const label = agent === "codex" ? "Codex capacity" : "Claude quota";
   const parked = listJobsByStatus(["waiting_limit"], db).filter((j) => j.agent === agent);
   for (const job of parked) {
     try {
@@ -550,38 +540,6 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
     await withPriority("low", () => trackedPrs(db));
   } catch (err) {
     logError("[driver] tracked-pr sweep failed", err);
-  }
-
-  // Mirror the OpenRouter model catalog (issue #169) when a refresh is due.
-  // Fire-and-forget: a slow Models API must never block job claims; the
-  // in-flight guard in the default sweep prevents overlapping syncs.
-  try {
-    const s = getSettings(db);
-    if (
-      s.openrouterEnabled &&
-      shouldSyncCatalog({ db, refreshHours: s.openrouterCatalogRefreshHours })
-    ) {
-      const catalogSync = deps.openrouterCatalogSync ?? defaultOpenRouterCatalogSync;
-      void Promise.resolve(catalogSync(db)).catch((err) =>
-        logError("[driver] openrouter catalog sync failed", err),
-      );
-    }
-  } catch (err) {
-    logError("[driver] openrouter catalog sweep failed", err);
-  }
-}
-
-/** Guard so at most one catalog sync runs at a time across ticks. */
-let catalogSyncInFlight = false;
-
-async function defaultOpenRouterCatalogSync(db: DB): Promise<void> {
-  if (catalogSyncInFlight) return;
-  catalogSyncInFlight = true;
-  try {
-    const settings = getSettings(db);
-    await syncOpenRouterCatalog({ db, apiKey: resolveOpenRouterApiKey(settings) || undefined });
-  } finally {
-    catalogSyncInFlight = false;
   }
 }
 

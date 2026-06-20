@@ -304,12 +304,7 @@ type NotifyEvent = (event: NotificationEvent, text: string) => Promise<void>;
 
 /** Operator-facing description of a parked job's limit kind (issues #166/#167). */
 export function limitParkMessage(kind: SessionLimitInfo["kind"], agent: AgentId): string {
-  const [vendor, label] =
-    agent === "codex"
-      ? ["OpenAI", "Codex"]
-      : agent === "openrouter"
-        ? ["OpenRouter", "OpenRouter"]
-        : ["Anthropic", "Claude"];
+  const [vendor, label] = agent === "codex" ? ["OpenAI", "Codex"] : ["Anthropic", "Claude"];
   switch (kind) {
     case "rate_limit":
       return `${vendor} API rate limit hit — waiting for the window to clear`;
@@ -445,13 +440,12 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   const allowedCommands = repoAutomation(repo).allowedCommands;
   // Sandboxed execution (issue #182, ADR 033). Resolved up front but only
   // *applied* after the worktree exists (the image may come from its
-  // devcontainer.json) and only for CLI agents — HTTP providers have no
-  // subprocess to wrap. `sessionEnv` is the late-bound command/runner the
+  // devcontainer.json). `sessionEnv` is the late-bound command/runner the
   // session closures read at invocation time: on the host today, or the bare
   // in-container command + a container-wrapping runner once a sandbox is
   // prepared below. Off-by-default repos leave it untouched (no behavior change).
   const sandboxConfig = resolveSandboxConfig(repo, settings);
-  const sandboxRequested = isSandboxEnabled(sandboxConfig) && provider.kind !== "http";
+  const sandboxRequested = isSandboxEnabled(sandboxConfig);
   const prepareSandbox = deps.prepareSandbox ?? prepareSandboxSession;
   const sessionEnv: { command: string; runner?: StreamRunner } = { command };
   const runSession =

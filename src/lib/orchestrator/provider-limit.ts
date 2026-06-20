@@ -173,7 +173,6 @@ export function clearProviderLimit(agent: string, db: DB = getDb()): void {
 export function limitAutoWaitEnabled(agent: AgentId, db: DB = getDb()): boolean {
   const settings = getSettings(db);
   if (agent === "codex") return settings.codexLimitAutoWait;
-  if (agent === "openrouter") return settings.openrouterLimitAutoWait;
   return settings.claudeLimitAutoWait;
 }
 

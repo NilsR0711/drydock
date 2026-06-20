@@ -33,9 +33,6 @@ export function modelsForAgent(agent: AgentId): ModelOption[] {
 
 /** First (preferred) model for an agent; used when switching agents in the UI. */
 export function defaultModelForAgent(agent: AgentId): string {
-  // OpenRouter has no static list — its models come from the synced catalog
-  // and the effective default resolves from settings at call time (issue #169).
-  if (agent === "openrouter") return "";
   // opencode (issue #349) routes through models.dev with `provider/model` ids
   // that aren't in the static MODELS list; seed a sensible, editable default.
   if (agent === "opencode") return OPENCODE_DEFAULT_MODEL;
@@ -56,8 +53,8 @@ export function isKnownModelId(id: string): boolean {
  * the agent's MODELS slice, which is ordered strongest→cheapest, so escalating
  * means stepping one entry toward the front. Returns null when there is no
  * defined next rung: the model is already the strongest, the id is not in the
- * agent's catalog (e.g. an openrouter id — that catalog is synced, not static,
- * and carries no strength ordering), or no current model is known.
+ * agent's catalog (e.g. an opencode `provider/model` id — opencode has no static
+ * strength-ordered ladder), or no current model is known.
  */
 export function nextStrongerModel(
   agent: AgentId,
