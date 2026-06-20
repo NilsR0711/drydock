@@ -594,6 +594,47 @@ let loopIntervalMs: number | null = null;
 export interface StartLoopOptions {
   intervalMs?: number;
   tick?: () => Promise<void>;
+  /**
+   * Hard per-tick watchdog deadline in ms (issue #359). A tick that overruns is
+   * abandoned so the loop can schedule the next one instead of wedging. 0
+   * disables the watchdog. Defaults to settings.maxTickSeconds * 1000.
+   */
+  maxTickMs?: number;
+}
+
+/** Sentinel the per-tick watchdog rejects with when a tick overruns (issue #359). */
+class TickTimeoutError extends Error {
+  constructor(readonly deadlineMs: number) {
+    super(`tick exceeded ${Math.round(deadlineMs / 1000)}s watchdog deadline`);
+    this.name = "TickTimeoutError";
+  }
+}
+
+/**
+ * Run `tick()` under a hard watchdog deadline (issue #359). A healthy tick
+ * resolves first and the watchdog timer is cleared. A hung tick (e.g. a stalled
+ * `gh` call) loses the race to the deadline, which rejects with
+ * {@link TickTimeoutError}; the caller then abandons it (it settles in the
+ * background — its per-call results still commit) and schedules the next tick,
+ * so the loop self-heals. `maxTickMs <= 0` disables the watchdog. The losing
+ * promise stays attached to the race, so neither branch leaks an unhandled
+ * rejection.
+ */
+async function runTickWithWatchdog(tick: () => Promise<void>, maxTickMs: number): Promise<void> {
+  if (maxTickMs <= 0) {
+    await tick();
+    return;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const watchdog = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TickTimeoutError(maxTickMs)), maxTickMs);
+    timer.unref?.();
+  });
+  try {
+    await Promise.race([tick(), watchdog]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export interface DriverLoopStatus {
@@ -617,7 +658,12 @@ export function startDriverLoop(opts: StartLoopOptions = {}): void {
   if (running) return;
   running = true;
   const tick = opts.tick ?? (() => driveTick());
-  const intervalMs = opts.intervalMs ?? getSettings().pollIntervalSec * 1000;
+  // Read settings at most once, and only when a default is actually needed, so
+  // callers that supply both knobs (the unit tests) never touch the DB.
+  let cachedSettings: ReturnType<typeof getSettings> | undefined;
+  const settings = () => (cachedSettings ??= getSettings());
+  const intervalMs = opts.intervalMs ?? settings().pollIntervalSec * 1000;
+  const maxTickMs = opts.maxTickMs ?? settings().maxTickSeconds * 1000;
   loopIntervalMs = intervalMs;
 
   const schedule = () => {
@@ -629,9 +675,16 @@ export function startDriverLoop(opts: StartLoopOptions = {}): void {
       ticking = true;
       lastTickAt = Date.now();
       try {
-        await tick();
+        await runTickWithWatchdog(tick, maxTickMs);
       } catch (err) {
-        logError("[driver] tick failed", err);
+        // On a watchdog breach the tick is abandoned, not failed — log it as the
+        // recovery it is. The `finally` clears `ticking` on every path, so the
+        // next scheduled tick runs even when the abandoned one never settles.
+        if (err instanceof TickTimeoutError) {
+          logError(`[driver] ${err.message} — abandoning tick and rescheduling`, err);
+        } else {
+          logError("[driver] tick failed", err);
+        }
       } finally {
         ticking = false;
       }
@@ -645,4 +698,8 @@ export function stopDriverLoop(): void {
   running = false;
   if (timer) clearTimeout(timer);
   timer = undefined;
+  // Reset the re-entrancy guard so a later restart isn't blocked by a tick that
+  // was still in flight (or abandoned by the watchdog) at stop time — the basis
+  // for restart-based recovery (issue #359). Any orphaned tick settles harmlessly.
+  ticking = false;
 }
