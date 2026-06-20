@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/NilsR0711/drydock/compare/v1.0.0...v1.0.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* **worktree:** branch jobs off origin's default, not the stale local ref ([#343](https://github.com/NilsR0711/drydock/issues/343)) ([90c6817](https://github.com/NilsR0711/drydock/commit/90c681746ec0abe3cec231af2cf5899043d202ed)), closes [#341](https://github.com/NilsR0711/drydock/issues/341)
+
 ## [1.0.0](https://github.com/NilsR0711/drydock/compare/v0.1.13...v1.0.0) (2026-06-20)
 
 
