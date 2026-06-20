@@ -285,8 +285,10 @@ const DEFAULT_PAGE_SIZE = 25;
 
 /**
  * Paginated cross-repo job history with optional filters and free-text search.
- * Rows are ordered newest-first by createdAt. Searching matches exact issue
- * number or a case-insensitive issue title substring via the issues cache.
+ * Rows are ordered newest-first by createdAt, with id (insertion order) as a
+ * deterministic tiebreaker for jobs enqueued within the same second. Searching
+ * matches exact issue number or a case-insensitive issue title substring via
+ * the issues cache.
  */
 export function listJobsPage(filters: JobHistoryFilters, db: DB = getDb()): JobHistoryPage {
   const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE;
@@ -343,7 +345,11 @@ export function listJobsPage(filters: JobHistoryFilters, db: DB = getDb()): JobH
     .leftJoin(issues, and(eq(issues.repoId, jobs.repoId), eq(issues.number, jobs.issueNumber)))
     .innerJoin(repos, eq(repos.id, jobs.repoId))
     .where(where)
-    .orderBy(desc(jobs.createdAt))
+    // createdAt is stored at one-second granularity, so bulk enqueues share a
+    // timestamp. id (autoincrement) is the monotonic insertion order and acts as
+    // a deterministic tiebreaker, keeping the history a stable processing-order
+    // timeline regardless of status.
+    .orderBy(desc(jobs.createdAt), desc(jobs.id))
     .limit(pageSize)
     .offset(offset)
     .all();

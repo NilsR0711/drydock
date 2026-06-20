@@ -226,4 +226,31 @@ describe("listJobsPage", () => {
     expect(result.rows).toHaveLength(4);
     expect(result.page).toBe(1);
   });
+
+  it("orders same-createdAt jobs by id descending (stable tiebreaker)", () => {
+    const db = getDb();
+    const repo = db.insert(repos).values({ path: "/batch", name: "batch" }).returning().get();
+
+    // Simulate a bulk enqueue: every job shares the same one-second createdAt,
+    // so id (autoincrement insertion order) is the only deterministic tiebreaker.
+    const sameSecond = NOW;
+    const inserted = db
+      .insert(jobs)
+      .values([
+        { repoId: repo.id, issueNumber: 1, status: "queued", createdAt: sameSecond },
+        { repoId: repo.id, issueNumber: 2, status: "working", createdAt: sameSecond },
+        { repoId: repo.id, issueNumber: 3, status: "merged", createdAt: sameSecond },
+        { repoId: repo.id, issueNumber: 4, status: "aborted", createdAt: sameSecond },
+      ])
+      .returning()
+      .all();
+
+    const expectedIds = inserted.map((j) => j.id).sort((a, b) => b - a);
+
+    // Stable across repeated reads (no non-deterministic scrambling).
+    for (let i = 0; i < 3; i++) {
+      const result = listJobsPage({ repoId: repo.id });
+      expect(result.rows.map((r) => r.id)).toEqual(expectedIds);
+    }
+  });
 });
