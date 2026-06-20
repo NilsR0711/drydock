@@ -646,7 +646,7 @@ describe("repos service — sandboxed execution (issue #182)", () => {
         db,
       );
       expect((updated.releasePlaybook as string).length).toBeLessThanOrEqual(
-        RELEASE_PLAYBOOK_MAX_CHARS + 20,
+        RELEASE_PLAYBOOK_MAX_CHARS,
       );
       expect(updated.releasePlaybook).toMatch(/truncated/);
     });

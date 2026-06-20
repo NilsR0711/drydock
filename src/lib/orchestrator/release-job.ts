@@ -202,13 +202,12 @@ export async function runReleaseJob(
       );
     }
 
-    // Success: record whatever the agent reported and settle both rows. Capture
-    // the recorded release procedure (issue #352) on this CLEAN run only — a
-    // needs_human/aborted run returned earlier, so a parked run can never blank a
-    // known-good playbook. A clean run that recorded nothing leaves the existing
-    // playbook untouched (only persist a non-null capture).
+    // Success: record whatever the agent reported and settle both rows. Read the
+    // recorded release procedure (issue #352) now (it lives in the throwaway
+    // worktree), but persist it only AFTER both rows settle cleanly — if
+    // publishAgentReleaseRun/transitionJob throw, the catch parks the job in
+    // needs_human, and a parked run must never blank a known-good playbook.
     const playbook = consumeReleasePlaybook(wt.path);
-    if (playbook) setReleasePlaybook(repo.id, playbook, db);
 
     const meta = consumeReleaseMetadata(wt.path);
     publishAgentReleaseRun(
@@ -217,6 +216,9 @@ export async function runReleaseJob(
       db,
     );
     const released = transitionJob(job.id, "released", { branch: wt.branch }, db);
+    // Clean release settled: a non-null capture overwrites the playbook; a clean
+    // run that recorded nothing leaves the existing one untouched.
+    if (playbook) setReleasePlaybook(repo.id, playbook, db);
     await send(
       "release_published",
       `🚀 Release done: ${repo.name}${meta?.tag ? ` (${meta.tag})` : ""}.`,

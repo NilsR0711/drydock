@@ -30,9 +30,10 @@ export const RELEASE_PLAYBOOK_MAX_CHARS = 12_000;
 export function parseReleasePlaybook(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  return trimmed.length > RELEASE_PLAYBOOK_MAX_CHARS
-    ? `${trimmed.slice(0, RELEASE_PLAYBOOK_MAX_CHARS)}\n… (truncated)`
-    : trimmed;
+  if (trimmed.length <= RELEASE_PLAYBOOK_MAX_CHARS) return trimmed;
+  // Keep the truncation marker inside the cap so the final string never exceeds it.
+  const suffix = "\n… (truncated)";
+  return `${trimmed.slice(0, RELEASE_PLAYBOOK_MAX_CHARS - suffix.length)}${suffix}`;
 }
 
 /** Read and parse `.drydock/RELEASE_PLAYBOOK.md` from a worktree, or null if absent/unusable. */

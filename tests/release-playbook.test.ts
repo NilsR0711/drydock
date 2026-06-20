@@ -26,7 +26,8 @@ describe("parseReleasePlaybook", () => {
     const huge = "x".repeat(RELEASE_PLAYBOOK_MAX_CHARS + 500);
     const parsed = parseReleasePlaybook(huge);
     expect(parsed).not.toBeNull();
-    expect((parsed as string).length).toBeLessThanOrEqual(RELEASE_PLAYBOOK_MAX_CHARS + 20);
+    // The truncation marker is counted inside the cap, so the final string fits.
+    expect((parsed as string).length).toBeLessThanOrEqual(RELEASE_PLAYBOOK_MAX_CHARS);
     expect(parsed).toMatch(/truncated/);
   });
 });
