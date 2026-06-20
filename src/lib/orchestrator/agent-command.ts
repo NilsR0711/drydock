@@ -1,3 +1,4 @@
+import { opencodePermissionEnv } from "@/lib/agents/opencode";
 import type { AgentProvider } from "@/lib/agents/types";
 import type { DB } from "@/lib/db/client";
 import { resolveOpenRouterApiKey } from "@/lib/openrouter/config";
@@ -18,15 +19,38 @@ export function commandForAgent(provider: AgentProvider, db: DB): string {
 }
 
 /**
- * Extra environment for a spawned agent process, or undefined when nothing is
- * needed. opencode (issue #349) reaches OpenRouter natively via models.dev and
- * reads `OPENROUTER_API_KEY` from its environment, so Drydock bridges its stored
- * key onto the opencode process — `openrouter/*` models then authenticate
- * without the user configuring opencode's own auth separately. Other agents get
- * no extra env (they inherit `process.env` as before).
+ * Per-spawn permission context for opencode (issue #350). An acting session
+ * (start/resume) passes this so opencode's headless run can never block on a
+ * permission prompt; one-shot probes (decomposition) omit it and keep opencode's
+ * defaults. See `opencodePermissionEnv`.
  */
-export function agentSpawnEnv(provider: AgentProvider, db: DB): Record<string, string> | undefined {
+export interface AgentPermissionContext {
+  bypassPermissions?: boolean;
+  allowedCommands?: string[];
+}
+
+/**
+ * Extra environment for a spawned agent process, or undefined when nothing is
+ * needed. Two opencode-only bridges (issue #349 / #350); other agents inherit
+ * `process.env` unchanged.
+ *
+ * - `OPENROUTER_API_KEY`: opencode reaches OpenRouter natively via models.dev,
+ *   so Drydock bridges its stored key onto the process — `openrouter/*` models
+ *   then authenticate without the user configuring opencode's own auth.
+ * - `OPENCODE_PERMISSION`: for an acting session (when `perm` is supplied) the
+ *   non-bypass path injects an explicit permission config so a headless run
+ *   never hangs on a prompt; the bypass path omits it (the
+ *   `--dangerously-skip-permissions` flag covers it). See `opencodePermissionEnv`.
+ */
+export function agentSpawnEnv(
+  provider: AgentProvider,
+  db: DB,
+  perm?: AgentPermissionContext,
+): Record<string, string> | undefined {
   if (provider.id !== "opencode") return undefined;
+  const env: Record<string, string> = {};
   const key = resolveOpenRouterApiKey(getSettings(db));
-  return key ? { OPENROUTER_API_KEY: key } : undefined;
+  if (key) env.OPENROUTER_API_KEY = key;
+  if (perm) Object.assign(env, opencodePermissionEnv(perm));
+  return Object.keys(env).length > 0 ? env : undefined;
 }
