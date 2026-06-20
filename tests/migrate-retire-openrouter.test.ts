@@ -61,6 +61,33 @@ describe("0046 retire-openrouter migration (issue #349, ADR 039)", () => {
     expect(row?.model_override).toBe("openrouter/meta-llama/llama-3.1-8b-instruct");
   });
 
+  it("migrates an inherited issue model override (no agent_override) on an openrouter repo", () => {
+    const repo = addRepo({ path: "/r", name: "r" }, db);
+    db.run(sql`UPDATE repos SET agent='openrouter', default_model='x/y' WHERE id=${repo.id}`);
+    // Issue inherits the repo's agent (no agent_override) but pins a bare model.
+    db.insert(issues)
+      .values({ repoId: repo.id, number: 9, title: "x", modelOverride: "openai/gpt-4o-mini" })
+      .run();
+    runRetireMigration(db);
+    const row = db.all<{ agent_override: string | null; model_override: string }>(
+      sql`SELECT agent_override, model_override FROM issues WHERE repo_id=${repo.id} AND number=9`,
+    )[0];
+    expect(row?.agent_override).toBeNull();
+    expect(row?.model_override).toBe("openrouter/openai/gpt-4o-mini");
+  });
+
+  it("leaves an inherited override untouched on a non-openrouter repo", () => {
+    const repo = addRepo({ path: "/c", name: "c", agent: "claude" }, db);
+    db.insert(issues)
+      .values({ repoId: repo.id, number: 3, title: "x", modelOverride: "claude-opus-4-8" })
+      .run();
+    runRetireMigration(db);
+    const row = db.all<{ model_override: string }>(
+      sql`SELECT model_override FROM issues WHERE repo_id=${repo.id} AND number=3`,
+    )[0];
+    expect(row?.model_override).toBe("claude-opus-4-8");
+  });
+
   it("migrates a job's recorded agent/model so it stays resolvable", () => {
     const repo = addRepo({ path: "/r", name: "r" }, db);
     const job = createJob({ repoId: repo.id, issueNumber: 1 }, db);
