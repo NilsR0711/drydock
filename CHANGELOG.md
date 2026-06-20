@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.1.0](https://github.com/NilsR0711/drydock/compare/v1.0.1...v1.1.0) (2026-06-20)
+
+
+### Features
+
+* **agents:** add opencode as a third CLI agent ([#354](https://github.com/NilsR0711/drydock/issues/354)) ([042073d](https://github.com/NilsR0711/drydock/commit/042073d80252a1d909a2973a40fd5befea3daafb))
+* **agents:** give codex a permission-bypass flag for full shell access ([#353](https://github.com/NilsR0711/drydock/issues/353)) ([1d57c38](https://github.com/NilsR0711/drydock/commit/1d57c388b7cf1b9659bc973522d306c9b46981d5))
+* **agents:** map opencode autonomous permission bypass so headless jobs don't hang ([#350](https://github.com/NilsR0711/drydock/issues/350)) ([#363](https://github.com/NilsR0711/drydock/issues/363)) ([60ec23f](https://github.com/NilsR0711/drydock/commit/60ec23fdaa231606c186bbfc8e9bfd029d53b342))
+* **agents:** retire the custom OpenRouter backend for opencode ([#362](https://github.com/NilsR0711/drydock/issues/362)) ([58ed259](https://github.com/NilsR0711/drydock/commit/58ed2591d84e99a9bb107de8d7bb07b99fd73938))
+* **ci:** drop EOL Node 20, test against current LTS (22 + 24) ([#358](https://github.com/NilsR0711/drydock/issues/358)) ([f451e18](https://github.com/NilsR0711/drydock/commit/f451e18d4a4141fd61f425c3d2f1c2566b1039cc))
+* export/import repo settings as a portable bundle ([#348](https://github.com/NilsR0711/drydock/issues/348)) ([#351](https://github.com/NilsR0711/drydock/issues/351)) ([ffcf5aa](https://github.com/NilsR0711/drydock/commit/ffcf5aa2b8bc2af3880659a3161d98b64fe09228))
+* **onboarding:** first-run setup checklist for agent CLIs, forge clients & environment ([#356](https://github.com/NilsR0711/drydock/issues/356)) ([#360](https://github.com/NilsR0711/drydock/issues/360)) ([513dc77](https://github.com/NilsR0711/drydock/commit/513dc77e2af8faf1395136aeda2787283611458b))
+* **release:** prominent "Create release" button + per-repo release playbook memoization ([#352](https://github.com/NilsR0711/drydock/issues/352)) ([985f80b](https://github.com/NilsR0711/drydock/commit/985f80b7ec7bc1bcf7636e97560f6ab10c4479ae))
+
+
+### Bug Fixes
+
+* **driver-loop:** tick watchdog so a hung tick never wedges the loop ([#359](https://github.com/NilsR0711/drydock/issues/359)) ([4235341](https://github.com/NilsR0711/drydock/commit/4235341b16ffd0b2bc4c4801a8dee289b76520e1))
+* **jobs:** stable id tiebreaker for job history ordering ([#347](https://github.com/NilsR0711/drydock/issues/347)) ([0cf1233](https://github.com/NilsR0711/drydock/commit/0cf1233955b0989987617f7f09badb92c1aa8d15)), closes [#346](https://github.com/NilsR0711/drydock/issues/346)
+
 ## [1.0.1](https://github.com/NilsR0711/drydock/compare/v1.0.0...v1.0.1) (2026-06-20)
 
 
