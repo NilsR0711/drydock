@@ -7,9 +7,9 @@ import type { AgentId } from "@/lib/agents/types";
 const ALL_AGENTS = listAgents();
 
 /**
- * Default offering: the CLI agents. OpenRouter (issue #169) only appears
- * where the caller opts in — surfaces that support it pass an explicit
- * `agents` list once the backend is enabled in settings.
+ * Default offering: the static-catalog CLI agents (claude, codex). Other
+ * agents such as opencode — which reaches OpenRouter via `openrouter/<model>`
+ * (ADR 039) — only appear where the caller passes an explicit `agents` list.
  */
 const DEFAULT_AGENT_IDS: readonly AgentId[] = ["claude", "codex"];
 

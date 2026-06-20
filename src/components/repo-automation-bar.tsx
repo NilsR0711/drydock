@@ -132,15 +132,12 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [verifyPr, setVerifyPr] = useState(repo.verifyPr);
   const [autoPrAudit, setAutoPrAudit] = useState(repo.autoPrAudit);
   const [quietComments, setQuietComments] = useState(repo.quietComments);
-  // PR audits run on the CLI agents only; an OpenRouter repo without an
-  // explicit audit agent falls back to claude so the select never holds a
-  // value its option list cannot show (issue #169).
   // PR audits run on the static-catalog CLI agents (claude/codex) only; a repo
-  // whose agent is openrouter or opencode falls back to claude so the select and
-  // model never hold a value its option list cannot show (issues #169/#349).
+  // whose agent is opencode falls back to claude so the select and model never
+  // hold a value its option list cannot show (issues #169/#349).
   const auditFallbackAgent: AgentId =
     repo.agent === "claude" || repo.agent === "codex" ? repo.agent : "claude";
-  // Normalize the persisted override too: a legacy/foreign value (openrouter,
+  // Normalize the persisted override too: a legacy/foreign value (e.g.
   // opencode) must not slip past the static-agent rule and seed an unsupported
   // audit agent/model — fall back to the repo's CLI agent (or claude).
   const persistedAuditAgent: AgentId | null =
