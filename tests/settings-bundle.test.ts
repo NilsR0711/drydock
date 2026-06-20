@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { repos } from "@/lib/db/schema";
 import { saveTemplate } from "@/lib/prompts/templates";
-import { addRepo } from "@/lib/repos/service";
+import { addRepo, repoInputSchema } from "@/lib/repos/service";
 import {
   DRYDOCK_SETTINGS_VERSION,
   EXCLUDED_BUNDLE_FIELDS,
@@ -11,6 +11,7 @@ import {
   importRepoSettings,
   parseSettingsBundle,
   previewBundleChanges,
+  REPO_JSON_ARRAY_FIELDS,
 } from "@/lib/repos/settings-bundle";
 
 let db: DB;
@@ -253,5 +254,28 @@ describe("previewBundleChanges", () => {
     // Nothing applied.
     const row = db.select().from(repos).where(eq(repos.id, target.id)).get();
     expect(row?.planFirst).toBe(false);
+  });
+});
+
+describe("REPO_JSON_ARRAY_FIELDS schema sync (drift guard)", () => {
+  it("matches exactly the jsonStringArray fields in repoInputSchema", () => {
+    // A jsonStringArray field takes an array but persists a JSON-stringified
+    // array, so in the parsed defaults its value is a string that JSON-parses
+    // to an array. Deriving the set from the schema this way fails loudly if a
+    // new array column is added without updating REPO_JSON_ARRAY_FIELDS.
+    const defaults = repoInputSchema.parse({ path: "/x", name: "x" }) as Record<string, unknown>;
+    const arrayFields = new Set(
+      Object.entries(defaults)
+        .filter(([, value]) => {
+          if (typeof value !== "string") return false;
+          try {
+            return Array.isArray(JSON.parse(value));
+          } catch {
+            return false;
+          }
+        })
+        .map(([key]) => key),
+    );
+    expect(arrayFields).toEqual(REPO_JSON_ARRAY_FIELDS);
   });
 });

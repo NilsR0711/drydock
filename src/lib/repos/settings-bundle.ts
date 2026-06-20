@@ -43,9 +43,10 @@ const EXCLUDED = new Set<string>(EXCLUDED_BUNDLE_FIELDS);
  * JSON string-array columns on the repo row (stored via the jsonStringArray
  * contract in service.ts). Exported as real arrays for human readability and so
  * they round-trip cleanly back through repoInputSchema on import. Kept in sync
- * with the jsonStringArray fields in repoInputSchema.
+ * with the jsonStringArray fields in repoInputSchema — a test asserts this set
+ * matches the schema's array fields so a newly added field can't silently drift.
  */
-const REPO_JSON_ARRAY_FIELDS = new Set<string>([
+export const REPO_JSON_ARRAY_FIELDS = new Set<string>([
   "readyLabels",
   "blockingLabels",
   "autoLabelWhitelist",
