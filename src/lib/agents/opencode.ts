@@ -226,6 +226,8 @@ export const opencodeProvider: AgentProvider = {
   id: "opencode",
   label: "opencode",
   defaultCommand: "opencode",
+  installDocsUrl: "https://opencode.ai/docs/",
+  authDocsUrl: "https://opencode.ai/docs/cli/#auth",
   supportsResume: true,
   // Resume reuses the session's original model (see buildResumeArgs), so this
   // only feeds the (always-zero) cost estimate; opencode prices from the stream.

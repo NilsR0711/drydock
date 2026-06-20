@@ -38,6 +38,8 @@ export const claudeProvider: AgentProvider = {
   id: "claude",
   label: "Claude Code",
   defaultCommand: "claude",
+  installDocsUrl: "https://docs.anthropic.com/en/docs/claude-code/setup",
+  authDocsUrl: "https://docs.anthropic.com/en/docs/claude-code/setup#authentication",
   supportsResume: true,
   resumeModel: CLAUDE_RESUME_MODEL,
   resumeMaxTurns: 15,

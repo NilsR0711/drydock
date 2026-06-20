@@ -360,6 +360,8 @@ export const codexProvider: AgentProvider = {
   id: "codex",
   label: "Codex CLI",
   defaultCommand: "codex",
+  installDocsUrl: "https://github.com/openai/codex#installing-and-running-codex-cli",
+  authDocsUrl: "https://github.com/openai/codex#authentication",
   supportsResume: true,
   resumeModel: CODEX_DEFAULT_MODEL,
   // Satisfies the AgentProvider contract but is intentionally unused: codex exec

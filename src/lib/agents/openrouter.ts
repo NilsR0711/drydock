@@ -17,6 +17,8 @@ export const openrouterProvider: AgentProvider = {
   id: "openrouter",
   kind: "http",
   label: "OpenRouter",
+  installDocsUrl: "https://openrouter.ai/docs/quickstart",
+  authDocsUrl: "https://openrouter.ai/keys",
   // No CLI binary: the empty command makes any accidental spawn fail loudly.
   defaultCommand: "",
   supportsResume: false,
