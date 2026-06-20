@@ -875,6 +875,87 @@ describe("WorktreeManager", () => {
     }
   });
 
+  it("prepares a worktree whose HEAD reflects the real mainline, not the stale local default (issue #342)", async () => {
+    // Diagnostic-integrity regression for the Job-4 false root cause: an agent
+    // ran `git merge-base --is-ancestor <merged-commit> HEAD` against a worktree
+    // cut from the *stale local default* and wrongly concluded already-merged
+    // fixes were "lost", burning a full run. End-to-end against real git: with a
+    // local default that has drifted behind origin, prepare() must still cut the
+    // worktree from origin/<default> so every ancestry check the agent runs from
+    // HEAD reflects the true remote mainline.
+    const root = mkdtempSync(join(tmpdir(), "drydock-diag-"));
+    const git = async (args: string[], cwd: string) => {
+      const r = await spawnRunner("git", args, cwd);
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+      return r.stdout;
+    };
+    try {
+      const origin = join(root, "origin.git");
+      const seed = join(root, "seed");
+      const clone = join(root, "clone");
+      // A bare origin seeded with one commit pushed from a scratch checkout.
+      await git(["init", "--bare", "-b", "main", origin], root);
+      await git(["init", "-b", "main", seed], root);
+      await git(["config", "user.email", "dev@example.com"], seed);
+      await git(["config", "user.name", "Dev"], seed);
+      await git(["remote", "add", "origin", origin], seed);
+      writeFileSync(join(seed, "README.md"), "base\n");
+      await git(["add", "-A"], seed);
+      await git(["commit", "-m", "chore: init"], seed);
+      await git(["push", "origin", "main"], seed);
+
+      // The clone Drydock manages (repo.path). Its local main matches origin now.
+      await git(["clone", origin, clone], root);
+      const staleLocal = (await git(["rev-parse", "main"], clone)).trim();
+
+      // Origin advances by a merge-like commit, exactly as after a server-side
+      // merge. The clone fetches the object (so origin/main tracks it) but never
+      // moves its local default ref — that is the drift the agent reasons against.
+      writeFileSync(join(seed, "fix.txt"), "stabilization\n");
+      await git(["add", "-A"], seed);
+      await git(["commit", "-m", "fix: test-host stabilization (PR #245)"], seed);
+      await git(["push", "origin", "main"], seed);
+      const mergedToOrigin = (await git(["rev-parse", "HEAD"], seed)).trim();
+      await git(["fetch", "origin", "main"], clone);
+
+      // Precondition, with exact exit semantics: the merged commit is a known
+      // object locally (origin/main tracks it) yet is *not* an ancestor of the
+      // stale local default — `merge-base --is-ancestor` exits exactly 1, the
+      // false "lost" answer the Job-4 agent saw. Asserting 1 (not merely
+      // non-zero) keeps a broken setup, which errors with 128, from passing.
+      expect((await git(["rev-parse", "main"], clone)).trim()).toBe(staleLocal);
+      const onStaleLocal = await spawnRunner(
+        "git",
+        ["merge-base", "--is-ancestor", mergedToOrigin, "main"],
+        clone,
+      );
+      expect(onStaleLocal.exitCode).toBe(1);
+
+      // Prepare the job worktree the way Drydock does for a new issue job.
+      const repoUnderTest = {
+        id: 1,
+        path: clone,
+        name: "diag-repo",
+        defaultBranch: "main",
+      } as Repo;
+      const wt = await new WorktreeManager(spawnRunner).prepare(repoUnderTest, 99);
+
+      // Diagnostic integrity: from the worktree HEAD the merged commit IS an
+      // ancestor — the agent sees the real mainline, not the stale local ref.
+      const fromWorktree = await spawnRunner(
+        "git",
+        ["merge-base", "--is-ancestor", mergedToOrigin, "HEAD"],
+        wt.path,
+      );
+      expect(fromWorktree.exitCode).toBe(0);
+      // The recorded base is the true origin tip, not the stale local default.
+      expect(wt.base).toBe(mergedToOrigin);
+      expect(wt.base).not.toBe(staleLocal);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("worktreeHome honours DRYDOCK_HOME", () => {
     const prev = process.env.DRYDOCK_HOME;
     process.env.DRYDOCK_HOME = "/custom/home";
