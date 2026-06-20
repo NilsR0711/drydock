@@ -41,6 +41,64 @@ const TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
 export const TERMINAL_STATES: readonly JobStatus[] = ["merged", "released", "aborted"];
 
 /**
+ * Operationally live states: the job is actively progressing, or will resume on
+ * its own, so it stays stoppable from the UI. `waiting_limit` is included — the
+ * driver requeues it once the provider quota clears (issue #166) — so the detail
+ * page keeps the Stop button and runs the live metrics/log streams while parked
+ * there (issues #242, #337).
+ */
+export const IN_FLIGHT_STATES: readonly JobStatus[] = [
+  "working",
+  "ci_running",
+  "retrying",
+  "waiting_limit",
+];
+
+/** True when `s` is an in-flight state (see {@link IN_FLIGHT_STATES}). */
+export function isInFlight(s: string): boolean {
+  return (IN_FLIGHT_STATES as readonly string[]).includes(s);
+}
+
+/**
+ * States whose entry stamps the job's `finishedAt`: the run is over — merged,
+ * released, parked for a human, or aborted. The detail page's duration timer
+ * freezes when a transition into one of these arrives live (issue #337), so this
+ * MUST stay in lockstep with the `finishedAt` write in `transitionJob`.
+ * `interrupted` is excluded: it parks the job for automatic recovery and leaves
+ * `finishedAt` unset.
+ */
+export const FINISHED_STATES: readonly JobStatus[] = [
+  "merged",
+  "released",
+  "needs_human",
+  "aborted",
+];
+
+/** True when entering `s` stamps `finishedAt` (see {@link FINISHED_STATES}). */
+export function isFinishedState(s: string): boolean {
+  return (FINISHED_STATES as readonly string[]).includes(s);
+}
+
+/**
+ * States whose per-job SSE stream produces no further events once entered — the
+ * terminal states plus the parked states a job sits in until an operator acts.
+ * The log viewer and the live header close their EventSource on reaching one,
+ * rather than holding a connection open forever (issues #241, #337).
+ */
+export const STREAM_END_STATES: readonly JobStatus[] = [
+  "merged",
+  "released",
+  "needs_human",
+  "aborted",
+  "interrupted",
+];
+
+/** True when `s` ends the per-job SSE stream (see {@link STREAM_END_STATES}). */
+export function isStreamEndState(s: string): boolean {
+  return (STREAM_END_STATES as readonly string[]).includes(s);
+}
+
+/**
  * Terminal *success* states: the issue's work landed — a PR merged, or an
  * agent-driven release published (issue #256). Distinct from the terminal
  * failure state `aborted`, these mark an issue as done. Re-enqueuing such an

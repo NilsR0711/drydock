@@ -76,6 +76,42 @@ describe("LogBroker", () => {
     expect(b.events).toHaveLength(1);
   });
 
+  it("broadcast fans out to subscribers without persisting a row", () => {
+    const broker = new LogBroker(db);
+    const sub = fakeSub();
+    broker.subscribe(jobId, sub);
+    broker.broadcast(jobId, { id: 42, type: "status", payload: { from: "queued", to: "working" } });
+    expect(sub.events).toEqual([
+      { id: 42, type: "status", payload: { from: "queued", to: "working" } },
+    ]);
+    // No new job_events row was written — broadcast is fan-out only.
+    expect(broker.replay(jobId)).toHaveLength(0);
+  });
+
+  it("broadcast is a no-op when nobody is subscribed", () => {
+    const broker = new LogBroker(db);
+    expect(() =>
+      broker.broadcast(jobId, { type: "status", payload: { to: "merged" } }),
+    ).not.toThrow();
+  });
+
+  it("broadcast drops a subscriber whose send throws and keeps the fan-out alive", () => {
+    const broker = new LogBroker(db);
+    const dead: Subscriber = {
+      send: () => {
+        throw new TypeError("controller closed");
+      },
+    };
+    const live = fakeSub();
+    broker.subscribe(jobId, dead);
+    broker.subscribe(jobId, live);
+    expect(() =>
+      broker.broadcast(jobId, { id: 1, type: "status", payload: { to: "merged" } }),
+    ).not.toThrow();
+    expect(live.events).toHaveLength(1);
+    expect(broker.subscriberCount(jobId)).toBe(1);
+  });
+
   it("publishes a payload with a port URL and an @ in sibling fields intact", () => {
     // Regression: the URL-credential redaction regex used to match across JSON
     // boundaries here, corrupting the payload and throwing out of publish.

@@ -19,6 +19,7 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
+import { isStreamEndState } from "@/lib/orchestrator/state-machine";
 import { useHydrated } from "@/lib/ui/use-hydrated";
 import { cn } from "@/lib/utils";
 
@@ -192,21 +193,20 @@ function field(payload: unknown, key: string): string | undefined {
   return undefined;
 }
 
-/** Job states whose log stream produces no further events once entered. */
-const STREAM_END_STATES = new Set(["merged", "released", "needs_human", "aborted", "interrupted"]);
-
 /**
  * Whether a log event marks the end of the stream: an agent result/exit, or a
  * `status` transition into a parked/terminal state. Jobs that end via a status
  * transition (needs_human, aborted) never emit a result/claude_exit event, so
  * the viewer must also treat those transitions as completion — otherwise it
- * shows a permanent "live" badge and keeps the EventSource open forever.
+ * shows a permanent "live" badge and keeps the EventSource open forever. The
+ * terminal/parked set lives in the state machine (STREAM_END_STATES) so the log
+ * viewer and the live header agree on what ends a stream.
  */
 export function isTerminalLogEvent(type: string, payload: unknown): boolean {
   if (type === "result" || type === "claude_exit") return true;
   if (type !== "status") return false;
   const to = field(payload, "to");
-  return to !== undefined && STREAM_END_STATES.has(to);
+  return to !== undefined && isStreamEndState(to);
 }
 
 /**

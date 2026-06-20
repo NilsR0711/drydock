@@ -1,9 +1,10 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
-import { issues, type Job, jobEvents, jobs } from "@/lib/db/schema";
+import { issues, type Job, type JobEvent, jobEvents, jobs } from "@/lib/db/schema";
 import { getSettings } from "@/lib/settings/service";
+import { getBroker, type LogBroker } from "@/lib/stream/broker";
 import { emitDashboardChange } from "@/lib/stream/dashboard-bus";
-import { assertTransition, type JobStatus, OPEN_STATES } from "./state-machine";
+import { assertTransition, isFinishedState, type JobStatus, OPEN_STATES } from "./state-machine";
 
 export function createJob(
   input: {
@@ -44,10 +45,17 @@ export function getJob(id: number, db: DB = getDb()): Job | undefined {
   return db.select().from(jobs).where(eq(jobs.id, id)).get();
 }
 
-export function recordEvent(jobId: number, type: string, payload: unknown, db: DB = getDb()): void {
-  db.insert(jobEvents)
+export function recordEvent(
+  jobId: number,
+  type: string,
+  payload: unknown,
+  db: DB = getDb(),
+): JobEvent {
+  return db
+    .insert(jobEvents)
     .values({ jobId, type, payload: JSON.stringify(payload ?? {}) })
-    .run();
+    .returning()
+    .get();
 }
 
 /** Transition a job, validating against the state machine and logging an event. */
@@ -56,12 +64,13 @@ export function transitionJob(
   to: JobStatus,
   patch: Partial<Job> = {},
   db: DB = getDb(),
+  broker: LogBroker = getBroker(),
 ): Job {
   // better-sqlite3 transactions are synchronous and serialized on the single
   // process connection, so wrapping the read-validate-write makes the
   // transition atomic: no interleaved write can invalidate the check, and the
   // status update and its event-log entry commit (or roll back) together.
-  const updated = db.transaction((tx) => {
+  const { row, from, eventId } = db.transaction((tx) => {
     const txDb = tx as unknown as DB;
     const job = getJob(jobId, txDb);
     if (!job) throw new Error(`job ${jobId} not found`);
@@ -69,18 +78,24 @@ export function transitionJob(
     const now = Math.floor(Date.now() / 1000);
     const extra: Partial<Job> = {};
     if (to === "working" && !job.startedAt) extra.startedAt = now;
-    if (["merged", "released", "needs_human", "aborted"].includes(to)) extra.finishedAt = now;
-    const row = tx
+    if (isFinishedState(to)) extra.finishedAt = now;
+    const updated = tx
       .update(jobs)
       .set({ ...extra, ...patch, status: to })
       .where(eq(jobs.id, jobId))
       .returning()
       .get();
-    recordEvent(jobId, "status", { from: job.status, to }, txDb);
-    return row;
+    const ev = recordEvent(jobId, "status", { from: job.status, to }, txDb);
+    return { row: updated, from: job.status, eventId: ev.id };
   });
   emitDashboardChange();
-  return updated;
+  // Fan out the just-persisted transition to any open per-job SSE streams so the
+  // detail page header (status badge, Stop button) and duration timer react
+  // live, in lockstep with the log stream (issue #337). The row is already
+  // persisted atomically above; this push carries its id so the SSE route
+  // dedupes it against a replay, and a missed push is recovered on reconnect.
+  broker.broadcast(jobId, { id: eventId, type: "status", payload: { from, to } });
+  return row;
 }
 
 export function listJobs(repoId: number, db: DB = getDb()): Job[] {
