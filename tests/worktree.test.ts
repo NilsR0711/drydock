@@ -96,11 +96,18 @@ describe("WorktreeManager", () => {
     expect(wt.branch).toBe("drydock/issue-13-add-pagination-to-the-api-job-42");
   });
 
-  it("prepare adds a worktree on a new branch off the default branch", async () => {
+  it("prepare adds a worktree on a new branch off origin's default branch (issue #341)", async () => {
+    // The worktree must be cut from origin/<default>, not the local ref: server
+    // -side merges never touch this clone, so the local default drifts behind
+    // origin and a branch cut from it starts stale, its PR conflicting against
+    // the real mainline (issue #341).
     const { calls, run } = recordingRunner();
     const wt = await new WorktreeManager(run).prepare(repo, 42);
     expect(wt.branch).toBe("drydock/issue-0-job-42");
     expect(wt.path).toContain("job-42");
+    // The default branch is fetched fresh before the worktree is cut.
+    const fetch = calls.find((c) => c.args[2] === "fetch");
+    expect(fetch?.args).toEqual(["-C", repo.path, "fetch", "origin", "main"]);
     const add = calls.find((c) => c.args[2] === "worktree" && c.args[3] === "add");
     expect(add).toBeDefined();
     expect(add?.args).toEqual([
@@ -111,7 +118,7 @@ describe("WorktreeManager", () => {
       "-b",
       "drydock/issue-0-job-42",
       wt.path,
-      "main",
+      "origin/main",
     ]);
   });
 
@@ -130,17 +137,20 @@ describe("WorktreeManager", () => {
       ["worktree", "remove", "--force", wt.path],
       ["worktree", "prune"],
       ["branch", "-D", "drydock/issue-13-job-42"],
-      ["worktree", "add", "-b", "drydock/issue-13-job-42", wt.path, "main"],
+      // Fetch origin's default branch, then cut the new branch from it so the
+      // job starts on the real mainline rather than a stale local ref (#341).
+      ["fetch", "origin", "main"],
+      ["worktree", "add", "-b", "drydock/issue-13-job-42", wt.path, "origin/main"],
       ["rev-parse", "drydock/issue-13-job-42"],
     ]);
   });
 
   it("prepare succeeds on a fresh job even though the stale-cleanup calls fail", async () => {
     // First attempt of a job: there is nothing to remove, so the best-effort
-    // cleanup git calls exit non-zero. Only a failing `worktree add` is fatal;
-    // the post-add `rev-parse` that records the base must still succeed.
+    // cleanup git calls exit non-zero. The required fetch/add/rev-parse calls
+    // still succeed; only a failing `worktree add` (or fetch) is fatal.
     const run: CommandRunner = async (_cmd, args) => {
-      const ok = args.includes("add") || args.includes("rev-parse");
+      const ok = args.includes("add") || args.includes("rev-parse") || args.includes("fetch");
       return { stdout: "", stderr: ok ? "" : "not found", exitCode: ok ? 0 : 1 };
     };
     await expect(new WorktreeManager(run).prepare(repo, 1, 1)).resolves.toMatchObject({
@@ -182,6 +192,24 @@ describe("WorktreeManager", () => {
       "123",
     );
     expect(wt.base).toBe("feedface");
+  });
+
+  it("prepareForNewBranch fetches origin and cuts the branch off origin's default (issue #341)", async () => {
+    // The deployment-healing follow-up branch must start from the merged
+    // mainline on origin, not the local default ref that has drifted behind it.
+    const { calls, run } = recordingRunner();
+    const wt = await new WorktreeManager(run).prepareForNewBranch(
+      repo,
+      "drydock/deploy-123",
+      "123",
+    );
+    expect(wt.branch).toBe("drydock/deploy-123");
+    expect(wt.path).toContain("dh-123");
+    expect(calls.map((c) => c.args.slice(2))).toEqual([
+      ["fetch", "origin", "main"],
+      ["worktree", "add", "-b", "drydock/deploy-123", wt.path, "origin/main"],
+      ["rev-parse", "drydock/deploy-123"],
+    ]);
   });
 
   it("prepareForBranch fetches and checks out an existing branch", async () => {
