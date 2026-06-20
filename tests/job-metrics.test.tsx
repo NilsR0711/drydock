@@ -127,6 +127,62 @@ describe("JobMetrics duration ticker (issue #242)", () => {
   });
 });
 
+describe("JobMetrics duration freeze on terminal status (issue #337)", () => {
+  it("freezes the Duration at the finish time when a terminal status arrives", () => {
+    const now = Math.floor(Date.now() / 1000);
+    mounted = render(
+      <JobMetrics {...baseProps} active startedAt={now - 100} finishedAt={null} nowSec={now} />,
+    );
+    expect(text()).toContain("1m 40s");
+    const es = MockEventSource.instances.at(-1);
+
+    // The job merges live; the timer must stop at the transition time rather
+    // than run away until a reload (the bug in #337).
+    es?.emit("status", { from: "ci_running", to: "merged" }, 5);
+    act(() => vi.advanceTimersByTime(5000));
+    expect(text()).toContain("1m 40s");
+    // The stream is closed once the job is terminal — no further metrics arrive.
+    expect(es?.closed).toBe(true);
+  });
+
+  it("keeps ticking through a non-terminal transition (working → ci_running)", () => {
+    const now = Math.floor(Date.now() / 1000);
+    mounted = render(
+      <JobMetrics {...baseProps} active startedAt={now - 30} finishedAt={null} nowSec={now} />,
+    );
+    const es = MockEventSource.instances.at(-1);
+    es?.emit("status", { from: "working", to: "ci_running" }, 1);
+    act(() => vi.advanceTimersByTime(4000));
+    // CI is still running; the duration keeps advancing.
+    expect(text()).toContain("34s");
+  });
+
+  it("does not freeze on the agent result event (CI may still be running)", () => {
+    const now = Math.floor(Date.now() / 1000);
+    mounted = render(
+      <JobMetrics {...baseProps} active startedAt={now - 50} finishedAt={null} nowSec={now} />,
+    );
+    const es = MockEventSource.instances.at(-1);
+    // The agent finishing (`result`) precedes ci_running → merged for issue
+    // jobs; the duration must keep running until the job itself is terminal.
+    es?.emit("result", { chunks: [], costUsd: 1, durationSec: 50 }, 1);
+    act(() => vi.advanceTimersByTime(3000));
+    expect(text()).toContain("53s");
+  });
+
+  it("freezes on a parked terminal status (needs_human)", () => {
+    const now = Math.floor(Date.now() / 1000);
+    mounted = render(
+      <JobMetrics {...baseProps} active startedAt={now - 200} finishedAt={null} nowSec={now} />,
+    );
+    const es = MockEventSource.instances.at(-1);
+    es?.emit("status", { from: "working", to: "needs_human" }, 1);
+    act(() => vi.advanceTimersByTime(5000));
+    expect(text()).toContain("3m 20s");
+    expect(es?.closed).toBe(true);
+  });
+});
+
 describe("JobMetrics live cost and token totals (issue #242)", () => {
   it("refreshes cost and token totals from streamed assistant events", () => {
     const now = Math.floor(Date.now() / 1000);
