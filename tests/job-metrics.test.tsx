@@ -170,6 +170,20 @@ describe("JobMetrics duration freeze on terminal status (issue #337)", () => {
     expect(text()).toContain("53s");
   });
 
+  it("closes the stream on interrupted without freezing the Duration", () => {
+    const now = Math.floor(Date.now() / 1000);
+    mounted = render(
+      <JobMetrics {...baseProps} active startedAt={now - 60} finishedAt={null} nowSec={now} />,
+    );
+    const es = MockEventSource.instances.at(-1);
+    // interrupted ends the stream but does NOT stamp finishedAt (the job resumes
+    // on recovery), so the EventSource must close yet the timer keeps running.
+    es?.emit("status", { from: "working", to: "interrupted" }, 1);
+    expect(es?.closed).toBe(true);
+    act(() => vi.advanceTimersByTime(3000));
+    expect(text()).toContain("1m 3s");
+  });
+
   it("freezes on a parked terminal status (needs_human)", () => {
     const now = Math.floor(Date.now() / 1000);
     mounted = render(

@@ -3,7 +3,7 @@
 import { Cpu, DollarSign, RefreshCw, Timer } from "lucide-react";
 import { useEffect, useState } from "react";
 import { StatCard } from "@/components/ui/stat-card";
-import { isFinishedState } from "@/lib/orchestrator/state-machine";
+import { isFinishedState, isStreamEndState } from "@/lib/orchestrator/state-machine";
 import { formatDuration, formatUsd } from "@/lib/utils";
 
 /** SSE event types whose payload carries running usage (cost + token totals). */
@@ -103,16 +103,18 @@ export function JobMetrics({
       } catch {
         return;
       }
-      // Freeze only on a transition that stamps finishedAt (merged/released/
-      // needs_human/aborted). NOT on `result`/`claude_exit`: for an issue job
-      // the agent finishes before ci_running → merged, so freezing there would
-      // undercount the run. The transition lands ≈ when finishedAt is persisted,
-      // so the live freeze matches the post-reload value.
       const to = field(payload, "to");
-      if (to !== undefined && isFinishedState(to)) {
-        setFinishedAt((prev) => prev ?? Math.floor(Date.now() / 1000));
-        setStreamDone(true);
-      }
+      if (to === undefined) return;
+      // Freeze the Duration only on a transition that stamps finishedAt
+      // (merged/released/needs_human/aborted). NOT on `result`/`claude_exit`:
+      // for an issue job the agent finishes before ci_running → merged, so
+      // freezing there would undercount the run. The transition lands ≈ when
+      // finishedAt is persisted, so the live freeze matches the reload value.
+      if (isFinishedState(to)) setFinishedAt((prev) => prev ?? Math.floor(Date.now() / 1000));
+      // Close the stream on ANY stream-end state — including `interrupted`,
+      // which ends the stream without stamping finishedAt — so the EventSource
+      // doesn't linger after the server stops publishing.
+      if (isStreamEndState(to)) setStreamDone(true);
     };
     for (const type of METRIC_EVENTS) es.addEventListener(type, onMetric);
     es.addEventListener("status", onStatus);
