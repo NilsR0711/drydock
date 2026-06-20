@@ -12,7 +12,6 @@ import {
   runOnboardingDiagnostics,
 } from "@/lib/onboarding/diagnostics";
 import { saveProviderUsage } from "@/lib/orchestrator/provider-usage";
-import { saveSettings } from "@/lib/settings/service";
 
 function reset(): void {
   const db = getDb();
@@ -35,8 +34,6 @@ const ALL_PRESENT: CommandRunner = async (cmd, args = []) => {
   return ok();
 };
 
-const okFetch = (async () =>
-  ({ ok: true, status: 200, text: async () => "" }) as unknown as Response) as typeof fetch;
 const httpOk: HttpClient = async () =>
   ({ status: 200, ok: true, body: "", headers: {} }) as HttpResponse;
 
@@ -53,7 +50,6 @@ describe("runOnboardingDiagnostics", () => {
     const report = await runOnboardingDiagnostics({
       runner: ALL_PRESENT,
       http: httpOk,
-      fetchImpl: okFetch,
     });
     for (const id of AGENT_IDS) {
       expect(report.items.some((i) => i.id === `agent:${id}`)).toBe(true);
@@ -68,7 +64,6 @@ describe("runOnboardingDiagnostics", () => {
     const report = await runOnboardingDiagnostics({
       runner: NOTHING,
       http: httpOk,
-      fetchImpl: okFetch,
     });
     expect(item(report, "agent:claude").status).toBe("missing");
     expect(item(report, "agent:claude").action?.url).toContain("claude-code");
@@ -88,7 +83,6 @@ describe("runOnboardingDiagnostics", () => {
     const report = await runOnboardingDiagnostics({
       runner: ALL_PRESENT,
       http: httpOk,
-      fetchImpl: okFetch,
     });
     const claude = item(report, "agent:claude");
     expect(claude.status).toBe("ready");
@@ -102,7 +96,6 @@ describe("runOnboardingDiagnostics", () => {
     const report = await runOnboardingDiagnostics({
       runner: ALL_PRESENT,
       http: httpOk,
-      fetchImpl: okFetch,
     });
     const claude = item(report, "agent:claude");
     // Sign-in is unconfirmable until the first job, so the card stays neutral
@@ -119,7 +112,7 @@ describe("runOnboardingDiagnostics", () => {
       if (cmd === "codex") throw new Error("ENOENT");
       return ALL_PRESENT(cmd, args);
     };
-    const report = await runOnboardingDiagnostics({ runner, http: httpOk, fetchImpl: okFetch });
+    const report = await runOnboardingDiagnostics({ runner, http: httpOk });
     const codex = item(report, "agent:codex");
     expect(codex.optional).toBe(true);
     expect(codex.status).toBe("warning");
@@ -133,7 +126,7 @@ describe("runOnboardingDiagnostics", () => {
       if (args[0] === "--version") return ok(`${cmd} version 1.0.0`);
       return ok();
     };
-    const report = await runOnboardingDiagnostics({ runner, http: httpOk, fetchImpl: okFetch });
+    const report = await runOnboardingDiagnostics({ runner, http: httpOk });
     const github = item(report, "forge:github");
     // Installed but unverifiable: must not read "ready", and a transient error
     // must never block completion.
@@ -145,7 +138,6 @@ describe("runOnboardingDiagnostics", () => {
     const report = await runOnboardingDiagnostics({
       runner: NOTHING,
       http: httpOk,
-      fetchImpl: okFetch,
     });
     for (const i of report.items) {
       if (i.action) expect(i.action.url).toBeTruthy();
@@ -158,49 +150,26 @@ describe("runOnboardingDiagnostics", () => {
       if (args[0] === "--version") return ok(`${cmd} version 1.0.0`);
       return ok();
     };
-    const report = await runOnboardingDiagnostics({ runner, http: httpOk, fetchImpl: okFetch });
+    const report = await runOnboardingDiagnostics({ runner, http: httpOk });
     const github = item(report, "forge:github");
     expect(github.status).toBe("missing");
     expect(github.action?.label).toBe("Set up auth");
     expect(report.complete).toBe(false);
   });
 
-  it("marks OpenRouter missing when a repo uses it without a key", async () => {
+  it("marks opencode required and CLI-probed when a repo uses it", async () => {
     const db = getDb();
-    db.insert(repos).values({ path: "/r", name: "r", agent: "openrouter" }).run();
-    const report = await runOnboardingDiagnostics({
-      runner: ALL_PRESENT,
-      http: httpOk,
-      fetchImpl: okFetch,
-    });
-    const openrouter = item(report, "agent:openrouter");
-    expect(openrouter.optional).toBe(false);
-    expect(openrouter.status).toBe("missing");
-    expect(report.complete).toBe(false);
-  });
-
-  it("keeps OpenRouter optional and non-blocking when unused and keyless", async () => {
-    const report = await runOnboardingDiagnostics({
-      runner: ALL_PRESENT,
-      http: httpOk,
-      fetchImpl: okFetch,
-    });
-    const openrouter = item(report, "agent:openrouter");
-    expect(openrouter.optional).toBe(true);
-    expect(openrouter.status).toBe("unknown");
-    expect(report.complete).toBe(true);
-  });
-
-  it("reports OpenRouter ready with a valid configured key", async () => {
-    const db = getDb();
-    db.insert(repos).values({ path: "/r", name: "r", agent: "openrouter" }).run();
-    saveSettings({ openrouterEnabled: true, openrouterApiKey: "sk-test" });
-    const report = await runOnboardingDiagnostics({
-      runner: ALL_PRESENT,
-      http: httpOk,
-      fetchImpl: okFetch,
-    });
-    expect(item(report, "agent:openrouter").status).toBe("ready");
+    db.insert(repos)
+      .values({ path: "/r", name: "r", agent: "opencode", defaultModel: "openrouter/x/y" })
+      .run();
+    const report = await runOnboardingDiagnostics({ runner: ALL_PRESENT, http: httpOk });
+    const opencode = item(report, "agent:opencode");
+    expect(opencode.optional).toBe(false);
+    // Probed like any other CLI agent (no bespoke OpenRouter HTTP check, ADR 039):
+    // the binary is found via `--version`, and sign-in stays unverified until the
+    // first job (no usage snapshot yet) — so the card is neutral, never missing.
+    expect(opencode.facets.find((f) => f.label === "Installed")?.status).toBe("ready");
+    expect(opencode.status).toBe("unknown");
   });
 
   it("blocks when a configured GitLab token is rejected", async () => {
@@ -219,7 +188,6 @@ describe("runOnboardingDiagnostics", () => {
     const report = await runOnboardingDiagnostics({
       runner: ALL_PRESENT,
       http: http401,
-      fetchImpl: okFetch,
     });
     const gitlab = item(report, "forge:gitlab");
     expect(gitlab.optional).toBe(false);
@@ -231,7 +199,6 @@ describe("runOnboardingDiagnostics", () => {
     const report = await runOnboardingDiagnostics({
       runner: ALL_PRESENT,
       http: httpOk,
-      fetchImpl: okFetch,
     });
     expect(item(report, "forge:gitlab").optional).toBe(true);
     expect(report.complete).toBe(true);
@@ -241,7 +208,6 @@ describe("runOnboardingDiagnostics", () => {
     const report = await runOnboardingDiagnostics({
       runner: ALL_PRESENT,
       http: httpOk,
-      fetchImpl: okFetch,
       now: () => 1_700_000_000_000,
     });
     expect(report.checkedAt).toBe(1_700_000_000);
