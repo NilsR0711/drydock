@@ -143,6 +143,13 @@ export const settingsSchema = z.object({
   // available (bootstrap), then this saved value takes over at runtime. The
   // Logs page has its own independent level *filter* on top of what is written.
   logLevel: z.enum(LOG_LEVELS).default("info"),
+  // First-run onboarding (issue #356). Unix seconds when the user finished or
+  // dismissed the setup checklist; null while it has never been seen. Gates the
+  // auto-opening welcome flow so it greets a fresh install exactly once, then
+  // stays reachable on demand from Settings. Stored here (global settings row)
+  // rather than browser-local so the "already onboarded" state is shared across
+  // every device pointed at the same Drydock instance.
+  onboardingCompletedAt: z.number().int().nullable().default(null),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 

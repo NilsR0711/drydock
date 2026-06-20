@@ -28,6 +28,14 @@ describe("settings", () => {
     expect(s.retentionDays).toBe(30);
   });
 
+  it("defaults onboarding as not-yet-seen and persists a completion timestamp (issue #356)", () => {
+    // Null until the first-run flow is finished/dismissed, which is what the
+    // root layout keys the auto-open decision off.
+    expect(getSettings(db).onboardingCompletedAt).toBeNull();
+    saveSettings({ onboardingCompletedAt: 1_700_000_000 }, db);
+    expect(getSettings(db).onboardingCompletedAt).toBe(1_700_000_000);
+  });
+
   it("treats maxTurns = 0 as an allowed (unlimited) budget and rejects negatives (issue #254)", () => {
     saveSettings({ maxTurns: 0 }, db);
     expect(getSettings(db).maxTurns).toBe(0);

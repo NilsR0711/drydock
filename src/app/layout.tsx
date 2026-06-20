@@ -36,10 +36,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   let credentialFailures: CredentialFailure[] = [];
   let claudeUsage: ClaudeUsageView = deriveClaudeUsageView({ now: Math.floor(Date.now() / 1000) });
   let codexUsage: CodexUsageView = buildCodexUsageView({ now: Math.floor(Date.now() / 1000) });
+  // First-run onboarding greets the user until they finish/dismiss it (issue
+  // #356). Default to showing it so a brand-new install (no DB yet) is welcomed.
+  let showOnboarding = true;
   try {
     pending = pendingCount();
     needsHuman = needsHumanJobs().length;
-    paused = getSettings().paused;
+    const settings = getSettings();
+    paused = settings.paused;
+    showOnboarding = settings.onboardingCompletedAt === null;
     credentialFailures = getCredentialFailures();
     claudeUsage = getClaudeUsageView();
     codexUsage = getCodexUsageView();
@@ -58,7 +63,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
     >
       <body>
-        <Providers>
+        <Providers showOnboarding={showOnboarding}>
           <AppShell
             adrPending={pending}
             needsHuman={needsHuman}

@@ -145,6 +145,18 @@ export interface AgentProvider {
   readonly label: string;
   /** CLI binary name used when settings provide no explicit path. */
   readonly defaultCommand: string;
+  /**
+   * Official page explaining how to install this agent (first-run onboarding,
+   * issue #356). Surfaced as the card's "Install" action when the CLI is
+   * missing. Omitted for agents with no install step.
+   */
+  readonly installDocsUrl?: string;
+  /**
+   * Official page explaining how to authenticate / obtain a key for this agent
+   * (first-run onboarding, issue #356). Surfaced as the "Set up" action when the
+   * agent is installed but not signed in.
+   */
+  readonly authDocsUrl?: string;
   /** Whether the CLI can resume a prior session (the CI-retry path). */
   readonly supportsResume: boolean;
   /** Model used on the cheaper/faster CI-fix resume path. */
