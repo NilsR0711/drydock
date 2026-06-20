@@ -136,6 +136,12 @@ export const repos = sqliteTable("repos", {
   // → publish release pipeline. Cutting a public release is hard to reverse, so
   // it is gated globally and per repo and is fully previewable.
   releaseEnabled: integer("release_enabled", { mode: "boolean" }).notNull().default(false),
+  // Memoized release procedure (issue #352). The agent-driven release records how
+  // THIS repo releases on a clean run so subsequent runs follow the known steps
+  // (light verification) instead of re-investigating from scratch — far cheaper.
+  // Machine-written commands/steps only, never secrets; null until the first
+  // clean release. Lives only in Drydock's DB, never committed to the repo.
+  releasePlaybook: text("release_playbook"),
   // Opt-in webhook-driven issue sync (issue #61). See ADR 029. A non-empty
   // secret enables the inbound receiver at /api/webhooks/<repoId>: it verifies
   // each delivery (GitHub HMAC-SHA256 signature / GitLab token) and triggers a
