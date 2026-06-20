@@ -28,9 +28,15 @@ export type StreamRunner = (
   args: string[],
   cwd: string,
   cb: StreamCallbacks,
+  /**
+   * Extra environment variables merged over `process.env` for the child only
+   * (issue #349). Bridges an OpenRouter key onto an `opencode` session so
+   * `openrouter/*` models authenticate without separate opencode auth.
+   */
+  env?: Record<string, string>,
 ) => StreamHandle;
 
-export const spawnStreamRunner: StreamRunner = (cmd, args, cwd, cb) => {
+export const spawnStreamRunner: StreamRunner = (cmd, args, cwd, cb, env) => {
   // Detached: the agent CLI leads its own process group, so abort() can signal
   // the whole tree. A SIGKILLed CLI would otherwise orphan its grandchildren
   // (test runners, dev servers started via the agent's tools), which keep
@@ -44,7 +50,7 @@ export const spawnStreamRunner: StreamRunner = (cmd, args, cwd, cb) => {
   // so the warning never fires; stdout/stderr stay piped for streaming.
   const child: ChildProcess = spawn(cmd, args, {
     cwd,
-    env: process.env,
+    env: env ? { ...process.env, ...env } : process.env,
     detached: SPAWN_DETACHED,
     stdio: ["ignore", "pipe", "pipe"],
   });

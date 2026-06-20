@@ -2,13 +2,13 @@ import type { ParsedEvent, ParseError, RawRateLimitInfo } from "@/lib/stream/par
 import type { CodexUsageReading } from "./codex-usage";
 
 /**
- * Coding agents Drydock can drive. claude/codex/opencode map to local CLIs;
- * openrouter talks to the hosted OpenRouter API over HTTP (issue #169, ADR 032).
- * opencode (issue #349) is a CLI that itself routes to 75+ providers via
- * models.dev, so its model ids are `provider/model` strings rather than the
- * static MODELS catalog the other CLI agents use.
+ * Coding agents Drydock can drive — all spawned local CLIs. claude/codex use the
+ * static MODELS catalog; opencode (issue #349) itself routes to 75+ providers
+ * via models.dev (including OpenRouter), so its model ids are `provider/model`
+ * strings. The bespoke `openrouter` HTTP backend (ADR 032) was retired in favour
+ * of opencode + `openrouter/*` models (ADR 039).
  */
-export type AgentId = "claude" | "codex" | "openrouter" | "opencode";
+export type AgentId = "claude" | "codex" | "opencode";
 
 /**
  * Incremental, stateful parser over an agent CLI's stdout stream. Both the
@@ -134,13 +134,6 @@ export interface ClassifyFailureInput {
  */
 export interface AgentProvider {
   readonly id: AgentId;
-  /**
-   * How the provider executes (issue #169): "cli" spawns a local binary and
-   * parses its stdout; "http" talks to a hosted API — the CLI arg/parser
-   * methods are unavailable and call sites must dispatch before using them.
-   * Omitted means "cli".
-   */
-  readonly kind?: "cli" | "http";
   /** Human-readable name for the UI. */
   readonly label: string;
   /** CLI binary name used when settings provide no explicit path. */

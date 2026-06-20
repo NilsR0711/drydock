@@ -7,8 +7,6 @@ import type { Repo } from "@/lib/db/schema";
 import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
 import { fetchHttp, type HttpClient } from "@/lib/forge/http";
 import { assertSafeForgeUrl, privateForgeAllowedFromEnv } from "@/lib/forge/url-guard";
-import { checkOpenRouterKey } from "@/lib/openrouter/client";
-import { resolveOpenRouterApiKey } from "@/lib/openrouter/config";
 import { commandForAgent } from "@/lib/orchestrator/agent-command";
 import { getCodexUsage, getProviderUsage } from "@/lib/orchestrator/provider-usage";
 import { getSettings, type Settings } from "@/lib/settings/service";
@@ -21,7 +19,7 @@ import { getSettings, type Settings } from "@/lib/settings/service";
  * explanation, and a docs link for whatever is missing.
  *
  * It reuses the same probes the rest of the app already depends on
- * ({@link checkAgent}, {@link checkOpenRouterKey}, `gh auth status`, the GitLab
+ * ({@link checkAgent}, `gh auth status`, the GitLab
  * `/api/v4/user` call, and the persisted usage snapshots) rather than inventing
  * new ones, and is fully dependency-injectable so it can be unit-tested without
  * spawning real processes or hitting the network — mirroring the
@@ -49,9 +47,8 @@ const GLAB_TOKEN_URL = "https://docs.gitlab.com/ee/user/profile/personal_access_
 const AGENT_BLURB: Record<AgentId, string> = {
   claude: "Anthropic's Claude Code CLI — Drydock's default agent for working through issues.",
   codex: "OpenAI's Codex CLI — an alternative coding agent you can assign per repository.",
-  openrouter:
-    "Reach many hosted models (including free-tier ones) through a single OpenRouter API key.",
-  opencode: "The open-source opencode CLI — another agent option, configurable per repository.",
+  opencode:
+    "The open-source opencode CLI — reaches 75+ providers (incl. OpenRouter as `openrouter/<model>`), configurable per repository.",
 };
 
 export type OnboardingStatus = "ready" | "warning" | "missing" | "unknown";
@@ -99,8 +96,6 @@ export interface OnboardingDeps {
   runner?: CommandRunner;
   /** HTTP seam for the GitLab `/api/v4/user` probe. */
   http?: HttpClient;
-  /** Fetch seam for the OpenRouter key probe. */
-  fetchImpl?: typeof fetch;
   /** Clock (epoch ms). */
   now?: () => number;
   /** Per-probe deadline override (tests). */
@@ -177,77 +172,13 @@ function cliAuthFacet(provider: AgentProvider, installed: boolean, db: DB): Onbo
   };
 }
 
-async function openrouterItem(
-  provider: AgentProvider,
-  settings: Settings,
-  required: boolean,
-  fetchImpl: typeof fetch,
-): Promise<OnboardingItem> {
-  const base = {
-    id: `agent:${provider.id}`,
-    category: "agent" as const,
-    name: provider.label,
-    blurb: AGENT_BLURB[provider.id],
-    optional: !required,
-  };
-  const key = resolveOpenRouterApiKey(settings);
-  if (!key) {
-    // No key. Only blocking when a repo is actually pinned to OpenRouter.
-    const status: OnboardingStatus = required ? "missing" : "unknown";
-    const detail = required
-      ? "No API key configured for a repo that uses OpenRouter."
-      : "Optional backend — add a key in Settings to use OpenRouter-hosted models.";
-    return {
-      ...base,
-      status,
-      facets: [{ label: "API key", status, detail }],
-      action: docsAction("Get an API key", provider.authDocsUrl),
-    };
-  }
-  const result = await checkOpenRouterKey(key, fetchImpl);
-  if (result.ok) {
-    return {
-      ...base,
-      status: "ready",
-      facets: [{ label: "API key", status: "ready", detail: "Key accepted by OpenRouter." }],
-    };
-  }
-  if (/HTTP 40[13]\b/.test(result.error)) {
-    const status: OnboardingStatus = required ? "missing" : "warning";
-    return {
-      ...base,
-      status,
-      facets: [{ label: "API key", status, detail: "OpenRouter rejected the API key." }],
-      action: docsAction("Update the key", provider.authDocsUrl),
-    };
-  }
-  // Network/timeout/5xx: transient, never a false alarm.
-  return {
-    ...base,
-    status: "unknown",
-    facets: [
-      {
-        label: "API key",
-        status: "unknown",
-        detail: "Could not reach OpenRouter to verify the key.",
-      },
-    ],
-  };
-}
-
 async function agentItem(
   provider: AgentProvider,
-  settings: Settings,
   requiredAgents: Set<AgentId>,
   db: DB,
   runner: CommandRunner,
-  fetchImpl: typeof fetch,
 ): Promise<OnboardingItem> {
   const required = requiredAgents.has(provider.id);
-  if (provider.kind === "http") {
-    return openrouterItem(provider, settings, required, fetchImpl);
-  }
-
   const command = commandForAgent(provider, db);
   const probe = await checkAgent(provider, { command, runner });
   const install: OnboardingFacet = probe.installed
@@ -483,7 +414,6 @@ export async function runOnboardingDiagnostics(
   const db = deps.db ?? getDb();
   const baseRunner = deps.runner ?? spawnRunner;
   const http = deps.http ?? fetchHttp;
-  const fetchImpl = deps.fetchImpl ?? fetch;
   const now = deps.now ?? Date.now;
   const timeoutMs = deps.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
 
@@ -504,9 +434,7 @@ export async function runOnboardingDiagnostics(
   const usesGitlab = repos.some((r) => r.platform === "gitlab");
 
   const [agents, github, gitlab, git, reposCheck] = await Promise.all([
-    Promise.all(
-      listAgents().map((p) => agentItem(p, settings, requiredAgents, db, runner, fetchImpl)),
-    ),
+    Promise.all(listAgents().map((p) => agentItem(p, requiredAgents, db, runner))),
     githubItem(settings, usesGithub, runner),
     gitlabItem(repos, usesGitlab, runner, http, timeoutMs),
     gitItem(runner),

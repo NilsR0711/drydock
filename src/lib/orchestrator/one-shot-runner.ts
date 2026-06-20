@@ -3,6 +3,7 @@ import { type DB, getDb } from "@/lib/db/client";
 import { oneShotCosts } from "@/lib/db/schema";
 import { type CommandOptions, type CommandRunner, spawnRunner } from "@/lib/exec/runner";
 import { StreamJsonParser } from "@/lib/stream/parser";
+import { agentSpawnEnv } from "./agent-command";
 
 export type OneShotType =
   | "verify"
@@ -43,27 +44,19 @@ export async function runOneShotAndRecordCost(opts: {
   timeoutMs?: number;
   runner?: CommandRunner;
   db?: DB;
-  /** HTTP transport override for http providers (tests). */
-  fetchImpl?: typeof fetch;
 }): Promise<OneShotResult> {
-  // HTTP providers (openrouter, issue #169) have no CLI to spawn — dispatch
-  // to the API one-shot, which mirrors the OneShotResult contract.
-  if (opts.provider.kind === "http") {
-    const { runOpenRouterOneShot } = await import("@/lib/openrouter/one-shot");
-    return runOpenRouterOneShot({
-      model: opts.model,
-      prompt: opts.prompt,
-      repoId: opts.repoId,
-      type: opts.type,
-      timeoutMs: opts.timeoutMs,
-      db: opts.db,
-      fetchImpl: opts.fetchImpl,
-    });
-  }
   const runner = opts.runner ?? spawnRunner;
   const db = opts.db ?? getDb();
+  // Bridge the OpenRouter key onto opencode one-shots (issue #349) so a repo's
+  // `openrouter/*` decompose/verify/plan/audit calls authenticate.
+  const env = agentSpawnEnv(opts.provider, db);
   const cmdOpts: CommandOptions | undefined =
-    opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : undefined;
+    opts.timeoutMs !== undefined || env
+      ? {
+          ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+          ...(env ? { env } : {}),
+        }
+      : undefined;
 
   const streamArgs = opts.provider.buildStreamOneShotArgs({
     prompt: opts.prompt,

@@ -131,7 +131,6 @@ describe("settings", () => {
       "cost_limit",
       "claude_limit",
       "codex_limit",
-      "openrouter_limit",
       "auth_expired",
       "automation_paused",
     ]);
@@ -162,46 +161,26 @@ describe("settings", () => {
   });
 });
 
-describe("openrouter settings (issue #169)", () => {
-  it("defaults to disabled with an empty key and sane sync interval", () => {
-    const s = getSettings(db);
-    expect(s.openrouterEnabled).toBe(false);
+describe("openrouter key bridge (issue #349, ADR 039)", () => {
+  it("defaults the OpenRouter API key to empty and drops the retired settings", () => {
+    const s = getSettings(db) as Record<string, unknown>;
     expect(s.openrouterApiKey).toBe("");
-    expect(s.openrouterCatalogRefreshHours).toBe(6);
-    expect(s.openrouterDefaultModel).toBe("");
-    expect(s.openrouterFreeModelsOnly).toBe(false);
-    expect(s.openrouterSiteUrl).toBe("");
-    expect(s.openrouterAppName).toBe("Drydock");
-    expect(s.openrouterLimitAutoWait).toBe(true);
+    // The bespoke OpenRouter backend settings are gone (ADR 039).
+    expect(s.openrouterEnabled).toBeUndefined();
+    expect(s.openrouterCatalogRefreshHours).toBeUndefined();
+    expect(s.openrouterDefaultModel).toBeUndefined();
+    expect(s.openrouterFreeModelsOnly).toBeUndefined();
+    expect(s.openrouterLimitAutoWait).toBeUndefined();
   });
 
-  it("persists the OpenRouter configuration", () => {
-    saveSettings(
-      {
-        openrouterEnabled: true,
-        openrouterApiKey: "sk-or-v1-test",
-        openrouterCatalogRefreshHours: 12,
-        openrouterDefaultModel: "meta-llama/llama-3.3-70b-instruct:free",
-        openrouterFreeModelsOnly: true,
-      },
-      db,
-    );
-    const s = getSettings(db);
-    expect(s.openrouterEnabled).toBe(true);
-    expect(s.openrouterApiKey).toBe("sk-or-v1-test");
-    expect(s.openrouterCatalogRefreshHours).toBe(12);
-    expect(s.openrouterDefaultModel).toBe("meta-llama/llama-3.3-70b-instruct:free");
-    expect(s.openrouterFreeModelsOnly).toBe(true);
+  it("persists the OpenRouter API key bridged onto opencode", () => {
+    saveSettings({ openrouterApiKey: "sk-or-v1-test" }, db);
+    expect(getSettings(db).openrouterApiKey).toBe("sk-or-v1-test");
   });
 
-  it("rejects a refresh interval below 15 minutes", () => {
-    expect(() => saveSettings({ openrouterCatalogRefreshHours: 0.1 }, db)).toThrow();
-    saveSettings({ openrouterCatalogRefreshHours: 0.25 }, db);
-    expect(getSettings(db).openrouterCatalogRefreshHours).toBe(0.25);
-  });
-
-  it("keeps defaultAgent restricted to the CLI agents", () => {
+  it("keeps defaultAgent restricted to the static-catalog CLI agents", () => {
     expect(() => saveSettings({ defaultAgent: "openrouter" as unknown as "claude" }, db)).toThrow();
+    expect(() => saveSettings({ defaultAgent: "opencode" as unknown as "claude" }, db)).toThrow();
   });
 });
 

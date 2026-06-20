@@ -108,31 +108,14 @@ export const settingsSchema = z.object({
   smtpPass: z.string().default(""),
   emailFrom: z.string().default(""),
   emailTo: z.string().default(""),
-  // ---- OpenRouter backend (issue #169, ADR 032). Off by default; enabling it
-  // adds OpenRouter-hosted models (including free-tier ones) as a third agent
-  // next to the Claude/Codex CLIs. The model catalog is mirrored from the
-  // public Models API into SQLite and refreshed on the interval below.
-  openrouterEnabled: z.boolean().default(false),
-  // Stored API key; the DRYDOCK_OPENROUTER_API_KEY env var overrides it
-  // (headless deployments). Redacted from logs/events like all other secrets.
+  // ---- OpenRouter API key, bridged onto opencode (issue #349, ADR 039). The
+  // bespoke OpenRouter HTTP backend was retired; opencode now reaches OpenRouter
+  // natively via `openrouter/<model>` ids and reads OPENROUTER_API_KEY from its
+  // environment. Drydock stores the key here and injects it into the spawned
+  // opencode process (see agentSpawnEnv). The DRYDOCK_OPENROUTER_API_KEY env var
+  // overrides it (headless deployments); redacted from logs/events like all
+  // other secrets. Empty = let opencode use its own configured auth instead.
   openrouterApiKey: z.string().default(""),
-  // Catalog sync interval in hours; 0.25 (15 minutes) is the floor so a
-  // misconfigured instance can never hammer the public Models API.
-  openrouterCatalogRefreshHours: z.number().min(0.25).default(6),
-  // Fallback model id when neither the job nor the repo pins one. Validated
-  // against the synced catalog at call time, not here: the schema must stay
-  // usable before the first sync.
-  openrouterDefaultModel: z.string().default(""),
-  // Restrict OpenRouter runs to zero-cost models (":free" variants and
-  // zero-priced catalog entries).
-  openrouterFreeModelsOnly: z.boolean().default(false),
-  // Optional attribution headers (HTTP-Referer / X-Title) OpenRouter uses for
-  // app rankings; both are cosmetic and safe to leave at their defaults.
-  openrouterSiteUrl: z.string().default(""),
-  openrouterAppName: z.string().default("Drydock"),
-  // Auto-wait on OpenRouter 429/limit responses (same park-and-resume
-  // treatment as the Claude/Codex CLIs, ADR 030).
-  openrouterLimitAutoWait: z.boolean().default(true),
   // Opt-in sandboxed agent execution (issue #182, ADR 033). The default image
   // used for a sandboxed repo when neither a per-repo override nor the repo's
   // devcontainer.json names one. The image MUST carry the agent CLI plus the

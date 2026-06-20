@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { getRepo, listRepos, listReposWithStats } from "@/lib/db/queries";
-import { jobs, openrouterModels } from "@/lib/db/schema";
+import { jobs } from "@/lib/db/schema";
 import { RELEASE_PLAYBOOK_MAX_CHARS } from "@/lib/orchestrator/release-playbook";
 import { repoAutomation } from "@/lib/repos/automation";
 import { addRepo, removeRepo, setReleasePlaybook, updateRepo } from "@/lib/repos/service";
-import { saveSettings } from "@/lib/settings/service";
 
 let db: DB;
 beforeEach(() => {
@@ -497,62 +496,33 @@ describe("PR audit settings (issue #168)", () => {
   });
 });
 
-describe("openrouter repos (issue #169)", () => {
-  function seedModel(id: string, over: Record<string, unknown> = {}) {
-    db.insert(openrouterModels)
-      .values({
-        id,
-        name: id,
-        supportedParameters: '["tools"]',
-        supportsTools: true,
-        isFree: false,
-        syncedAt: 1,
-        ...over,
-      })
-      .run();
-  }
+describe("opencode model validation (issue #349, ADR 039)", () => {
+  it("accepts an opencode agent with a provider/model id", () => {
+    const repo = addRepo(
+      { path: "/oc", name: "oc", agent: "opencode", defaultModel: "anthropic/claude-sonnet-4-6" },
+      db,
+    );
+    expect(repo.agent).toBe("opencode");
+    expect(repo.defaultModel).toBe("anthropic/claude-sonnet-4-6");
+  });
 
-  it("accepts an openrouter agent with an available catalog model", () => {
-    seedModel("meta-llama/llama-3.3-70b-instruct:free", { isFree: true });
+  it("accepts an OpenRouter model through opencode as openrouter/<id>", () => {
     const repo = addRepo(
       {
         path: "/or",
         name: "or",
-        agent: "openrouter",
-        defaultModel: "meta-llama/llama-3.3-70b-instruct:free",
+        agent: "opencode",
+        defaultModel: "openrouter/meta-llama/llama-3.3-70b-instruct:free",
       },
       db,
     );
-    expect(repo.agent).toBe("openrouter");
-    expect(repo.defaultModel).toBe("meta-llama/llama-3.3-70b-instruct:free");
+    expect(repo.defaultModel).toBe("openrouter/meta-llama/llama-3.3-70b-instruct:free");
   });
 
-  it("rejects an openrouter model missing from the synced catalog", () => {
+  it("rejects an opencode model that is not a provider/model id", () => {
     expect(() =>
-      addRepo({ path: "/or", name: "or", agent: "openrouter", defaultModel: "missing/model" }, db),
-    ).toThrow(/catalog/i);
-  });
-
-  it("rejects removed and expired catalog models", () => {
-    seedModel("legacy/gone", { removedAt: 1 });
-    seedModel("legacy/expired", { expirationDate: 1 });
-    expect(() =>
-      addRepo({ path: "/a", name: "a", agent: "openrouter", defaultModel: "legacy/gone" }, db),
-    ).toThrow(/catalog/i);
-    expect(() =>
-      addRepo({ path: "/b", name: "b", agent: "openrouter", defaultModel: "legacy/expired" }, db),
-    ).toThrow(/catalog/i);
-  });
-
-  it("enforces the global free-models-only policy at write time", () => {
-    saveSettings({ openrouterFreeModelsOnly: true }, db);
-    seedModel("openai/gpt-4o-mini");
-    expect(() =>
-      addRepo(
-        { path: "/or", name: "or", agent: "openrouter", defaultModel: "openai/gpt-4o-mini" },
-        db,
-      ),
-    ).toThrow(/free/i);
+      addRepo({ path: "/oc", name: "oc", agent: "opencode", defaultModel: "claude-opus-4-8" }, db),
+    ).toThrow(/provider\/model/i);
   });
 
   it("still rejects unknown CLI model ids (issue #93 regression)", () => {
@@ -562,17 +532,16 @@ describe("openrouter repos (issue #169)", () => {
   });
 
   it("revalidates the model when an update switches the agent", () => {
-    seedModel("anthropic/claude-fable-5");
-    const repo = addRepo({ path: "/or", name: "or" }, db);
-    // The repo's claude default model is not an OpenRouter catalog id.
-    expect(() => updateRepo(repo.id, { agent: "openrouter" }, db)).toThrow(/catalog/i);
+    const repo = addRepo({ path: "/oc", name: "oc" }, db);
+    // The repo's claude default model is not a provider/model id.
+    expect(() => updateRepo(repo.id, { agent: "opencode" }, db)).toThrow(/provider\/model/i);
     const ok = updateRepo(
       repo.id,
-      { agent: "openrouter", defaultModel: "anthropic/claude-fable-5" },
+      { agent: "opencode", defaultModel: "openrouter/anthropic/claude-3.5-sonnet" },
       db,
     );
-    expect(ok.agent).toBe("openrouter");
-    // And back: switching to codex with an OpenRouter id must fail too.
+    expect(ok.agent).toBe("opencode");
+    // And back: switching to codex with a provider/model id must fail too.
     expect(() => updateRepo(repo.id, { agent: "codex" }, db)).toThrow(/unknown model id/i);
   });
 });

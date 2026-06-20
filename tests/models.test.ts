@@ -86,7 +86,9 @@ describe("nextStrongerModel", () => {
     expect(nextStrongerModel("claude", "")).toBeNull();
   });
 
-  it("returns null for openrouter (no static catalog to rank)", () => {
-    expect(nextStrongerModel("openrouter", "meta-llama/llama-3.3-70b-instruct:free")).toBeNull();
+  it("returns null for opencode (no static ladder to rank, issue #349)", () => {
+    expect(
+      nextStrongerModel("opencode", "openrouter/meta-llama/llama-3.3-70b-instruct:free"),
+    ).toBeNull();
   });
 });

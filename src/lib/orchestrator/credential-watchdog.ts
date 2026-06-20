@@ -10,8 +10,6 @@ import { assertSafeForgeUrl, privateForgeAllowedFromEnv } from "@/lib/forge/url-
 import { type RateLimitGovernor, sharedGovernor } from "@/lib/github/rate-limit";
 import { logError } from "@/lib/log/logger";
 import { redactSecrets } from "@/lib/log/redact";
-import { checkOpenRouterKey } from "@/lib/openrouter/client";
-import { resolveOpenRouterApiKey } from "@/lib/openrouter/config";
 import { getSettings, type Settings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
 import {
@@ -24,8 +22,8 @@ import {
 /**
  * Credential watchdog (issue #177): periodic auth probes for every credential
  * the orchestrator depends on — `gh auth status` for GitHub repos, a cheap
- * authenticated GitLab API call per configured base URL, the agent CLIs, and
- * the OpenRouter API key. A failed probe persists a {@link CredentialStatus}
+ * authenticated GitLab API call per configured base URL, and the agent CLIs.
+ * A failed probe persists a {@link CredentialStatus}
  * with failures, which gates new job starts (`jobsAllowed()` reason "auth"),
  * surfaces a navbar banner, and emits an edge-triggered notification; the next
  * healthy probe clears all three automatically.
@@ -53,8 +51,6 @@ export interface CredentialProbeDeps {
   runner?: CommandRunner;
   /** HTTP seam for the GitLab `/api/v4/user` probe. */
   http?: HttpClient;
-  /** Fetch seam for the OpenRouter key probe. */
-  fetchImpl?: typeof fetch;
   /** GitHub rate-limit governor; a gated budget skips the gh probe. */
   governor?: RateLimitGovernor;
   /** Clock (epoch ms). */
@@ -180,40 +176,10 @@ function gitlabTarget(baseUrl: string, token: string, deps: Required<ProbeDeps>)
   };
 }
 
-/** Probe one agent: CLI `--version` for claude/codex, the API key for OpenRouter. */
-function agentTarget(
-  agent: AgentId,
-  settings: Settings,
-  db: DB,
-  deps: Required<ProbeDeps>,
-): ProbeTarget {
+/** Probe one agent: CLI `--version` for claude/codex/opencode. */
+function agentTarget(agent: AgentId, db: DB, deps: Required<ProbeDeps>): ProbeTarget {
   const id = `agent:${agent}`;
   const provider = getAgentProvider(agent);
-  if (agent === "openrouter") {
-    return {
-      id,
-      probe: async () => {
-        const key = resolveOpenRouterApiKey(settings);
-        if (!key) {
-          return failed(
-            id,
-            "OpenRouter API key",
-            "No OpenRouter API key is configured — set it in settings or via DRYDOCK_OPENROUTER_API_KEY.",
-          );
-        }
-        const result = await checkOpenRouterKey(key, deps.fetchImpl);
-        if (result.ok) return OK;
-        if (/HTTP 40[13]\b/.test(result.error)) {
-          return failed(
-            id,
-            "OpenRouter API key",
-            `OpenRouter rejected the API key (${snippet(result.error)}). Update the key in settings.`,
-          );
-        }
-        return UNKNOWN; // Network/timeout/5xx: transient.
-      },
-    };
-  }
   return {
     id,
     probe: async () => {
@@ -256,7 +222,7 @@ function buildTargets(repos: Repo[], settings: Settings, db: DB, deps: Required<
     if (isAgentId(repo.agent)) agents.add(repo.agent);
   }
   for (const agent of agents) {
-    targets.push(agentTarget(agent, settings, db, deps));
+    targets.push(agentTarget(agent, db, deps));
   }
 
   return targets;
@@ -272,7 +238,6 @@ async function runCredentialProbes(deps: CredentialProbeDeps): Promise<Credentia
   const resolved: Required<ProbeDeps> = {
     runner: deps.runner ?? spawnRunner,
     http: deps.http ?? fetchHttp,
-    fetchImpl: deps.fetchImpl ?? fetch,
     governor: deps.governor ?? sharedGovernor,
     now: deps.now ?? Date.now,
     probeTimeoutMs: deps.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS,

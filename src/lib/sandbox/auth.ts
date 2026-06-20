@@ -29,9 +29,6 @@ function candidatesFor(agent: AgentId, home: string): AuthMount[] {
   switch (agent) {
     case "codex":
       return [{ host: join(home, ".codex"), container: "/root/.codex" }];
-    case "openrouter":
-      // HTTP provider: no CLI session is sandboxed, so no config mount applies.
-      return [];
     default:
       return [
         { host: join(home, ".claude"), container: "/root/.claude" },

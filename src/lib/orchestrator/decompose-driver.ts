@@ -25,8 +25,8 @@ import { buildSubtaskGenerator, decomposeRepo } from "./subtask-driver";
  * starved with it.
  *
  * Decoupling it into its own low-priority background sweep — fired
- * fire-and-forget at the end of a tick, exactly like the review-feedback,
- * branch-janitor, and OpenRouter-catalog sweeps — means it can never block job
+ * fire-and-forget at the end of a tick, exactly like the review-feedback and
+ * branch-janitor sweeps — means it can never block job
  * creation or job starting again. An in-flight guard ({@link runDecomposeSweep})
  * stops successive ticks from stacking overlapping sweeps for the same repos.
  */

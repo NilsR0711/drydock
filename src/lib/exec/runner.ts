@@ -35,6 +35,12 @@ export interface CommandResult {
 export interface CommandOptions {
   /** Wall-clock timeout in ms; the process is killed and the call rejects on breach. */
   timeoutMs?: number;
+  /**
+   * Extra environment variables merged over `process.env` for the child only
+   * (issue #349). Used to bridge an OpenRouter key onto an `opencode` one-shot
+   * so `openrouter/*` models authenticate without separate opencode auth.
+   */
+  env?: Record<string, string>;
 }
 
 /**
@@ -57,7 +63,8 @@ export const ONE_SHOT_TIMEOUT_MS = 5 * 60 * 1000;
 
 export const spawnRunner: CommandRunner = (cmd, args, cwd, opts) =>
   new Promise((resolvePromise, reject) => {
-    const child = spawn(cmd, args, { cwd, env: process.env, detached: SPAWN_DETACHED });
+    const env = opts?.env ? { ...process.env, ...opts.env } : process.env;
+    const child = spawn(cmd, args, { cwd, env, detached: SPAWN_DETACHED });
     let stdout = "";
     let stderr = "";
     let timedOut = false;

@@ -21,9 +21,10 @@ describe("agent registry", () => {
   it("validates agent ids", () => {
     expect(isAgentId("claude")).toBe(true);
     expect(isAgentId("codex")).toBe(true);
-    expect(isAgentId("openrouter")).toBe(true);
     expect(isAgentId("opencode")).toBe(true);
+    // openrouter was retired (ADR 039) — no longer a valid agent id.
+    expect(isAgentId("openrouter")).toBe(false);
     expect(isAgentId("gemini")).toBe(false);
-    expect(AGENT_IDS).toEqual(["claude", "codex", "openrouter", "opencode"]);
+    expect(AGENT_IDS).toEqual(["claude", "codex", "opencode"]);
   });
 });

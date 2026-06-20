@@ -133,14 +133,11 @@ export interface StartReleaseResult {
  * deep-link to the job's live log. As a manual operator action surfaced on every
  * repo, it is gated by the global kill-switch and forge capability but NOT the
  * per-repo `releaseEnabled` opt-in (issue #352 — that gate only governs the
- * background auto-release sweep); additionally requires a CLI
- * agent (claude or codex), the ones wired for the full-shell-access release
- * session via their verified permission-bypass flag. The HTTP provider
- * (openrouter) drives an in-process tool loop with no shell, so it cannot run a
- * repo's release commands and is rejected. The job's dedupe key
- * (`release:<repoId>`) refuses a second concurrent release (double submit,
- * second tab) until the prior one settles — a release is hard to reverse, so a
- * duplicate must never slip through.
+ * background auto-release sweep). Every agent is a local CLI with full
+ * shell access via its verified permission-bypass flag (ADR 039), so all can run
+ * a repo's release commands. The job's dedupe key (`release:<repoId>`) refuses a
+ * second concurrent release (double submit, second tab) until the prior one
+ * settles — a release is hard to reverse, so a duplicate must never slip through.
  */
 export async function startReleaseAction(repoId: number): Promise<StartReleaseResult> {
   // Use the provider releaseContext already resolved (not a re-read of
@@ -148,11 +145,6 @@ export async function startReleaseAction(repoId: number): Promise<StartReleaseRe
   // The manual button is independent of the per-repo `releaseEnabled` opt-in
   // (issue #352) — that gate only governs the background auto-release sweep.
   const { db, repo, provider } = releaseContext(repoId, { requireRepoOptIn: false });
-  if (provider.kind === "http") {
-    throw new Error(
-      "Agent-driven release requires a CLI agent (claude or codex); the OpenRouter backend has no shell access.",
-    );
-  }
   // Guard, enqueue, and record in one transaction so nothing can interleave
   // (better-sqlite3 transactions are synchronous). `activeReleaseRun` also blocks
   // a deterministic auto/manual run already in flight — that path creates no job,
