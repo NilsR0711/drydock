@@ -908,24 +908,28 @@ describe("WorktreeManager", () => {
       await git(["clone", origin, clone], root);
       const staleLocal = (await git(["rev-parse", "main"], clone)).trim();
 
-      // Origin advances by a merge-like commit the clone never fetches — the
-      // local default now drifts behind, exactly as after a server-side merge.
+      // Origin advances by a merge-like commit, exactly as after a server-side
+      // merge. The clone fetches the object (so origin/main tracks it) but never
+      // moves its local default ref — that is the drift the agent reasons against.
       writeFileSync(join(seed, "fix.txt"), "stabilization\n");
       await git(["add", "-A"], seed);
       await git(["commit", "-m", "fix: test-host stabilization (PR #245)"], seed);
       await git(["push", "origin", "main"], seed);
       const mergedToOrigin = (await git(["rev-parse", "HEAD"], seed)).trim();
+      await git(["fetch", "origin", "main"], clone);
 
-      // Precondition: the clone's local default is stale and lacks the merged
-      // commit, so an ancestry check against it gives the false "lost" answer the
-      // Job-4 agent saw. This is the very signal the fix must stop corrupting.
+      // Precondition, with exact exit semantics: the merged commit is a known
+      // object locally (origin/main tracks it) yet is *not* an ancestor of the
+      // stale local default — `merge-base --is-ancestor` exits exactly 1, the
+      // false "lost" answer the Job-4 agent saw. Asserting 1 (not merely
+      // non-zero) keeps a broken setup, which errors with 128, from passing.
       expect((await git(["rev-parse", "main"], clone)).trim()).toBe(staleLocal);
       const onStaleLocal = await spawnRunner(
         "git",
         ["merge-base", "--is-ancestor", mergedToOrigin, "main"],
         clone,
       );
-      expect(onStaleLocal.exitCode).not.toBe(0);
+      expect(onStaleLocal.exitCode).toBe(1);
 
       // Prepare the job worktree the way Drydock does for a new issue job.
       const repoUnderTest = {
