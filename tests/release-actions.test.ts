@@ -1,5 +1,6 @@
 process.env.DRYDOCK_DB = ":memory:";
 
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/lib/db/client";
 import { jobs, releaseRuns, repos } from "@/lib/db/schema";
@@ -82,8 +83,22 @@ describe("startReleaseAction (issue #256)", () => {
     await expect(startReleaseAction(r.id)).rejects.toThrow(/not enabled for this repo/);
   });
 
-  it("rejects a non-Claude agent", async () => {
+  it("allows a codex agent (CLI agent with a verified bypass flag)", async () => {
     const r = repo({ agent: "codex" });
-    await expect(startReleaseAction(r.id)).rejects.toThrow(/Claude agent only/);
+    const { jobId } = await startReleaseAction(r.id);
+    const job = getJob(jobId, getDb());
+    expect(job?.kind).toBe("release");
+    expect(job?.agent).toBe("codex");
+  });
+
+  it("rejects the OpenRouter backend (HTTP provider, no shell access)", async () => {
+    // A release must run the repo's release commands; the in-process tool loop
+    // has no shell, so only CLI agents (claude/codex) qualify. Flip the agent in
+    // the DB directly — addRepo validates an openrouter model against the synced
+    // catalog, which this suite doesn't seed, and the guard under test runs in
+    // startReleaseAction regardless of how the repo got its agent.
+    const r = repo();
+    getDb().update(repos).set({ agent: "openrouter" }).where(eq(repos.id, r.id)).run();
+    await expect(startReleaseAction(r.id)).rejects.toThrow(/requires a CLI agent/);
   });
 });
