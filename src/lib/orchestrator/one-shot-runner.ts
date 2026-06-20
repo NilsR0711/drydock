@@ -3,6 +3,7 @@ import { type DB, getDb } from "@/lib/db/client";
 import { oneShotCosts } from "@/lib/db/schema";
 import { type CommandOptions, type CommandRunner, spawnRunner } from "@/lib/exec/runner";
 import { StreamJsonParser } from "@/lib/stream/parser";
+import { agentSpawnEnv } from "./agent-command";
 
 export type OneShotType =
   | "verify"
@@ -62,8 +63,16 @@ export async function runOneShotAndRecordCost(opts: {
   }
   const runner = opts.runner ?? spawnRunner;
   const db = opts.db ?? getDb();
+  // Bridge the OpenRouter key onto opencode one-shots (issue #349) so a repo's
+  // `openrouter/*` decompose/verify/plan/audit calls authenticate.
+  const env = agentSpawnEnv(opts.provider, db);
   const cmdOpts: CommandOptions | undefined =
-    opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : undefined;
+    opts.timeoutMs !== undefined || env
+      ? {
+          ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+          ...(env ? { env } : {}),
+        }
+      : undefined;
 
   const streamArgs = opts.provider.buildStreamOneShotArgs({
     prompt: opts.prompt,

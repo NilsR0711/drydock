@@ -9,6 +9,7 @@ import { type StreamHandle, type StreamRunner, spawnStreamRunner } from "@/lib/e
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, resolveTemplateContent } from "@/lib/prompts/templates";
 import { getBroker, type LogBroker } from "@/lib/stream/broker";
+import { agentSpawnEnv } from "./agent-command";
 import { transitionJob } from "./jobs";
 import { agentLimitBlocked } from "./provider-limit";
 import { recordCodexUsage, saveProviderUsage } from "./provider-usage";
@@ -447,21 +448,27 @@ export async function spawnAgentSession(
   });
   // Tail of stderr, retained for provider-limit classification (issue #166).
   let stderrTail = "";
-  const handle = runner(command, args, cwd, {
-    onStdout: (chunk) => {
-      for (const event of parser.push(chunk)) {
-        broker.publish(job.id, {
-          type: event.type,
-          payload: serializeEvent(event, usageSnapshot()),
-        });
-      }
-      guard?.observe();
+  const handle = runner(
+    command,
+    args,
+    cwd,
+    {
+      onStdout: (chunk) => {
+        for (const event of parser.push(chunk)) {
+          broker.publish(job.id, {
+            type: event.type,
+            payload: serializeEvent(event, usageSnapshot()),
+          });
+        }
+        guard?.observe();
+      },
+      onStderr: (chunk) => {
+        stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX);
+        broker.publish(job.id, { type: "error", payload: { stderr: chunk } });
+      },
     },
-    onStderr: (chunk) => {
-      stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX);
-      broker.publish(job.id, { type: "error", payload: { stderr: chunk } });
-    },
-  });
+    agentSpawnEnv(provider, db),
+  );
 
   registerAbort(job.id, handle.abort);
   const { exitCode, timedOut, costExceeded } = await awaitBounded(handle, {
@@ -653,21 +660,27 @@ export async function resumeAgentSession(
 
   // Tail of stderr, retained for provider-limit classification (issue #166).
   let stderrTail = "";
-  const handle = runner(command, args, cwd, {
-    onStdout: (chunk) => {
-      for (const event of parser.push(chunk)) {
-        broker.publish(job.id, {
-          type: event.type,
-          payload: serializeEvent(event, usageSnapshot()),
-        });
-      }
-      guard?.observe();
+  const handle = runner(
+    command,
+    args,
+    cwd,
+    {
+      onStdout: (chunk) => {
+        for (const event of parser.push(chunk)) {
+          broker.publish(job.id, {
+            type: event.type,
+            payload: serializeEvent(event, usageSnapshot()),
+          });
+        }
+        guard?.observe();
+      },
+      onStderr: (chunk) => {
+        stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX);
+        broker.publish(job.id, { type: "error", payload: { stderr: chunk } });
+      },
     },
-    onStderr: (chunk) => {
-      stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX);
-      broker.publish(job.id, { type: "error", payload: { stderr: chunk } });
-    },
-  });
+    agentSpawnEnv(provider, db),
+  );
   registerAbort(job.id, handle.abort);
   const { exitCode, timedOut, costExceeded } = await awaitBounded(handle, {
     timeoutMs: deps.timeoutMs,
