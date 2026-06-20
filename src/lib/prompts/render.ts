@@ -12,6 +12,8 @@ export const SUPPORTED_VARIABLES = [
   "$INSTRUCTION",
   // The repo's default branch, used by the agent-driven release prompt (#256).
   "$DEFAULT_BRANCH",
+  // The memoized release procedure, injected into the release prompt (issue #352).
+  "$RELEASE_PLAYBOOK",
 ] as const;
 export type TemplateVar = (typeof SUPPORTED_VARIABLES)[number];
 
@@ -25,6 +27,7 @@ export interface TemplateVars {
   PR_FORMAT?: string;
   INSTRUCTION?: string;
   DEFAULT_BRANCH?: string;
+  RELEASE_PLAYBOOK?: string;
 }
 
 /**
@@ -42,6 +45,7 @@ export function renderTemplate(content: string, vars: TemplateVars): string {
     $PR_FORMAT: vars.PR_FORMAT ?? "$PR_FORMAT",
     $INSTRUCTION: vars.INSTRUCTION ?? "$INSTRUCTION",
     $DEFAULT_BRANCH: vars.DEFAULT_BRANCH ?? "$DEFAULT_BRANCH",
+    $RELEASE_PLAYBOOK: vars.RELEASE_PLAYBOOK ?? "$RELEASE_PLAYBOOK",
   };
   let out = content;
   for (const token of [...SUPPORTED_VARIABLES].sort((a, b) => b.length - a.length)) {

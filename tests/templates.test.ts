@@ -65,6 +65,23 @@ describe("SUPPORTED_VARIABLES", () => {
   it("includes the PR-format token (issue #252)", () => {
     expect(SUPPORTED_VARIABLES).toContain("$PR_FORMAT");
   });
+
+  it("includes the release-playbook token (issue #352)", () => {
+    expect(SUPPORTED_VARIABLES).toContain("$RELEASE_PLAYBOOK");
+  });
+});
+
+describe("renderTemplate — $RELEASE_PLAYBOOK (issue #352)", () => {
+  it("substitutes the injected release playbook", () => {
+    const out = renderTemplate("playbook:\n$RELEASE_PLAYBOOK", {
+      RELEASE_PLAYBOOK: "1. run pnpm release",
+    });
+    expect(out).toBe("playbook:\n1. run pnpm release");
+  });
+
+  it("leaves $RELEASE_PLAYBOOK untouched when the var is missing", () => {
+    expect(renderTemplate("playbook:\n$RELEASE_PLAYBOOK", {})).toBe("playbook:\n$RELEASE_PLAYBOOK");
+  });
 });
 
 describe("renderTemplate — $PR_FORMAT (issue #252)", () => {

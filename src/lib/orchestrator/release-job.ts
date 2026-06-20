@@ -16,6 +16,7 @@ import {
   transitionReleaseRun,
 } from "@/lib/release/release-service";
 import type { ReleaseStatus } from "@/lib/release/release-state";
+import { setReleasePlaybook } from "@/lib/repos/service";
 import { getSettings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
 import { type AgentSessionResult, spawnAgentSession } from "./agent-session";
@@ -23,6 +24,10 @@ import { getJob, recordEvent, transitionJob } from "./jobs";
 import { clearProviderLimit } from "./provider-limit";
 import { consumeQuestions as defaultConsumeQuestions } from "./questions-metadata";
 import { consumeReleaseMetadata as defaultConsumeReleaseMetadata } from "./release-metadata";
+import {
+  consumeReleasePlaybook as defaultConsumeReleasePlaybook,
+  releasePlaybookPromptValue,
+} from "./release-playbook";
 
 /** The worktree operations a release job needs (no commit/push — the agent pushes itself). */
 interface ReleaseWorktreeApi {
@@ -55,6 +60,8 @@ export interface RunReleaseJobDeps {
     title: string;
     notes: string;
   } | null;
+  /** Read+remove `.drydock/RELEASE_PLAYBOOK.md` (issue #352); injectable for tests. */
+  consumeReleasePlaybook?: (worktreePath: string) => string | null;
 }
 
 /**
@@ -115,6 +122,7 @@ export async function runReleaseJob(
       }));
   const consumeQuestions = deps.consumeQuestions ?? defaultConsumeQuestions;
   const consumeReleaseMetadata = deps.consumeReleaseMetadata ?? defaultConsumeReleaseMetadata;
+  const consumeReleasePlaybook = deps.consumeReleasePlaybook ?? defaultConsumeReleasePlaybook;
 
   // Move the run into the in-flight lane. A fresh run starts in `detected`; a
   // run that previously failed/parked is in `error` (the retry lane) and must be
@@ -143,6 +151,9 @@ export async function runReleaseJob(
       REPO_NAME: repo.name,
       BRANCH: wt.branch,
       DEFAULT_BRANCH: repo.defaultBranch,
+      // The memoized procedure (issue #352): runs 2+ follow it instead of
+      // re-investigating from scratch. Empty on the first release.
+      RELEASE_PLAYBOOK: releasePlaybookPromptValue(repo.releasePlaybook),
     });
 
     const session = await runSession(getJob(job.id, db) as Job, prompt, wt.path, true);
@@ -191,7 +202,14 @@ export async function runReleaseJob(
       );
     }
 
-    // Success: record whatever the agent reported and settle both rows.
+    // Success: record whatever the agent reported and settle both rows. Capture
+    // the recorded release procedure (issue #352) on this CLEAN run only — a
+    // needs_human/aborted run returned earlier, so a parked run can never blank a
+    // known-good playbook. A clean run that recorded nothing leaves the existing
+    // playbook untouched (only persist a non-null capture).
+    const playbook = consumeReleasePlaybook(wt.path);
+    if (playbook) setReleasePlaybook(repo.id, playbook, db);
+
     const meta = consumeReleaseMetadata(wt.path);
     publishAgentReleaseRun(
       run.id,
