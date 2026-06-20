@@ -25,6 +25,7 @@ import { RepoHealingPanel } from "@/components/repo-healing-panel";
 import { RepoPromptsSection } from "@/components/repo-prompts-section";
 import { RepoReleasePanel } from "@/components/repo-release-panel";
 import { RepoSettingsBar } from "@/components/repo-settings-bar";
+import { RepoSettingsBundlePanel } from "@/components/repo-settings-bundle-panel";
 import { RepoWebhookPanel } from "@/components/repo-webhook-panel";
 import { TrackedPrsPanel } from "@/components/tracked-prs-panel";
 import { Badge } from "@/components/ui/badge";
@@ -210,6 +211,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
             </div>
             <RepoAutomationBar repo={ws.repo} />
             <RepoWebhookPanel repo={ws.repo} />
+            <RepoSettingsBundlePanel repo={ws.repo} />
           </div>
         </Section>
 
