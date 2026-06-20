@@ -21,7 +21,23 @@ const REPLAY_LIMIT = 200;
  */
 export class LogBroker {
   private readonly subs = new Map<number, Set<Subscriber>>();
-  constructor(private readonly db: DB = getDb()) {}
+  private dbInstance: DB | undefined;
+
+  // The database handle is resolved lazily: the singleton broker is constructed
+  // eagerly (and shared across bundle layers), but pure fan-out paths —
+  // `subscribe`/`unsubscribe`/`broadcast` — never touch the database. Opening a
+  // connection in the constructor would force every `getBroker()` caller (e.g.
+  // a `transitionJob` that only needs to broadcast, issue #337) to open the
+  // global DB, which deadlocks tests that swap module instances. Tests can still
+  // inject their own handle.
+  constructor(db?: DB) {
+    this.dbInstance = db;
+  }
+
+  private get db(): DB {
+    if (!this.dbInstance) this.dbInstance = getDb();
+    return this.dbInstance;
+  }
 
   subscribe(jobId: number, sub: Subscriber): void {
     let set = this.subs.get(jobId);
@@ -64,19 +80,30 @@ export class LogBroker {
       .values({ jobId, type: event.type, payload })
       .returning()
       .get();
+    this.broadcast(jobId, { id: row.id, type: row.type, payload: safePayload });
+    return row;
+  }
+
+  /**
+   * Fan out an already-persisted event to live subscribers WITHOUT re-persisting
+   * it. Used when a row was written elsewhere — e.g. inside a job-state
+   * transaction via `recordEvent` (issue #337) — yet must still reach open SSE
+   * streams live. Callers own redaction: pass an already-safe payload (status
+   * transitions carry only enum `{from,to}` values, never secrets). A dropped
+   * push is recovered by the route's replay on reconnect.
+   */
+  broadcast(jobId: number, event: { id?: number; type: string; payload: unknown }): void {
     const set = this.subs.get(jobId);
-    if (set) {
-      // A broken subscriber (e.g. an SSE controller closed mid-publish) must
-      // not break the fan-out or its producer: drop it and keep going.
-      for (const sub of [...set]) {
-        try {
-          sub.send({ id: row.id, type: row.type, payload: safePayload });
-        } catch {
-          this.unsubscribe(jobId, sub);
-        }
+    if (!set) return;
+    // A broken subscriber (e.g. an SSE controller closed mid-broadcast) must
+    // not break the fan-out or its producer: drop it and keep going.
+    for (const sub of [...set]) {
+      try {
+        sub.send(event);
+      } catch {
+        this.unsubscribe(jobId, sub);
       }
     }
-    return row;
   }
 
   /**

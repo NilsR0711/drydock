@@ -2,11 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   assertTransition,
   canTransition,
+  FINISHED_STATES,
+  IN_FLIGHT_STATES,
   InvalidTransitionError,
+  isFinishedState,
+  isInFlight,
   isJobStatus,
   isOpenStatus,
+  isStreamEndState,
   JOB_STATES,
   OPEN_STATES,
+  STREAM_END_STATES,
   TERMINAL_STATES,
   TERMINAL_SUCCESS_STATES,
 } from "@/lib/orchestrator/state-machine";
@@ -112,6 +118,79 @@ describe("state machine", () => {
       expect(isOpenStatus("merged")).toBe(false);
       expect(isOpenStatus("released")).toBe(false);
       expect(isOpenStatus("aborted")).toBe(false);
+    });
+  });
+
+  describe("in-flight states (issues #242, #337)", () => {
+    it("is exactly the operationally live, stoppable states", () => {
+      expect([...IN_FLIGHT_STATES].sort()).toEqual(
+        ["ci_running", "retrying", "waiting_limit", "working"].sort(),
+      );
+    });
+
+    it("includes waiting_limit (the driver resumes it on its own)", () => {
+      expect(isInFlight("waiting_limit")).toBe(true);
+    });
+
+    it("isInFlight mirrors membership", () => {
+      expect(isInFlight("working")).toBe(true);
+      expect(isInFlight("ci_running")).toBe(true);
+      expect(isInFlight("queued")).toBe(false);
+      expect(isInFlight("merged")).toBe(false);
+      expect(isInFlight("needs_human")).toBe(false);
+      expect(isInFlight("nonsense")).toBe(false);
+    });
+  });
+
+  describe("finished states (issue #337)", () => {
+    it("is exactly the set that stamps finishedAt on entry", () => {
+      // Must stay in lockstep with transitionJob's finishedAt write — the
+      // duration timer freezes on a live transition into one of these.
+      expect([...FINISHED_STATES].sort()).toEqual(
+        ["aborted", "merged", "needs_human", "released"].sort(),
+      );
+    });
+
+    it("excludes interrupted, which leaves finishedAt unset for recovery", () => {
+      expect(isFinishedState("interrupted")).toBe(false);
+    });
+
+    it("isFinishedState mirrors membership", () => {
+      expect(isFinishedState("merged")).toBe(true);
+      expect(isFinishedState("released")).toBe(true);
+      expect(isFinishedState("needs_human")).toBe(true);
+      expect(isFinishedState("aborted")).toBe(true);
+      expect(isFinishedState("ci_running")).toBe(false);
+    });
+
+    it("every finished state is a closed (non-open) or parked state", () => {
+      // merged/released/aborted are terminal; needs_human is parked. None is a
+      // state from which the job keeps progressing without an operator/driver.
+      for (const s of FINISHED_STATES) {
+        expect(canTransition(s, "ci_running")).toBe(false);
+      }
+    });
+  });
+
+  describe("stream-end states (issues #241, #337)", () => {
+    it("is the terminal states plus the operator-parked states", () => {
+      expect([...STREAM_END_STATES].sort()).toEqual(
+        ["aborted", "interrupted", "merged", "needs_human", "released"].sort(),
+      );
+    });
+
+    it("contains every terminal state", () => {
+      for (const t of TERMINAL_STATES) {
+        expect(isStreamEndState(t)).toBe(true);
+      }
+    });
+
+    it("isStreamEndState mirrors membership", () => {
+      expect(isStreamEndState("merged")).toBe(true);
+      expect(isStreamEndState("interrupted")).toBe(true);
+      expect(isStreamEndState("working")).toBe(false);
+      expect(isStreamEndState("ci_running")).toBe(false);
+      expect(isStreamEndState("queued")).toBe(false);
     });
   });
 });

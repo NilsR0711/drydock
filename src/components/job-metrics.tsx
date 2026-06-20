@@ -3,10 +3,20 @@
 import { Cpu, DollarSign, RefreshCw, Timer } from "lucide-react";
 import { useEffect, useState } from "react";
 import { StatCard } from "@/components/ui/stat-card";
+import { isFinishedState, isStreamEndState } from "@/lib/orchestrator/state-machine";
 import { formatDuration, formatUsd } from "@/lib/utils";
 
 /** SSE event types whose payload carries running usage (cost + token totals). */
 const METRIC_EVENTS = ["assistant", "result"] as const;
+
+/** Best-effort read of a string field off an unknown SSE payload. */
+function field(payload: unknown, key: string): string | undefined {
+  if (payload && typeof payload === "object" && key in payload) {
+    const v = (payload as Record<string, unknown>)[key];
+    return v == null ? undefined : String(v);
+  }
+  return undefined;
+}
 
 /**
  * Live job metrics, rendered as a StatCard strip. While the job is running two
@@ -25,7 +35,7 @@ export function JobMetrics({
   inputTokens: initialInputTokens,
   outputTokens: initialOutputTokens,
   startedAt,
-  finishedAt,
+  finishedAt: initialFinishedAt,
   nowSec,
   attempts,
   active = true,
@@ -55,10 +65,18 @@ export function JobMetrics({
   const [costUsd, setCostUsd] = useState(initialCostUsd);
   const [tokens, setTokens] = useState({ input: initialInputTokens, output: initialOutputTokens });
   const [now, setNow] = useState(nowSec);
+  // Track the finish time locally so a job that ends while the page is open
+  // freezes its Duration immediately, instead of ticking forever until a reload
+  // (issue #337). Seeded from the server snapshot.
+  const [finishedAt, setFinishedAt] = useState<number | null>(initialFinishedAt ?? null);
+  // Once the job is terminal, no further metrics arrive — close the stream
+  // rather than hold it open (and let EventSource auto-reconnect).
+  const [streamDone, setStreamDone] = useState(false);
 
   useEffect(() => {
-    // A finished job's cost and tokens are already persisted — don't open a stream.
-    if (!active) return;
+    // A finished job's cost and tokens are already persisted — don't open a
+    // stream; close it once the job reaches a terminal state.
+    if (!active || streamDone) return;
     const es = new EventSource(`/api/sse/jobs/${jobId}`);
     const onMetric = (ev: MessageEvent) => {
       try {
@@ -78,9 +96,30 @@ export function JobMetrics({
         // ignore malformed payloads
       }
     };
+    const onStatus = (ev: MessageEvent) => {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      const to = field(payload, "to");
+      if (to === undefined) return;
+      // Freeze the Duration only on a transition that stamps finishedAt
+      // (merged/released/needs_human/aborted). NOT on `result`/`claude_exit`:
+      // for an issue job the agent finishes before ci_running → merged, so
+      // freezing there would undercount the run. The transition lands ≈ when
+      // finishedAt is persisted, so the live freeze matches the reload value.
+      if (isFinishedState(to)) setFinishedAt((prev) => prev ?? Math.floor(Date.now() / 1000));
+      // Close the stream on ANY stream-end state — including `interrupted`,
+      // which ends the stream without stamping finishedAt — so the EventSource
+      // doesn't linger after the server stops publishing.
+      if (isStreamEndState(to)) setStreamDone(true);
+    };
     for (const type of METRIC_EVENTS) es.addEventListener(type, onMetric);
+    es.addEventListener("status", onStatus);
     return () => es.close();
-  }, [jobId, active]);
+  }, [jobId, active, streamDone]);
 
   useEffect(() => {
     // Tick the duration once per second while the job is live. A job that has

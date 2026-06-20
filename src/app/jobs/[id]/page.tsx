@@ -1,7 +1,11 @@
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
+import {
+  JobLiveStatusProvider,
+  JobStatusBadge,
+  JobStopControl,
+} from "@/components/job-live-status";
 import { JobMetrics } from "@/components/job-metrics";
-import { JobStopButton } from "@/components/job-stop-button";
 import { LogViewer } from "@/components/log-viewer";
 import { PageHeader } from "@/components/page-header";
 import { PrAuditButton } from "@/components/pr-audit-button";
@@ -17,6 +21,7 @@ import { getIssueTitle } from "@/lib/issues/service";
 import { jobHeading } from "@/lib/orchestrator/job-display";
 import { getJob } from "@/lib/orchestrator/jobs";
 import { listPrQuestions } from "@/lib/orchestrator/pr-questions";
+import { isInFlight, isStreamEndState, type JobStatus } from "@/lib/orchestrator/state-machine";
 
 export const dynamic = "force-dynamic";
 
@@ -28,9 +33,12 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const repo = getRepo(job.repoId);
   const events = getDb().select().from(jobEvents).where(eq(jobEvents.jobId, jobId)).all();
   const questions = job.prNumber != null ? listPrQuestions(job.id) : [];
+  const status = job.status as JobStatus;
   // waiting_limit counts as in flight: the job is operationally live (the
-  // driver resumes it on its own) and must stay stoppable from the UI.
-  const inFlight = ["working", "ci_running", "retrying", "waiting_limit"].includes(job.status);
+  // driver resumes it on its own) and must stay stoppable from the UI. This
+  // seeds the metrics/log streams; the live header/duration react to SSE
+  // transitions thereafter (issue #337).
+  const inFlight = isInFlight(status);
   const isError = job.status === "needs_human";
   const isLimitParked = job.status === "waiting_limit";
 
@@ -48,34 +56,44 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
   return (
     <div className="dd-fade-up space-y-5">
-      <PageHeader
-        breadcrumb={[
-          { label: "Dashboard", href: "/" },
-          { label: repoName, href: `/repos/${job.repoId}` },
-          { label: subjectLabel },
-        ]}
-        title={heading}
-        subtitle={
-          <span className="inline-flex flex-wrap items-center gap-2">
-            <Badge status={job.status} />
-            <span className="font-mono text-foreground/80">{repoName}</span>
-            <Badge tone="neutral" className="font-mono">
-              {subjectLabel}
-            </Badge>
-            <Badge tone="neutral" className="font-mono">
-              job #{job.id}
-            </Badge>
-          </span>
-        }
-        actions={
-          job.prNumber != null || inFlight ? (
-            <span className="flex items-center gap-2">
-              {job.prNumber != null && <PrAuditButton jobId={job.id} />}
-              {inFlight && <JobStopButton jobId={job.id} />}
+      {/* The header status badge and Stop button track the live job status from
+          a single SSE stream the provider owns (issue #337); both the subtitle
+          badge and the actions control read it from context. */}
+      <JobLiveStatusProvider jobId={job.id} initialStatus={status}>
+        <PageHeader
+          breadcrumb={[
+            { label: "Dashboard", href: "/" },
+            { label: repoName, href: `/repos/${job.repoId}` },
+            { label: subjectLabel },
+          ]}
+          title={heading}
+          subtitle={
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <JobStatusBadge initialStatus={status} />
+              <span className="font-mono text-foreground/80">{repoName}</span>
+              <Badge tone="neutral" className="font-mono">
+                {subjectLabel}
+              </Badge>
+              <Badge tone="neutral" className="font-mono">
+                job #{job.id}
+              </Badge>
             </span>
-          ) : undefined
-        }
-      />
+          }
+          actions={
+            // Render the actions area whenever a PR audit applies or the job can
+            // still be (or become) stoppable. JobStopControl decides per the
+            // live status whether to show the Stop button, so it appears on
+            // queued→working and disappears on reaching a terminal/parked state
+            // — all without a reload.
+            job.prNumber != null || !isStreamEndState(status) ? (
+              <span className="flex items-center gap-2">
+                {job.prNumber != null && <PrAuditButton jobId={job.id} />}
+                <JobStopControl jobId={job.id} initialStatus={status} />
+              </span>
+            ) : undefined
+          }
+        />
+      </JobLiveStatusProvider>
 
       {isError && (
         <>
