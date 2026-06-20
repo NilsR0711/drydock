@@ -68,6 +68,10 @@ describe("settings", () => {
     saveSettings({ maxTickSeconds: 0 }, db);
     expect(getSettings(db).maxTickSeconds).toBe(0);
     expect(() => saveSettings({ maxTickSeconds: -1 }, db)).toThrow();
+    // Rejected above Node's 32-bit setTimeout ceiling (2_147_483s * 1000 ms),
+    // where the watchdog timer would otherwise fire after 1ms and abandon every
+    // tick instantly.
+    expect(() => saveSettings({ maxTickSeconds: 2_147_484 }, db)).toThrow();
   });
 
   it("defaults the per-job cost ceiling to off (0) and persists an override (issue #57)", () => {

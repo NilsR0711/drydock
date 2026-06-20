@@ -34,7 +34,10 @@ export const settingsSchema = z.object({
   // tick, clears its re-entrancy guard, and schedules the next one, so it
   // self-heals once GitHub is reachable again. Defaults to 120s — well below the
   // observed ~50 min wedge yet above any healthy tick. 0 disables the watchdog.
-  maxTickSeconds: z.number().int().nonnegative().default(120),
+  // Capped at 2_147_483s (~24.8 days): * 1000 stays under Node's 32-bit setTimeout
+  // ceiling (2_147_483_647 ms), above which a timer silently fires after 1ms —
+  // which here would abandon *every* tick instantly, the opposite of the intent.
+  maxTickSeconds: z.number().int().nonnegative().max(2_147_483).default(120),
   // Per-job turn budget (issue #254). 0 is off (unlimited): the runner drops the
   // CLI `--max-turns` flag and the OpenRouter loop skips its turn check, so a
   // long task is bounded only by maxJobMinutes / the per-job cost cap. Defaults
