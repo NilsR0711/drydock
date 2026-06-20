@@ -27,7 +27,7 @@ npx @nilsr0711/drydock --open
 <br />
 <br />
 
-<img src="docs/dashboard.jpg" alt="Drydock dashboard — every watched repository, its in-flight jobs, today's spend, and live per-provider usage gauges" width="900">
+<img src="docs/dashboard.png" alt="Drydock dashboard — every watched repository, its in-flight jobs, today's spend, and live per-provider usage gauges" width="900">
 
 </div>
 
