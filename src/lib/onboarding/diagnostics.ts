@@ -135,14 +135,26 @@ function raceTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-/** Roll an install + auth pair up to a single card status. */
+// Severity order for rolling up an item's facets: a worse facet wins. "unknown"
+// outranks "ready" so a card never reads green while a facet is unverified (a
+// transient probe error, or a CLI sign-in we cannot confirm yet) — it shows the
+// neutral "unknown" instead. It still never blocks completion (only "missing"
+// does), so an unverified-but-not-broken setup is non-fatal.
+const STATUS_RANK: Record<OnboardingStatus, number> = {
+  ready: 0,
+  unknown: 1,
+  warning: 2,
+  missing: 3,
+};
+
+/** Roll an install + auth pair up to a single card status (worst facet wins). */
 function rollup(install: OnboardingFacet, auth: OnboardingFacet): OnboardingStatus {
-  // A definitive failure on either facet is blocking; the caller decides whether
-  // a *required* forge's auth failure is "missing" vs a non-required "warning".
-  if (install.status === "missing" || auth.status === "missing") return "missing";
-  if (install.status === "warning" || auth.status === "warning") return "warning";
-  // An unconfirmable CLI sign-in ("unknown") does not drag an installed card down.
-  return "ready";
+  return STATUS_RANK[install.status] >= STATUS_RANK[auth.status] ? install.status : auth.status;
+}
+
+/** Build a docs action, or undefined when no usable URL is configured. */
+function docsAction(label: string, url: string | undefined): OnboardingAction | undefined {
+  return url ? { label, url } : undefined;
 }
 
 /** Sign-in evidence for a CLI agent from its persisted usage snapshot. */
@@ -189,7 +201,7 @@ async function openrouterItem(
       ...base,
       status,
       facets: [{ label: "API key", status, detail }],
-      action: { label: "Get an API key", url: provider.authDocsUrl ?? "" },
+      action: docsAction("Get an API key", provider.authDocsUrl),
     };
   }
   const result = await checkOpenRouterKey(key, fetchImpl);
@@ -206,7 +218,7 @@ async function openrouterItem(
       ...base,
       status,
       facets: [{ label: "API key", status, detail: "OpenRouter rejected the API key." }],
-      action: { label: "Update the key", url: provider.authDocsUrl ?? "" },
+      action: docsAction("Update the key", provider.authDocsUrl),
     };
   }
   // Network/timeout/5xx: transient, never a false alarm.
@@ -251,11 +263,10 @@ async function agentItem(
   const status = rollup(install, auth);
 
   let action: OnboardingAction | undefined;
-  if (!probe.installed && provider.installDocsUrl) {
-    action = { label: "Install", url: provider.installDocsUrl };
-  } else if (probe.installed && auth.status !== "ready") {
-    const url = provider.authDocsUrl ?? provider.installDocsUrl;
-    if (url) action = { label: "Set up sign-in", url };
+  if (!probe.installed) {
+    action = docsAction("Install", provider.installDocsUrl);
+  } else if (auth.status !== "ready") {
+    action = docsAction("Set up sign-in", provider.authDocsUrl ?? provider.installDocsUrl);
   }
 
   return {

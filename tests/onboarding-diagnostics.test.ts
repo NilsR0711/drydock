@@ -98,14 +98,17 @@ describe("runOnboardingDiagnostics", () => {
     expect(report.complete).toBe(true);
   });
 
-  it("an installed CLI with no usage history is still ready (sign-in unconfirmable, not failed)", async () => {
+  it("an installed CLI with no usage history reads unverified, not failed, and never blocks", async () => {
     const report = await runOnboardingDiagnostics({
       runner: ALL_PRESENT,
       http: httpOk,
       fetchImpl: okFetch,
     });
     const claude = item(report, "agent:claude");
-    expect(claude.status).toBe("ready");
+    // Sign-in is unconfirmable until the first job, so the card stays neutral
+    // ("unknown") rather than claiming a green "ready" it cannot verify — but an
+    // unverified-yet-installed agent must never block completion.
+    expect(claude.status).toBe("unknown");
     expect(claude.facets.find((f) => f.label === "Signed in")?.status).toBe("unknown");
     expect(report.complete).toBe(true);
   });
@@ -122,6 +125,31 @@ describe("runOnboardingDiagnostics", () => {
     expect(codex.status).toBe("warning");
     // Optional warnings never block completion.
     expect(report.complete).toBe(true);
+  });
+
+  it("keeps an installed forge neutral (not green) when its auth probe errors transiently", async () => {
+    const runner: CommandRunner = async (cmd, args = []) => {
+      if (args[0] === "auth") throw new Error("network down");
+      if (args[0] === "--version") return ok(`${cmd} version 1.0.0`);
+      return ok();
+    };
+    const report = await runOnboardingDiagnostics({ runner, http: httpOk, fetchImpl: okFetch });
+    const github = item(report, "forge:github");
+    // Installed but unverifiable: must not read "ready", and a transient error
+    // must never block completion.
+    expect(github.status).toBe("unknown");
+    expect(report.complete).toBe(true);
+  });
+
+  it("never emits an action with an empty URL", async () => {
+    const report = await runOnboardingDiagnostics({
+      runner: NOTHING,
+      http: httpOk,
+      fetchImpl: okFetch,
+    });
+    for (const i of report.items) {
+      if (i.action) expect(i.action.url).toBeTruthy();
+    }
   });
 
   it("blocks when gh is installed but not authenticated", async () => {
