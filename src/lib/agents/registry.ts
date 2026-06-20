@@ -1,5 +1,6 @@
 import { claudeProvider } from "./claude";
 import { codexProvider } from "./codex";
+import { opencodeProvider } from "./opencode";
 import { openrouterProvider } from "./openrouter";
 import type { AgentId, AgentProvider } from "./types";
 
@@ -7,9 +8,15 @@ export const AGENT_PROVIDERS: Record<AgentId, AgentProvider> = {
   claude: claudeProvider,
   codex: codexProvider,
   openrouter: openrouterProvider,
+  opencode: opencodeProvider,
 };
 
-export const AGENT_IDS = ["claude", "codex", "openrouter"] as const satisfies readonly AgentId[];
+export const AGENT_IDS = [
+  "claude",
+  "codex",
+  "openrouter",
+  "opencode",
+] as const satisfies readonly AgentId[];
 
 /** Default agent for repos/jobs that don't specify one — keeps claude behavior. */
 export const DEFAULT_AGENT: AgentId = "claude";

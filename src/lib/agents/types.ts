@@ -2,10 +2,13 @@ import type { ParsedEvent, ParseError, RawRateLimitInfo } from "@/lib/stream/par
 import type { CodexUsageReading } from "./codex-usage";
 
 /**
- * Coding agents Drydock can drive. claude/codex map to local CLIs; openrouter
- * talks to the hosted OpenRouter API over HTTP (issue #169, ADR 032).
+ * Coding agents Drydock can drive. claude/codex/opencode map to local CLIs;
+ * openrouter talks to the hosted OpenRouter API over HTTP (issue #169, ADR 032).
+ * opencode (issue #349) is a CLI that itself routes to 75+ providers via
+ * models.dev, so its model ids are `provider/model` strings rather than the
+ * static MODELS catalog the other CLI agents use.
  */
-export type AgentId = "claude" | "codex" | "openrouter";
+export type AgentId = "claude" | "codex" | "openrouter" | "opencode";
 
 /**
  * Incremental, stateful parser over an agent CLI's stdout stream. Both the

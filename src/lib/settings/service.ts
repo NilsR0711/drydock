@@ -79,6 +79,9 @@ export const settingsSchema = z.object({
   defaultAgent: z.enum(["claude", "codex"]).default("claude"),
   claudePath: z.string().default("claude"),
   codexPath: z.string().default("codex"),
+  // opencode CLI binary path (issue #349). Only used by repos whose agent is
+  // opencode; defaults to the binary on PATH.
+  opencodePath: z.string().default("opencode"),
   ghPath: z.string().default("gh"),
   maxParallelJobs: z.number().int().positive().default(3),
   telegramBotToken: z.string().default(""),

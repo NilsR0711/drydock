@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { AGENT_IDS, DEFAULT_AGENT, getAgentProvider, isAgentId } from "@/lib/agents/registry";
 
 describe("agent registry", () => {
-  it("resolves claude and codex by id", () => {
+  it("resolves claude, codex and opencode by id", () => {
     expect(getAgentProvider("claude").id).toBe("claude");
     expect(getAgentProvider("codex").id).toBe("codex");
+    expect(getAgentProvider("opencode").id).toBe("opencode");
   });
 
   it("falls back to the default agent for unknown / missing ids", () => {
@@ -21,7 +22,8 @@ describe("agent registry", () => {
     expect(isAgentId("claude")).toBe(true);
     expect(isAgentId("codex")).toBe(true);
     expect(isAgentId("openrouter")).toBe(true);
+    expect(isAgentId("opencode")).toBe(true);
     expect(isAgentId("gemini")).toBe(false);
-    expect(AGENT_IDS).toEqual(["claude", "codex", "openrouter"]);
+    expect(AGENT_IDS).toEqual(["claude", "codex", "openrouter", "opencode"]);
   });
 });

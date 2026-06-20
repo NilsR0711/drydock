@@ -71,6 +71,10 @@ export function RepoSettingsBar({
 
   function change(value: string) {
     setModel(value);
+    // opencode models are free-text `provider/model` ids (issue #349); don't
+    // persist a partial entry mid-typing (e.g. "anthropic") that would fail the
+    // repo service's shape check and spam an error toast on every keystroke.
+    if (agent === "opencode" && !value.includes("/")) return;
     persist({ defaultModel: value });
   }
 
@@ -162,8 +166,8 @@ export function RepoSettingsBar({
               onChange={changeAgent}
               agents={
                 openrouter.enabled || agent === "openrouter"
-                  ? ["claude", "codex", "openrouter"]
-                  : ["claude", "codex"]
+                  ? ["claude", "codex", "opencode", "openrouter"]
+                  : ["claude", "codex", "opencode"]
               }
             />
           </Field>

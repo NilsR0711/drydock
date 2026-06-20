@@ -29,10 +29,11 @@ export const repoInputSchema = z.object({
   workingLabel: z.string().min(1).default("drydock:working"),
   needsHumanLabel: z.string().min(1).default("drydock:needs-human"),
   // Model ids are validated against the agent after parsing (see
-  // assertModelAllowedForAgent): CLI agents check the static MODELS list,
-  // openrouter checks the synced catalog (issue #169).
+  // assertModelAllowedForAgent): claude/codex check the static MODELS list,
+  // openrouter checks the synced catalog (issue #169), opencode accepts any
+  // `provider/model` id since it routes through models.dev (issue #349).
   defaultModel: z.string().min(1).default("claude-opus-4-8"),
-  agent: z.enum(["claude", "codex", "openrouter"]).default("claude"),
+  agent: z.enum(["claude", "codex", "openrouter", "opencode"]).default("claude"),
   platform: z.enum(["github", "gitlab"]).default("github"),
   // A self-hosted forge API base URL. Validated as an absolute http(s) URL so a
   // bogus/attacker-influenced scheme (file:, javascript:, relative) can never be
@@ -166,6 +167,17 @@ export type RepoInput = z.input<typeof repoInputSchema>;
  * cross-field and (for openrouter) needs the database.
  */
 function assertModelAllowedForAgent(agent: string, model: string, db: DB): void {
+  if (agent === "opencode") {
+    // opencode validates the model against the live models.dev catalog itself at
+    // spawn time across 75+ providers (issue #349); we only enforce the
+    // `provider/model` shape so a leftover claude/codex id can't slip through.
+    if (!model.includes("/")) {
+      throw new Error(
+        `opencode model "${model}" must be a "provider/model" id (e.g. "anthropic/claude-sonnet-4-6")`,
+      );
+    }
+    return;
+  }
   if (agent === "openrouter") {
     const row = getOpenRouterModel(model, db);
     if (!row || !isModelAvailable(row)) {
