@@ -9,7 +9,7 @@ Runs on every push to `master` and every PR over an OS × Node matrix —
 `ubuntu-latest`, `macos-latest`, and `windows-latest` — so the cross-platform
 daemon lifecycle (`drydock start`/`stop`/`status`/`restart`, issue #216) is
 exercised on every target OS. Installs with a frozen lockfile, then: ubuntu
-(Node 20 & 22) and macOS (Node 22) run the full test suite; Windows (Node 22)
+(Node 22 & 24) and macOS (Node 24) run the full test suite; Windows (Node 24)
 runs the daemon lifecycle subset (`pnpm test:daemon`), since the rest of the
 legacy suite has Unix-only tests — real `false`/`printenv` spawns and POSIX
 signal timing — that predate and are unrelated to this work. The OS-independent
