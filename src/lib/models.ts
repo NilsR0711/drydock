@@ -1,3 +1,4 @@
+import { OPENCODE_DEFAULT_MODEL } from "@/lib/agents/opencode";
 import type { AgentId } from "@/lib/agents/types";
 
 /**
@@ -35,6 +36,9 @@ export function defaultModelForAgent(agent: AgentId): string {
   // OpenRouter has no static list — its models come from the synced catalog
   // and the effective default resolves from settings at call time (issue #169).
   if (agent === "openrouter") return "";
+  // opencode (issue #349) routes through models.dev with `provider/model` ids
+  // that aren't in the static MODELS list; seed a sensible, editable default.
+  if (agent === "opencode") return OPENCODE_DEFAULT_MODEL;
   return modelsForAgent(agent)[0]?.id ?? DEFAULT_MODEL;
 }
 

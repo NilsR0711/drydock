@@ -38,3 +38,4 @@
 - [035](adr/035-structured-server-logging.md) — Structured server-log sink (rotating file + stdout + SSE fan-out, secret-redacted) with a global Logs page (filter, search, live tail)
 - [036](adr/036-desktop-menu-bar-shell.md) — Native macOS menu-bar shell (Tauri) wrapping the dashboard + HTTP control endpoints (pause/drain) with a custom-header CSRF guard; separate crate, not in the npm package, Rust out of CI
 - [037](adr/037-tracked-pr-babysitting.md) — Babysit arbitrary PRs added by URL (decoupled `tracked_prs` record + driver-loop sweep; auto-merge opt-in & owned-only; never touches fork branches)
+- [038](adr/038-opencode-cli-agent.md) — opencode as a fourth CLI agent (multi-provider via models.dev, JSONL parser with per-step cost, free-text `provider/model` ids; OpenRouter retirement deferred)

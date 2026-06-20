@@ -41,7 +41,14 @@ export async function notifyCostLimitEdge(
   }
 }
 
-/** Per-agent enter/clear messages and event for the provider-limit edge. */
+/**
+ * Per-agent enter/clear messages and event for the provider-limit edge. Keyed by
+ * a subset of {@link AgentId}: only agents with usage-limit detection
+ * (`classifyFailure`) ever latch. opencode (issue #349) has no limit detection,
+ * so it never participates — adding a dead entry with no `*_limit` event would be
+ * misleading. The `Partial<Record<…>>` constraint still validates every key is a
+ * real agent and every value the right shape.
+ */
 const PROVIDER_LIMIT_MESSAGES = {
   claude: {
     event: "claude_limit",
@@ -58,10 +65,15 @@ const PROVIDER_LIMIT_MESSAGES = {
     blocked: "⏳ OpenRouter limit reached — OpenRouter jobs are parked until the window resets.",
     cleared: "▶️ OpenRouter available again — parked jobs are resuming.",
   },
-} as const satisfies Record<
-  AgentId,
-  { event: NotificationEvent; blocked: string; cleared: string }
+} as const satisfies Partial<
+  Record<AgentId, { event: NotificationEvent; blocked: string; cleared: string }>
 >;
+
+/** Agents that have usage-limit detection and can therefore latch (issues #166/#167). */
+export type LimitAgentId = keyof typeof PROVIDER_LIMIT_MESSAGES;
+
+/** The limit-capable agent ids, for callers that iterate the provider-limit latches. */
+export const LIMIT_AGENT_IDS = Object.keys(PROVIDER_LIMIT_MESSAGES) as LimitAgentId[];
 
 /**
  * Two-sided edge notification for an agent's usage-limit latch (issues
@@ -69,7 +81,7 @@ const PROVIDER_LIMIT_MESSAGES = {
  * parked work resumes. Re-arms after each clear like the cost-limit edge.
  */
 export async function notifyProviderLimitEdge(
-  agent: AgentId,
+  agent: LimitAgentId,
   blocked: boolean,
   state: EdgeState,
   db: DB = getDb(),

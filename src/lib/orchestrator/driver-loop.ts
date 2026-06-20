@@ -1,5 +1,4 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { AGENT_IDS } from "@/lib/agents/registry";
 import type { AgentId } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { listRepos } from "@/lib/db/queries";
@@ -15,6 +14,8 @@ import { type TriageResult, triageRepo } from "@/lib/issues/triage";
 import { logError } from "@/lib/log/logger";
 import {
   type EdgeState,
+  LIMIT_AGENT_IDS,
+  type LimitAgentId,
   notifyCostLimitEdge,
   notifyCredentialEdge,
   notifyProviderLimitEdge,
@@ -53,7 +54,7 @@ const costLimitState: EdgeState = { active: false };
 /** Latch so the credential-watchdog notification fires once per outage (issue #177). */
 const credentialEdgeState: EdgeState = { active: false };
 /** Latches so the per-agent limit enter/exit notifications fire once per edge (issues #166/#167). */
-const providerLimitStates: Record<AgentId, EdgeState> = {
+const providerLimitStates: Record<LimitAgentId, EdgeState> = {
   claude: { active: false },
   codex: { active: false },
   openrouter: { active: false },
@@ -421,8 +422,10 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   // blocks, its jobs stay queued (other agents proceed); once it clears,
   // parked jobs requeue so this very tick's claim loop picks them straight
   // back up. The edge notifications fire once on entering and once on clearing.
+  // Only limit-capable agents (those with usage-limit detection) can latch;
+  // opencode (issue #349) has none, so it is not part of this sweep.
   const latchedAgents: AgentId[] = [];
-  for (const agent of AGENT_IDS) {
+  for (const agent of LIMIT_AGENT_IDS) {
     const latch = agentLimitBlocked(agent, db);
     void notifyProviderLimitEdge(agent, !!latch, providerLimitStates[agent], db);
     if (latch) {

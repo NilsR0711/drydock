@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { opencodeProvider } from "@/lib/agents/opencode";
 import { createDb, type DB } from "@/lib/db/client";
+import { commandForAgent } from "@/lib/orchestrator/agent-command";
 import { driveTick } from "@/lib/orchestrator/driver-loop";
 import { createJob, getJob, listJobs } from "@/lib/orchestrator/jobs";
 import { setDrainMode } from "@/lib/orchestrator/runtime";
@@ -63,8 +65,52 @@ describe("settings agent defaults", () => {
     expect(s.codexPath).toBe("codex");
   });
 
+  it("defaults the opencode CLI path to the binary on PATH (issue #349)", () => {
+    expect(getSettings(db).opencodePath).toBe("opencode");
+  });
+
+  it("persists a custom opencode CLI path (issue #349)", () => {
+    saveSettings({ opencodePath: "/usr/local/bin/opencode" }, db);
+    expect(getSettings(db).opencodePath).toBe("/usr/local/bin/opencode");
+  });
+
   it("persists a different default agent", () => {
     saveSettings({ defaultAgent: "codex" }, db);
     expect(getSettings(db).defaultAgent).toBe("codex");
+  });
+});
+
+describe("opencode repo configuration (issue #349)", () => {
+  it("stores opencode as a per-repo agent with a provider/model id", () => {
+    const repo = addRepo(
+      {
+        path: "/tmp/oc",
+        name: "oc",
+        agent: "opencode",
+        defaultModel: "anthropic/claude-sonnet-4-6",
+      },
+      db,
+    );
+    expect(repo.agent).toBe("opencode");
+    expect(repo.defaultModel).toBe("anthropic/claude-sonnet-4-6");
+  });
+
+  it("rejects a non provider/model id for opencode", () => {
+    expect(() =>
+      addRepo(
+        { path: "/tmp/bad", name: "bad", agent: "opencode", defaultModel: "claude-opus-4-8" },
+        db,
+      ),
+    ).toThrow(/provider\/model/);
+  });
+
+  it("rejects switching to opencode while the model is a static CLI id", () => {
+    const repo = addRepo({ path: "/tmp/sw", name: "sw" }, db);
+    expect(() => updateRepo(repo.id, { agent: "opencode" }, db)).toThrow(/provider\/model/);
+  });
+
+  it("resolves the opencode CLI binary path for the opencode provider", () => {
+    saveSettings({ opencodePath: "/opt/opencode" }, db);
+    expect(commandForAgent(opencodeProvider, db)).toBe("/opt/opencode");
   });
 });

@@ -135,17 +135,29 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   // PR audits run on the CLI agents only; an OpenRouter repo without an
   // explicit audit agent falls back to claude so the select never holds a
   // value its option list cannot show (issue #169).
-  const [auditAgent, setAuditAgent] = useState<AgentId>(
-    (repo.prAuditAgent ?? (repo.agent === "openrouter" ? "claude" : repo.agent)) as AgentId,
-  );
+  // PR audits run on the static-catalog CLI agents (claude/codex) only; a repo
+  // whose agent is openrouter or opencode falls back to claude so the select and
+  // model never hold a value its option list cannot show (issues #169/#349).
+  const auditFallbackAgent: AgentId =
+    repo.agent === "claude" || repo.agent === "codex" ? repo.agent : "claude";
+  // Normalize the persisted override too: a legacy/foreign value (openrouter,
+  // opencode) must not slip past the static-agent rule and seed an unsupported
+  // audit agent/model — fall back to the repo's CLI agent (or claude).
+  const persistedAuditAgent: AgentId | null =
+    repo.prAuditAgent === "claude" || repo.prAuditAgent === "codex" ? repo.prAuditAgent : null;
+  const effectiveAuditAgent = persistedAuditAgent ?? auditFallbackAgent;
+  const [auditAgent, setAuditAgent] = useState<AgentId>(effectiveAuditAgent);
   // Effective audit model: an explicit override wins; with only the agent
   // overridden, that agent's catalog default applies (the repo's defaultModel
-  // may belong to the other CLI); otherwise inherit the repo's defaultModel.
+  // may belong to the other CLI); otherwise inherit the repo's defaultModel —
+  // unless that belongs to a non-audit agent, then use the fallback's default.
   const [auditModel, setAuditModel] = useState(
     repo.prAuditModel ??
-      (repo.prAuditAgent && repo.prAuditAgent !== repo.agent
-        ? defaultModelForAgent(repo.prAuditAgent as AgentId)
-        : repo.defaultModel),
+      (effectiveAuditAgent !== repo.agent
+        ? defaultModelForAgent(effectiveAuditAgent)
+        : auditFallbackAgent === repo.agent
+          ? repo.defaultModel
+          : defaultModelForAgent(auditFallbackAgent)),
   );
   const [auditLanguage, setAuditLanguage] = useState(repo.prAuditLanguage);
   const [auditPostOnIssue, setAuditPostOnIssue] = useState(repo.prAuditPostOnIssue);
@@ -354,7 +366,9 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
               <AgentSelect
                 value={auditAgent}
                 onChange={(v) => {
-                  if (v === "openrouter") return; // PR audits run on the CLI agents only
+                  // PR audits run on the static-catalog CLI agents only
+                  // (issues #169/#349).
+                  if (v === "openrouter" || v === "opencode") return;
                   const nextModel = defaultModelForAgent(v);
                   setAuditAgent(v);
                   setAuditModel(nextModel);

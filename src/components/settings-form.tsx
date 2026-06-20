@@ -317,10 +317,13 @@ export function SettingsForm({
             <Field label="Default agent" hint="Used when a repo has none set.">
               <AgentSelect
                 value={s.defaultAgent}
+                // The global default stays a static-catalog CLI agent
+                // (claude/codex); OpenRouter and opencode are chosen per repo,
+                // where their model entry lives (issues #169/#349). Restrict the
+                // options so those values can't be picked, not just rejected.
+                agents={["claude", "codex"]}
                 onChange={(v: AgentId) => {
-                  // The global default stays a CLI agent; OpenRouter is chosen
-                  // per repo or job (issue #169).
-                  if (v === "openrouter") return;
+                  if (v === "openrouter" || v === "opencode") return;
                   set("defaultAgent", v);
                 }}
               />
@@ -362,6 +365,13 @@ export function SettingsForm({
             <Input
               value={s.codexPath}
               onChange={(e) => set("codexPath", e.target.value)}
+              spellCheck={false}
+            />
+          </Field>
+          <Field label="opencode CLI path">
+            <Input
+              value={s.opencodePath}
+              onChange={(e) => set("opencodePath", e.target.value)}
               spellCheck={false}
             />
           </Field>

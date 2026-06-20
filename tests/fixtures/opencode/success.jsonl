@@ -1,0 +1,6 @@
+{"type":"step_start","timestamp":1,"sessionID":"ses_abc","part":{"id":"prt_1","sessionID":"ses_abc","messageID":"msg_1","type":"step-start","snapshot":"snap1"}}
+{"type":"text","timestamp":2,"sessionID":"ses_abc","part":{"id":"prt_2","type":"text","text":"Let me inspect the file.","time":{"start":1,"end":2}}}
+{"type":"tool_use","timestamp":3,"sessionID":"ses_abc","part":{"id":"prt_3","callID":"call_1","tool":"edit","state":{"status":"completed","input":{"filePath":"a.ts"},"output":"ok","title":"a.ts","metadata":{},"time":{"start":2,"end":3}}}}
+{"type":"step_finish","timestamp":4,"sessionID":"ses_abc","part":{"id":"prt_4","type":"step-finish","reason":"tool-calls","snapshot":"snap2","cost":0.002,"tokens":{"input":1000,"output":200,"reasoning":50,"cache":{"read":300,"write":100}}}}
+{"type":"text","timestamp":5,"sessionID":"ses_abc","part":{"id":"prt_5","type":"text","text":"Fixed the off-by-one error.","time":{"start":4,"end":5}}}
+{"type":"step_finish","timestamp":6,"sessionID":"ses_abc","part":{"id":"prt_6","type":"step-finish","reason":"stop","snapshot":"snap3","cost":0.001,"tokens":{"input":500,"output":100,"reasoning":0,"cache":{"read":150,"write":0}}}}
