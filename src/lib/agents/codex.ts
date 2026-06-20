@@ -322,10 +322,30 @@ export class CodexStreamParser {
 }
 
 /**
+ * Codex's sandbox/approval flags for an `exec` run. The default maps to Claude's
+ * edits-only `--permission-mode acceptEdits`: `--sandbox workspace-write`
+ * auto-applies edits inside the worktree but blocks network and out-of-tree
+ * writes. `bypassPermissions` (issue #256, agent-driven release) instead grants
+ * full, unsandboxed access via `--dangerously-bypass-approvals-and-sandbox` —
+ * the codex analogue of Claude's `--dangerously-skip-permissions` — so the run
+ * can execute the repo's release commands (gh/git/npm), which the sandbox blocks
+ * headlessly. The bypass flag disables the sandbox outright, so it replaces the
+ * `--sandbox` flag rather than layering on top of it. Codex has no per-command
+ * allowlist analogous to Claude's `--allowedTools`, so `allowedCommands` is
+ * intentionally not honoured here.
+ */
+function codexSandboxArgs(bypassPermissions: boolean | undefined): string[] {
+  return bypassPermissions
+    ? ["--dangerously-bypass-approvals-and-sandbox"]
+    : ["--sandbox", "workspace-write"];
+}
+
+/**
  * The Codex CLI as an AgentProvider. Invocation: `codex exec --json` for a fresh
  * run and `codex exec resume <thread_id> --json` for the CI-fix path. The
  * `workspace-write` sandbox maps to claude's `--permission-mode acceptEdits`
- * (auto-apply edits within the worktree, no network/system writes).
+ * (auto-apply edits within the worktree, no network/system writes); a release
+ * run bypasses both sandbox and approvals (see `codexSandboxArgs`).
  *
  * Turn budget (issue #48): unlike Claude (`--max-turns`), `codex exec` has no
  * turn-budget flag or config key. It runs a *single* turn (TurnStart →
@@ -349,25 +369,25 @@ export const codexProvider: AgentProvider = {
   defaultModel: CODEX_DEFAULT_MODEL,
 
   // `maxTurns` is intentionally not destructured: codex exec has no turn-budget
-  // flag (issue #48). See the provider doc comment above.
-  buildStartArgs: ({ prompt, model }) => [
+  // flag (issue #48). See the provider doc comment above. `bypassPermissions`
+  // selects the sandbox flag (issue #256); see `codexSandboxArgs`.
+  buildStartArgs: ({ prompt, model, bypassPermissions }) => [
     "exec",
     "--json",
-    "--sandbox",
-    "workspace-write",
+    ...codexSandboxArgs(bypassPermissions),
     "--model",
     model,
     prompt,
   ],
 
   // `maxTurns` intentionally unused on resume too (no codex turn-budget flag, #48).
-  buildResumeArgs: ({ prompt, sessionId, model }) => [
+  // Symmetric with buildStartArgs: a resumed release session keeps full access.
+  buildResumeArgs: ({ prompt, sessionId, model, bypassPermissions }) => [
     "exec",
     "resume",
     sessionId,
     "--json",
-    "--sandbox",
-    "workspace-write",
+    ...codexSandboxArgs(bypassPermissions),
     "--model",
     model,
     prompt,

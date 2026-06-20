@@ -41,6 +41,49 @@ describe("codexProvider", () => {
     expect(args.at(-1)).toBe("fix the bug");
   });
 
+  it("bypasses sandbox and approvals when bypassPermissions is set (issue #256)", () => {
+    // The codex analogue of Claude's --dangerously-skip-permissions: an
+    // agent-driven release must run gh/git/npm, which the workspace-write
+    // sandbox blocks. The bypass flag replaces --sandbox (they are mutually
+    // exclusive), it does not layer on top of it.
+    const args = codexProvider.buildStartArgs({
+      prompt: "cut the release",
+      model: "gpt-5-codex",
+      maxTurns: 40,
+      bypassPermissions: true,
+    });
+    expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(args).not.toContain("--sandbox");
+    expect(args).not.toContain("workspace-write");
+    expect(args.at(-1)).toBe("cut the release");
+  });
+
+  it("bypasses sandbox and approvals on resume too when bypassPermissions is set (issue #256)", () => {
+    const args = codexProvider.buildResumeArgs({
+      prompt: "finish the release",
+      sessionId: "th_codex_abc",
+      model: codexProvider.resumeModel,
+      maxTurns: codexProvider.resumeMaxTurns,
+      bypassPermissions: true,
+    });
+    expect(args).not.toBeNull();
+    expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(args).not.toContain("--sandbox");
+    expect(args).not.toContain("workspace-write");
+  });
+
+  it("keeps the writable sandbox when bypassPermissions is unset", () => {
+    // Default (and edits-only) runs must never grant the full bypass.
+    const args = codexProvider.buildStartArgs({
+      prompt: "fix the bug",
+      model: "gpt-5-codex",
+      maxTurns: 40,
+    });
+    expect(args).toContain("--sandbox");
+    expect(args).toContain("workspace-write");
+    expect(args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+  });
+
   it("does not inject a turn-budget flag on start (codex exec has no --max-turns, issue #48)", () => {
     // `codex exec` runs a single turn (TurnStart → TurnCompleted) and exposes no
     // turn-budget flag or config key, unlike Claude's `--max-turns`. Passing one

@@ -120,16 +120,23 @@ export interface StartReleaseResult {
  * whose agent discovers how the repo releases and performs it, then record a
  * linked `release_runs` row (mode "agent") so the panel shows the run and can
  * deep-link to the job's live log. Gated by the same global + per-repo opt-in
- * and forge capability as the deterministic path; additionally requires the
- * Claude agent, the only one wired for the full-shell-access release session.
- * The job's dedupe key (`release:<repoId>`) refuses a second concurrent release
- * (double submit, second tab) until the prior one settles — a release is hard to
- * reverse, so a duplicate must never slip through.
+ * and forge capability as the deterministic path; additionally requires a CLI
+ * agent (claude or codex), the ones wired for the full-shell-access release
+ * session via their verified permission-bypass flag. The HTTP provider
+ * (openrouter) drives an in-process tool loop with no shell, so it cannot run a
+ * repo's release commands and is rejected. The job's dedupe key
+ * (`release:<repoId>`) refuses a second concurrent release (double submit,
+ * second tab) until the prior one settles — a release is hard to reverse, so a
+ * duplicate must never slip through.
  */
 export async function startReleaseAction(repoId: number): Promise<StartReleaseResult> {
-  const { db, repo } = releaseContext(repoId);
-  if (repo.agent !== "claude") {
-    throw new Error("Agent-driven release currently supports the Claude agent only.");
+  // Use the provider releaseContext already resolved (not a re-read of
+  // repo.agent), so the guard and the persisted job agent agree on the same id.
+  const { db, repo, provider } = releaseContext(repoId);
+  if (provider.kind === "http") {
+    throw new Error(
+      "Agent-driven release requires a CLI agent (claude or codex); the OpenRouter backend has no shell access.",
+    );
   }
   // Guard, enqueue, and record in one transaction so nothing can interleave
   // (better-sqlite3 transactions are synchronous). `activeReleaseRun` also blocks
@@ -149,7 +156,7 @@ export async function startReleaseAction(repoId: number): Promise<StartReleaseRe
         repoId: repo.id,
         issueNumber: 0,
         kind: "release",
-        agent: repo.agent,
+        agent: provider.id,
         model: repo.defaultModel,
         dedupeKey: `release:${repo.id}`,
       },
