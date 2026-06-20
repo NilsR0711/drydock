@@ -25,6 +25,19 @@ export const settingsSchema = z.object({
   // semantics independently.
   dailyCostLimitUsd: z.number().nonnegative().default(0),
   pollIntervalSec: z.number().int().positive().default(30),
+  // Hard per-tick watchdog deadline for the scheduler loop, in seconds (issue
+  // #359). A single hung tick — e.g. a `gh` call stalling on a dead connection
+  // with an expired token — used to wedge the whole loop indefinitely: the next
+  // tick is scheduled only after the current one resolves, so once a tick never
+  // resolved no queued job was ever claimed again until a manual restart. The
+  // loop now races each tick against this deadline; on breach it abandons the
+  // tick, clears its re-entrancy guard, and schedules the next one, so it
+  // self-heals once GitHub is reachable again. Defaults to 120s — well below the
+  // observed ~50 min wedge yet above any healthy tick. 0 disables the watchdog.
+  // Capped at 2_147_483s (~24.8 days): * 1000 stays under Node's 32-bit setTimeout
+  // ceiling (2_147_483_647 ms), above which a timer silently fires after 1ms —
+  // which here would abandon *every* tick instantly, the opposite of the intent.
+  maxTickSeconds: z.number().int().nonnegative().max(2_147_483).default(120),
   // Per-job turn budget (issue #254). 0 is off (unlimited): the runner drops the
   // CLI `--max-turns` flag and the OpenRouter loop skips its turn check, so a
   // long task is bounded only by maxJobMinutes / the per-job cost cap. Defaults

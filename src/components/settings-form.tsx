@@ -314,6 +314,17 @@ export function SettingsForm({
                 onChange={(e) => set("maxJobCostUsd", Number(e.target.value))}
               />
             </Field>
+            <Field
+              label="Max tick (s)"
+              hint="Abandon a hung scheduler tick after this, so the loop never wedges. 0 disables the watchdog."
+            >
+              <Input
+                type="number"
+                min="0"
+                value={s.maxTickSeconds}
+                onChange={(e) => set("maxTickSeconds", Number(e.target.value))}
+              />
+            </Field>
             <Field label="Default agent" hint="Used when a repo has none set.">
               <AgentSelect
                 value={s.defaultAgent}

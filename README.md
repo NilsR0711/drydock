@@ -449,6 +449,11 @@ pnpm mcp            # start the local stdio MCP server (see "MCP server")
   limit). HTTP 200 while the driver loop ticks; 503 when the loop is stalled (no tick
   within 3 poll intervals), not running, or the DB is unreachable. Read-only and
   secret-free, served from a single cheap query set with no forge calls.
+- **Tick watchdog** — every scheduler tick races a hard deadline (`maxTickSeconds`,
+  default 120s; 0 disables). A single hung tick — e.g. a `gh` call stalling on a dead
+  connection with an expired token — is abandoned at the deadline, the loop reschedules,
+  and queued jobs keep being claimed, so a wedged loop self-heals once GitHub is reachable
+  again instead of needing a manual restart.
 - **Control endpoints** — `POST /api/control/pause` (`{ "paused": boolean }`) and
   `POST /api/control/drain` (`{ "draining": boolean }`) flip global pause/resume and drain
   mode over HTTP, so the [desktop shell](#desktop-app-menu-bar) and local scripts can toggle
