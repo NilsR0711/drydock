@@ -78,9 +78,13 @@ describe("startReleaseAction (issue #256)", () => {
     await expect(startReleaseAction(r.id)).rejects.toThrow(/disabled globally/);
   });
 
-  it("rejects when the repo has not opted in", async () => {
+  it("allows a manual start even when the repo has not opted in (issue #352)", async () => {
+    // The "Create release" button is a manual operator action, independent of the
+    // per-repo `releaseEnabled` background gate. Only the global kill-switch, forge
+    // capability, and CLI-agent checks apply.
     const r = repo({ releaseEnabled: false });
-    await expect(startReleaseAction(r.id)).rejects.toThrow(/not enabled for this repo/);
+    const { jobId } = await startReleaseAction(r.id);
+    expect(getJob(jobId, getDb())?.kind).toBe("release");
   });
 
   it("allows a codex agent (CLI agent with a verified bypass flag)", async () => {

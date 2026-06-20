@@ -16,6 +16,7 @@ import {
 import { notFound } from "next/navigation";
 import { IssueBoard } from "@/components/issue-board";
 import { PageHeader } from "@/components/page-header";
+import { ReleaseButton } from "@/components/release-button";
 import { RepoActivity } from "@/components/repo-activity";
 import { RepoAdrPanel } from "@/components/repo-adr-panel";
 import { RepoAutomationBar } from "@/components/repo-automation-bar";
@@ -113,9 +114,14 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
         title={<span className="font-mono">{ws.repo.name}</span>}
         subtitle={ws.repo.path}
         actions={
-          <Badge tone="neutral" className="capitalize">
-            {ws.repo.platform}
-          </Badge>
+          <>
+            <Badge tone="neutral" className="capitalize">
+              {ws.repo.platform}
+            </Badge>
+            {/* Manual agent-driven release (issue #352), independent of the
+                per-repo releaseEnabled background opt-in. */}
+            <ReleaseButton repoId={ws.repo.id} />
+          </>
         }
       />
 
