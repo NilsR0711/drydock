@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
-import { listRepos, listReposWithStats } from "@/lib/db/queries";
+import { getRepo, listRepos, listReposWithStats } from "@/lib/db/queries";
 import { jobs, openrouterModels } from "@/lib/db/schema";
+import { RELEASE_PLAYBOOK_MAX_CHARS } from "@/lib/orchestrator/release-playbook";
 import { repoAutomation } from "@/lib/repos/automation";
-import { addRepo, removeRepo, updateRepo } from "@/lib/repos/service";
+import { addRepo, removeRepo, setReleasePlaybook, updateRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
 
 let db: DB;
@@ -622,5 +623,46 @@ describe("repos service — sandboxed execution (issue #182)", () => {
     const auto = repoAutomation(repo);
     expect(auto.sandbox).toBe("docker");
     expect(auto.sandboxImage).toBe("img:2");
+  });
+
+  describe("setReleasePlaybook (issue #352)", () => {
+    it("defaults the release playbook to null", () => {
+      const repo = addRepo({ path: "/pb1", name: "pb1" }, db);
+      expect(repo.releasePlaybook).toBeNull();
+    });
+
+    it("round-trips a playbook through the repos service", () => {
+      const repo = addRepo({ path: "/pb2", name: "pb2" }, db);
+      const updated = setReleasePlaybook(repo.id, "1. dispatch release-please\n2. publish", db);
+      expect(updated.releasePlaybook).toBe("1. dispatch release-please\n2. publish");
+      expect(getRepo(repo.id, db)?.releasePlaybook).toBe("1. dispatch release-please\n2. publish");
+    });
+
+    it("trims and length-caps the stored playbook", () => {
+      const repo = addRepo({ path: "/pb3", name: "pb3" }, db);
+      const updated = setReleasePlaybook(
+        repo.id,
+        `  ${"y".repeat(RELEASE_PLAYBOOK_MAX_CHARS + 50)}  `,
+        db,
+      );
+      expect((updated.releasePlaybook as string).length).toBeLessThanOrEqual(
+        RELEASE_PLAYBOOK_MAX_CHARS,
+      );
+      expect(updated.releasePlaybook).toMatch(/truncated/);
+    });
+
+    it("clears the playbook when given null", () => {
+      const repo = addRepo({ path: "/pb4", name: "pb4" }, db);
+      setReleasePlaybook(repo.id, "something", db);
+      const cleared = setReleasePlaybook(repo.id, null, db);
+      expect(cleared.releasePlaybook).toBeNull();
+    });
+
+    it("leaves other fields untouched", () => {
+      const repo = addRepo({ path: "/pb5", name: "pb5", agentInstructions: "be careful" }, db);
+      const updated = setReleasePlaybook(repo.id, "steps", db);
+      expect(updated.name).toBe("pb5");
+      expect(updated.agentInstructions).toBe("be careful");
+    });
   });
 });

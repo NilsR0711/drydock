@@ -5,6 +5,7 @@ import { jobs, type Repo, repos } from "@/lib/db/schema";
 import { isValidForgeBaseUrl } from "@/lib/forge/url-guard";
 import { isKnownModelId } from "@/lib/models";
 import { getOpenRouterModel, isModelAvailable } from "@/lib/openrouter/catalog";
+import { parseReleasePlaybook } from "@/lib/orchestrator/release-playbook";
 import { TERMINAL_STATES } from "@/lib/orchestrator/state-machine";
 import { AGENT_INSTRUCTIONS_MAX_CHARS } from "@/lib/repos/agent-instructions";
 import { getSettings } from "@/lib/settings/service";
@@ -233,6 +234,25 @@ export function updateRepo(id: number, input: Partial<RepoInput>, db: DB = getDb
     return current;
   }
   const updated = db.update(repos).set(data).where(eq(repos.id, id)).returning().get();
+  if (!updated) throw new Error(`repo ${id} not found`);
+  return updated;
+}
+
+/**
+ * Persist the memoized release playbook for a repo (issue #352). Machine-written
+ * by `runReleaseJob` after a clean agent-driven release — deliberately NOT part of
+ * `repoInputSchema` (it is not operator-editable and must not be reset by partial
+ * repo updates). The text is trimmed and length-capped; a blank/null playbook
+ * clears the column. Round-trips back out via `getRepo(...).releasePlaybook`.
+ */
+export function setReleasePlaybook(id: number, playbook: string | null, db: DB = getDb()): Repo {
+  const value = playbook == null ? null : parseReleasePlaybook(playbook);
+  const updated = db
+    .update(repos)
+    .set({ releasePlaybook: value })
+    .where(eq(repos.id, id))
+    .returning()
+    .get();
   if (!updated) throw new Error(`repo ${id} not found`);
   return updated;
 }

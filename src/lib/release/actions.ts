@@ -34,15 +34,26 @@ import { getSettings } from "@/lib/settings/service";
  * to reverse, so a disabled or unsupported repo fails loudly rather than guessing.
  */
 
-/** Resolve a release-capable forge for a gated repo, or throw a clear reason. */
-function releaseContext(repoId: number) {
+/**
+ * Resolve a release-capable forge for a gated repo, or throw a clear reason.
+ *
+ * `requireRepoOptIn` (default true) enforces the per-repo `releaseEnabled` gate,
+ * which the deterministic preview/publish path uses. The manual agent-driven
+ * start (issue #352) passes false: its "Create release" button is an explicit
+ * operator action surfaced on every repo, independent of the per-repo background
+ * opt-in. The global kill-switch, forge capability, and agent checks still apply.
+ */
+function releaseContext(
+  repoId: number,
+  { requireRepoOptIn = true }: { requireRepoOptIn?: boolean } = {},
+) {
   const db = getDb();
   const repo = getRepo(repoId, db);
   if (!repo) throw new Error(`repo ${repoId} not found`);
   if (!getSettings(db).releaseManagementEnabled) {
     throw new Error("Release management is disabled globally.");
   }
-  if (!repoAutomation(repo).releaseEnabled) {
+  if (requireRepoOptIn && !repoAutomation(repo).releaseEnabled) {
     throw new Error("Release management is not enabled for this repo.");
   }
   const client: ForgeClient = getForge(repo);
@@ -119,8 +130,10 @@ export interface StartReleaseResult {
  * Start an agent-driven release for a repo (issue #256): enqueue a release job
  * whose agent discovers how the repo releases and performs it, then record a
  * linked `release_runs` row (mode "agent") so the panel shows the run and can
- * deep-link to the job's live log. Gated by the same global + per-repo opt-in
- * and forge capability as the deterministic path; additionally requires a CLI
+ * deep-link to the job's live log. As a manual operator action surfaced on every
+ * repo, it is gated by the global kill-switch and forge capability but NOT the
+ * per-repo `releaseEnabled` opt-in (issue #352 — that gate only governs the
+ * background auto-release sweep); additionally requires a CLI
  * agent (claude or codex), the ones wired for the full-shell-access release
  * session via their verified permission-bypass flag. The HTTP provider
  * (openrouter) drives an in-process tool loop with no shell, so it cannot run a
@@ -132,7 +145,9 @@ export interface StartReleaseResult {
 export async function startReleaseAction(repoId: number): Promise<StartReleaseResult> {
   // Use the provider releaseContext already resolved (not a re-read of
   // repo.agent), so the guard and the persisted job agent agree on the same id.
-  const { db, repo, provider } = releaseContext(repoId);
+  // The manual button is independent of the per-repo `releaseEnabled` opt-in
+  // (issue #352) — that gate only governs the background auto-release sweep.
+  const { db, repo, provider } = releaseContext(repoId, { requireRepoOptIn: false });
   if (provider.kind === "http") {
     throw new Error(
       "Agent-driven release requires a CLI agent (claude or codex); the OpenRouter backend has no shell access.",
