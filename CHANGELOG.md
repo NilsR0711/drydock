@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.0](https://github.com/NilsR0711/drydock/compare/v0.1.13...v1.0.0) (2026-06-20)
+
+
+### Bug Fixes
+
+* **job-detail:** live status badge, Stop button & duration timer ([#337](https://github.com/NilsR0711/drydock/issues/337)) ([745e782](https://github.com/NilsR0711/drydock/commit/745e7826b4bc7d4ce6ac17973b3b134498a84983))
+
+
+### Build System
+
+* **release-please:** graduate to stable, cut v1.0.0 ([#339](https://github.com/NilsR0711/drydock/issues/339)) ([8413ff3](https://github.com/NilsR0711/drydock/commit/8413ff39fd5a79a91ddc85b166fb26674de23208))
+
 ## [0.1.13](https://github.com/NilsR0711/drydock/compare/v0.1.12...v0.1.13) (2026-06-19)
 
 
