@@ -130,8 +130,10 @@ export interface StartReleaseResult {
  * duplicate must never slip through.
  */
 export async function startReleaseAction(repoId: number): Promise<StartReleaseResult> {
-  const { db, repo } = releaseContext(repoId);
-  if (getAgentProvider(repo.agent).kind === "http") {
+  // Use the provider releaseContext already resolved (not a re-read of
+  // repo.agent), so the guard and the persisted job agent agree on the same id.
+  const { db, repo, provider } = releaseContext(repoId);
+  if (provider.kind === "http") {
     throw new Error(
       "Agent-driven release requires a CLI agent (claude or codex); the OpenRouter backend has no shell access.",
     );
@@ -154,7 +156,7 @@ export async function startReleaseAction(repoId: number): Promise<StartReleaseRe
         repoId: repo.id,
         issueNumber: 0,
         kind: "release",
-        agent: repo.agent,
+        agent: provider.id,
         model: repo.defaultModel,
         dedupeKey: `release:${repo.id}`,
       },
