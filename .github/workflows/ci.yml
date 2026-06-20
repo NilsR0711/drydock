@@ -25,19 +25,19 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node: ["20", "22"]
+        node: ["22", "24"]
         # The daemon lifecycle must behave identically on every OS (issue #216).
         # ubuntu and macOS (both Unix) run the full suite; Windows runs the
         # daemon lifecycle subset, because the legacy suite has Unix-only tests
         # (real `false`/`printenv` spawns, POSIX signal timing) that predate this
         # work and are unrelated to it. The heavier lint/typecheck/build are
         # OS-independent and run on ubuntu only; macOS/Windows run a single Node
-        # version (22) so the slowest runners don't double.
+        # version (24, the current Active LTS) so the slowest runners don't double.
         exclude:
           - os: macos-latest
-            node: "20"
+            node: "22"
           - os: windows-latest
-            node: "20"
+            node: "22"
     steps:
       - name: Checkout
         uses: actions/checkout@v6

@@ -281,7 +281,7 @@ pnpm test           # run the unit suite (167 tests, fully offline)
 
 | Tool | Version | Notes |
 | --- | --- | --- |
-| Node.js | ≥ 20.9 (22 recommended) | matches the CI matrix |
+| Node.js | ≥ 22 (24 recommended) | matches the CI matrix |
 | npm | ≥ 10 (ships with Node) | to install/run the published tool — `npm i -g @nilsr0711/drydock` or `npx @nilsr0711/drydock` |
 | [`claude`](https://docs.claude.com/en/docs/claude-code) **or** [`codex`](https://github.com/openai/codex) CLI | latest | the coding agent — pick one per repo; on `PATH`, authenticated |
 | [`gh`](https://cli.github.com) CLI | latest | on `PATH`, authenticated — for **GitHub** repos |
@@ -423,7 +423,7 @@ pnpm mcp            # start the local stdio MCP server (see "MCP server")
 - **Architecture decisions** live in [`docs/adr/`](docs/adr) (index:
   [`docs/DECISIONS.md`](docs/DECISIONS.md)).
 - CI runs across an ubuntu/macOS/windows matrix so the cross-platform daemon lifecycle is
-  exercised on every target OS: ubuntu (Node 20 & 22) and macOS run the full suite, windows
+  exercised on every target OS: ubuntu (Node 22 & 24) and macOS run the full suite, windows
   runs the daemon lifecycle subset, with lint, typecheck, build, and the standalone smoke test
   on ubuntu; CodeQL scans the codebase; Dependabot keeps dependencies and actions current.
 
