@@ -207,7 +207,23 @@ export class WorktreeManager {
       rmSync(path, { recursive: true, force: true });
       await this.git(["-C", repo.path, "worktree", "prune"]).catch(() => undefined);
       await this.git(["-C", repo.path, "branch", "-D", branch]).catch(() => undefined);
-      await this.git(["-C", repo.path, "worktree", "add", "-b", branch, path, repo.defaultBranch]);
+      // Cut the branch from origin's default, not the local ref. Drydock's
+      // server-side merges never touch this clone, so the local default branch
+      // only ever drifts behind origin; a worktree cut from it starts several
+      // commits stale and its PR is reported CONFLICTING against the real
+      // mainline, parking a finished job for nothing (issue #341). Fetch the
+      // default branch and base off origin/<default>, mirroring prepareResume.
+      await this.git(["-C", repo.path, "fetch", "origin", repo.defaultBranch]);
+      await this.git([
+        "-C",
+        repo.path,
+        "worktree",
+        "add",
+        "-b",
+        branch,
+        path,
+        `origin/${repo.defaultBranch}`,
+      ]);
       return this.resolveBase(repo.path, branch);
     });
     return { path, branch, base };
@@ -275,7 +291,20 @@ export class WorktreeManager {
   async prepareForNewBranch(repo: Repo, branch: string, key: string): Promise<Worktree> {
     const path = join(repoWorktreesDir(repo.name), `dh-${sanitize(key)}`);
     const base = await this.withRepoLock(repo.path, async () => {
-      await this.git(["-C", repo.path, "worktree", "add", "-b", branch, path, repo.defaultBranch]);
+      // Same stale-base fix as prepare (issue #341): the deployment-healing
+      // follow-up branch must start from the merged mainline on origin, not the
+      // local default ref that has drifted behind it.
+      await this.git(["-C", repo.path, "fetch", "origin", repo.defaultBranch]);
+      await this.git([
+        "-C",
+        repo.path,
+        "worktree",
+        "add",
+        "-b",
+        branch,
+        path,
+        `origin/${repo.defaultBranch}`,
+      ]);
       return this.resolveBase(repo.path, branch);
     });
     return { path, branch, base };
