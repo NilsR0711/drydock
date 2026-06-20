@@ -140,17 +140,21 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   // model never hold a value its option list cannot show (issues #169/#349).
   const auditFallbackAgent: AgentId =
     repo.agent === "claude" || repo.agent === "codex" ? repo.agent : "claude";
-  const [auditAgent, setAuditAgent] = useState<AgentId>(
-    (repo.prAuditAgent ?? auditFallbackAgent) as AgentId,
-  );
+  // Normalize the persisted override too: a legacy/foreign value (openrouter,
+  // opencode) must not slip past the static-agent rule and seed an unsupported
+  // audit agent/model — fall back to the repo's CLI agent (or claude).
+  const persistedAuditAgent: AgentId | null =
+    repo.prAuditAgent === "claude" || repo.prAuditAgent === "codex" ? repo.prAuditAgent : null;
+  const effectiveAuditAgent = persistedAuditAgent ?? auditFallbackAgent;
+  const [auditAgent, setAuditAgent] = useState<AgentId>(effectiveAuditAgent);
   // Effective audit model: an explicit override wins; with only the agent
   // overridden, that agent's catalog default applies (the repo's defaultModel
   // may belong to the other CLI); otherwise inherit the repo's defaultModel —
   // unless that belongs to a non-audit agent, then use the fallback's default.
   const [auditModel, setAuditModel] = useState(
     repo.prAuditModel ??
-      (repo.prAuditAgent && repo.prAuditAgent !== repo.agent
-        ? defaultModelForAgent(repo.prAuditAgent as AgentId)
+      (effectiveAuditAgent !== repo.agent
+        ? defaultModelForAgent(effectiveAuditAgent)
         : auditFallbackAgent === repo.agent
           ? repo.defaultModel
           : defaultModelForAgent(auditFallbackAgent)),

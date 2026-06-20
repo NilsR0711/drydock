@@ -78,6 +78,24 @@ describe("opencodeProvider", () => {
     expect(args?.at(-1)).toBe("fix ci");
   });
 
+  it("forwards the permission bypass on resume too", () => {
+    const normal = opencodeProvider.buildResumeArgs({
+      prompt: "fix ci",
+      sessionId: "ses_abc",
+      model: opencodeProvider.resumeModel,
+      maxTurns: opencodeProvider.resumeMaxTurns,
+    });
+    expect(normal).not.toContain("--dangerously-skip-permissions");
+    const bypass = opencodeProvider.buildResumeArgs({
+      prompt: "fix ci",
+      sessionId: "ses_abc",
+      model: opencodeProvider.resumeModel,
+      maxTurns: opencodeProvider.resumeMaxTurns,
+      bypassPermissions: true,
+    });
+    expect(bypass).toContain("--dangerously-skip-permissions");
+  });
+
   it("builds a plain (non-JSON) one-shot for text decomposition", () => {
     const args = opencodeProvider.buildOneShotArgs({
       prompt: "split this issue",

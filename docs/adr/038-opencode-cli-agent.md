@@ -23,9 +23,10 @@ deliberately **out of scope** here: OpenRouter stays exactly as-is.
 
 ## Decision
 
-Add **`opencode` as a fourth `AgentId`** — a CLI provider next to
-`claude`/`codex` — reusing the existing spawn/stream/cost machinery. Opt-in
-per repo like the others; no behaviour change for existing repos.
+Add **`opencode` as a fourth `AgentId`** — the **third CLI agent**, next to
+`claude`/`codex` and alongside the HTTP-backed `openrouter` — reusing the
+existing spawn/stream/cost machinery. Opt-in per repo like the others; no
+behaviour change for existing repos.
 
 ### 1. CLI provider on the existing spawn path
 
