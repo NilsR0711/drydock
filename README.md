@@ -4,7 +4,8 @@
 
 ### Turn GitHub issues into merged pull requests — autonomously, on your own machine.
 
-Drydock picks issues off a queue, drives the [`claude`](https://docs.claude.com/en/docs/claude-code) CLI to implement them,
+Drydock picks issues off a queue, drives a coding agent ([`claude`](https://docs.claude.com/en/docs/claude-code),
+[`codex`](https://github.com/openai/codex), or [`opencode`](https://opencode.ai)) to implement them,
 babysits CI until it's green, auto-merges, and tracks every dollar it spends — all from one
 local dashboard bound to `127.0.0.1`.
 
@@ -27,8 +28,9 @@ npx @nilsr0711/drydock --open
 
 > [!NOTE]
 > Drydock is a **single-user, local tool**: no auth, no cloud, no multi-tenant. It binds
-> `127.0.0.1` only and stores everything in a local SQLite file. It shells out to the
-> `claude` and `gh` CLIs you already have authenticated.
+> `127.0.0.1` only and stores everything in a local SQLite file. It shells out to your
+> chosen agent CLI (`claude`, `codex`, or `opencode`) and `gh` — the ones you already have
+> authenticated.
 
 ---
 
@@ -65,7 +67,7 @@ handlers. The **driver loop** atomically claims the next eligible job with a lea
 per-repo priority, the daily cost limit, global pause, and serial-vs-parallel settings),
 heartbeats it while it runs, then releases the lease once it settles.
 
-The `claude` CLI is spawned as a subprocess; its `stream-json` stdout is parsed line-by-line,
+The agent CLI (`claude` by default) is spawned as a subprocess; its `stream-json` stdout is parsed line-by-line,
 persisted to `job_events`, and pushed to the browser over SSE. Every external command
 (`claude`, `gh`, `git`) goes through an injectable runner, so the entire test suite runs
 **offline with fakes** — no network, no real subprocesses ([ADR&nbsp;004](docs/adr/004-injectable-command-runner.md)).
@@ -82,8 +84,8 @@ The SQLite database lives in `~/.drydock/` (override with `DRYDOCK_DATA_DIR`) an
 and migrated automatically on first start. Then **open the dashboard, add a repository, and
 queue an issue** — that's the whole setup.
 
-You need the `claude` (or `codex`) and — for GitHub — `gh` CLIs on your `PATH`, already
-authenticated. See [Requirements](#requirements).
+You need an agent CLI (`claude`, `codex`, or `opencode`) and — for GitHub — `gh` on your
+`PATH`, already authenticated. See [Requirements](#requirements).
 
 <details>
 <summary><b>Install globally instead</b></summary>
@@ -117,7 +119,7 @@ The database is created and migrated on first connection. See [Development](#dev
 | --- | --- | --- |
 | Node.js | ≥ 22 (24 recommended) | matches the CI matrix |
 | npm | ≥ 10 (ships with Node) | to run the published tool (`npx` / `npm i -g`) |
-| [`claude`](https://docs.claude.com/en/docs/claude-code) **or** [`codex`](https://github.com/openai/codex) CLI | latest | the coding agent — pick one per repo; on `PATH`, authenticated |
+| [`claude`](https://docs.claude.com/en/docs/claude-code), [`codex`](https://github.com/openai/codex), **or** [`opencode`](https://opencode.ai) CLI | latest | the coding agent — pick one per repo; on `PATH`, authenticated |
 | [`gh`](https://cli.github.com) CLI | latest | on `PATH`, authenticated — for **GitHub** repos |
 | pnpm | 10.x | **only** for local development (`corepack enable`) |
 
