@@ -49,8 +49,47 @@ describe("agentSpawnEnv (OpenRouter bridge, issue #349 Step 2)", () => {
   });
 });
 
+describe("agentSpawnEnv permission mapping (issue #350)", () => {
+  beforeEach(() => delete process.env[ENV_KEY]);
+
+  it("injects the non-bypass OPENCODE_PERMISSION config when a permission context is given", () => {
+    const env = agentSpawnEnv(opencodeProvider, db, {
+      bypassPermissions: false,
+      allowedCommands: ["npm test"],
+    });
+    expect(env?.OPENCODE_PERMISSION).toBeTruthy();
+    const config = JSON.parse(env?.OPENCODE_PERMISSION as string);
+    expect(config.edit).toBe("allow");
+    expect(config.bash["npm test"]).toBe("allow");
+    expect(config.bash["*"]).toBe("deny");
+  });
+
+  it("omits OPENCODE_PERMISSION on the bypass path (the flag handles it)", () => {
+    const env = agentSpawnEnv(opencodeProvider, db, { bypassPermissions: true });
+    expect(env).toBeUndefined();
+  });
+
+  it("merges the OpenRouter bridge key with the permission config", () => {
+    saveSettings({ openrouterApiKey: "sk-or-stored" }, db);
+    const env = agentSpawnEnv(opencodeProvider, db, { bypassPermissions: false });
+    expect(env?.OPENROUTER_API_KEY).toBe("sk-or-stored");
+    expect(env?.OPENCODE_PERMISSION).toBeTruthy();
+  });
+
+  it("never injects a permission config for claude or codex", () => {
+    expect(agentSpawnEnv(claudeProvider, db, { bypassPermissions: false })).toBeUndefined();
+    expect(agentSpawnEnv(codexProvider, db, { allowedCommands: ["npm test"] })).toBeUndefined();
+  });
+
+  it("leaves a two-arg call (one-shot probes) unmanaged — no permission config", () => {
+    // Decomposition one-shots only read and exit; they pass no permission
+    // context, so opencode keeps its defaults rather than the restrictive config.
+    expect(agentSpawnEnv(opencodeProvider, db)).toBeUndefined();
+  });
+});
+
 describe("spawnAgentSession forwards the bridge env to the spawned process", () => {
-  it("passes OPENROUTER_API_KEY to the opencode child when a key is set", async () => {
+  it("passes OPENROUTER_API_KEY and the permission config to the opencode child", async () => {
     delete process.env[ENV_KEY];
     const repoId = addRepo(
       { path: "/tmp/oc", name: "oc", agent: "opencode", defaultModel: "openrouter/x/y" },
@@ -71,6 +110,37 @@ describe("spawnAgentSession forwards the bridge env to the spawned process", () 
       db,
       broker: new LogBroker(db),
       runner,
+      allowedCommands: ["npm test"],
+    });
+    expect(capturedEnv?.OPENROUTER_API_KEY).toBe("sk-or-bridge");
+    const config = JSON.parse(capturedEnv?.OPENCODE_PERMISSION as string);
+    expect(config.bash["npm test"]).toBe("allow");
+    expect(config.bash["*"]).toBe("deny");
+  });
+
+  it("forwards the bypass setting so a side session never gets the restrictive config", async () => {
+    delete process.env[ENV_KEY];
+    const repoId = addRepo(
+      { path: "/tmp/oc2", name: "oc2", agent: "opencode", defaultModel: "openrouter/x/y" },
+      db,
+    ).id;
+    saveSettings({ openrouterApiKey: "sk-or-bridge" }, db);
+    const job = createJob(
+      { repoId, issueNumber: 2, agent: "opencode", model: "openrouter/x/y" },
+      db,
+    );
+    let capturedEnv: Record<string, string> | undefined;
+    const runner: StreamRunner = (_cmd, _args, _cwd, cb: StreamCallbacks, env): StreamHandle => {
+      capturedEnv = env;
+      cb.onStdout("");
+      return { done: Promise.resolve(0), abort: () => {} };
+    };
+    await spawnAgentSession(getJob(job.id, db) as never, "go", "/tmp/oc2", {
+      db,
+      broker: new LogBroker(db),
+      runner,
+      sideSession: true,
+      bypassPermissions: true,
     });
     expect(capturedEnv).toEqual({ OPENROUTER_API_KEY: "sk-or-bridge" });
   });

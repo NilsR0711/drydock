@@ -204,6 +204,55 @@ export class OpencodeStreamParser {
 }
 
 /**
+ * The `OPENCODE_PERMISSION` env config for the non-bypass path (issue #350).
+ * opencode reads this inlined-JSON permission map from its environment; here it
+ * is the autonomous-safety analogue of Claude's `acceptEdits` + `--allowedTools`
+ * (issues #256/#329).
+ *
+ * opencode runs headless, so a permission left at `ask` blocks forever — a hung
+ * prompt is a hung job. The two paths:
+ *
+ * - **Bypass** (`bypassPermissions`, the agent-driven release path, issue #256):
+ *   returns `undefined`. The provider passes `--dangerously-skip-permissions`
+ *   instead, which auto-approves everything not explicitly denied — the direct
+ *   `{"*":"allow"}` equivalent, and the safest place to grant it is inside a
+ *   Docker sandbox (ADR 033 / issue #182).
+ * - **Non-bypass** (the default): edits are auto-approved, the per-repo command
+ *   allowlist (issue #329) becomes bash `allow` rules, and every other bash
+ *   command is `deny` — not `ask` — so a non-allowlisted command fails fast
+ *   rather than hanging. This is the safer middle ground: it does NOT grant the
+ *   full bash access opencode permits by default. `external_directory` and
+ *   `doom_loop` default to `ask`, so they are pinned to `deny` for the same
+ *   never-hang reason; every other tool keeps opencode's permissive default.
+ *
+ * opencode resolves rules last-match-wins, so the catch-all `"*": "deny"` is
+ * emitted first and the specific allow rules layered after it win.
+ */
+export function opencodePermissionEnv(opts: {
+  bypassPermissions?: boolean;
+  allowedCommands?: string[];
+}): Record<string, string> | undefined {
+  if (opts.bypassPermissions) return undefined;
+  const bash: Record<string, string> = { "*": "deny" };
+  for (const cmd of opts.allowedCommands ?? []) {
+    const trimmed = cmd.trim();
+    if (!trimmed) continue;
+    // Mirror Claude's `Bash(<cmd>:*)`: allow the bare command and the command
+    // with any arguments (opencode's `<cmd> *` requires a trailing space, so the
+    // bare form is listed separately).
+    bash[trimmed] = "allow";
+    bash[`${trimmed} *`] = "allow";
+  }
+  const permission = {
+    edit: "allow",
+    bash,
+    external_directory: "deny",
+    doom_loop: "deny",
+  };
+  return { OPENCODE_PERMISSION: JSON.stringify(permission) };
+}
+
+/**
  * opencode (SST's open-source terminal coding agent) as a third CLI agent
  * alongside claude/codex (issue #349). It is a spawned CLI with a non-interactive
  * `run` mode (`opencode run "<prompt>" --model provider/model --format json`),
@@ -211,12 +260,11 @@ export class OpencodeStreamParser {
  * OpencodeStreamParser consumes, and the orchestrator's generic cost-cap guard
  * enforces a per-job budget from the parser's accumulated `costUsd`.
  *
- * Permissions: opencode starts from permissive defaults (edit and bash both
- * `allow`), which already covers headless work inside the worktree — no
- * acceptEdits-style flag is needed. `bypassPermissions` (the agent-driven
- * release path, issue #256) adds `--dangerously-skip-permissions` to also
- * auto-approve the few `ask` permissions (e.g. external_directory). The per-repo
- * command allowlist (issue #329) does not apply: opencode allows bash by default.
+ * Permissions (issue #350): the bypass path adds `--dangerously-skip-permissions`
+ * for full, unprompted access; the non-bypass path is constrained by an
+ * `OPENCODE_PERMISSION` env config the orchestrator injects (see
+ * `opencodePermissionEnv` above and `agentSpawnEnv`). Either way, opencode never
+ * waits on a permission prompt — a hung prompt would wedge the headless job.
  *
  * Turn budget: `opencode run` has no `--max-turns` flag, so the turn budget is
  * intentionally not passed (like codex, issue #48); a runaway run is bounded by

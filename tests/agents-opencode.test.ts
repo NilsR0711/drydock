@@ -1,8 +1,22 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { OpencodeStreamParser, opencodeProvider } from "@/lib/agents/opencode";
+import {
+  OpencodeStreamParser,
+  opencodePermissionEnv,
+  opencodeProvider,
+} from "@/lib/agents/opencode";
 import type { ParseError } from "@/lib/stream/parser";
+
+/** Parse the inlined `OPENCODE_PERMISSION` JSON out of the env builder's result. */
+function permissionConfig(opts: {
+  bypassPermissions?: boolean;
+  allowedCommands?: string[];
+}): Record<string, unknown> {
+  const env = opencodePermissionEnv(opts);
+  if (!env?.OPENCODE_PERMISSION) throw new Error("expected OPENCODE_PERMISSION to be set");
+  return JSON.parse(env.OPENCODE_PERMISSION);
+}
 
 function fixture(name: string): string {
   return readFileSync(
@@ -43,7 +57,7 @@ describe("opencodeProvider", () => {
     expect(args).not.toContain("40");
   });
 
-  it("runs with opencode's permissive defaults unless permissions are bypassed", () => {
+  it("adds the --dangerously-skip-permissions flag only on the bypass path", () => {
     const normal = opencodeProvider.buildStartArgs({
       prompt: "fix the bug",
       model: "anthropic/claude-sonnet-4-6",
@@ -123,6 +137,81 @@ describe("opencodeProvider", () => {
     expect(opencodeProvider.estimateCost("anthropic/claude-sonnet-4-6", 1_000_000, 1_000_000)).toBe(
       0,
     );
+  });
+});
+
+describe("opencodePermissionEnv (autonomous permission mapping, issue #350)", () => {
+  it("emits no OPENCODE_PERMISSION on the bypass path — the flag handles it", () => {
+    // bypassPermissions adds `--dangerously-skip-permissions` (auto-approves
+    // everything not explicitly denied), so an env config would be redundant.
+    expect(opencodePermissionEnv({ bypassPermissions: true })).toBeUndefined();
+    expect(
+      opencodePermissionEnv({ bypassPermissions: true, allowedCommands: ["npm test"] }),
+    ).toBeUndefined();
+  });
+
+  it("auto-approves edits on the non-bypass path", () => {
+    expect(permissionConfig({}).edit).toBe("allow");
+  });
+
+  it("denies bash by default so a non-allowlisted command never hangs", () => {
+    // deny (not ask) is the headless-safe baseline: a blocked command fails fast
+    // instead of waiting forever on a prompt no human will answer.
+    const bash = permissionConfig({}).bash as Record<string, string>;
+    expect(bash["*"]).toBe("deny");
+  });
+
+  it("turns the allowedCommands allowlist into bash allow rules (bare + with args)", () => {
+    const bash = permissionConfig({ allowedCommands: ["npm test", "pnpm build"] }).bash as Record<
+      string,
+      string
+    >;
+    expect(bash["npm test"]).toBe("allow");
+    expect(bash["npm test *"]).toBe("allow");
+    expect(bash["pnpm build"]).toBe("allow");
+    expect(bash["pnpm build *"]).toBe("allow");
+    // The catch-all deny is still present underneath the allow rules.
+    expect(bash["*"]).toBe("deny");
+  });
+
+  it("emits the catch-all deny before the specific allow rules (last match wins)", () => {
+    // opencode resolves bash rules last-match-wins, so the `*` deny must come
+    // first and the allowlist entries override it.
+    const bash = permissionConfig({ allowedCommands: ["npm test"] }).bash as Record<string, string>;
+    const keys = Object.keys(bash);
+    expect(keys[0]).toBe("*");
+    expect(keys.indexOf("npm test")).toBeGreaterThan(0);
+  });
+
+  it("ignores blank allowlist entries", () => {
+    const bash = permissionConfig({ allowedCommands: ["", "  ", "npm test"] }).bash as Record<
+      string,
+      string
+    >;
+    expect(bash["npm test"]).toBe("allow");
+    expect(Object.keys(bash)).not.toContain("");
+    expect(Object.keys(bash)).not.toContain("  ");
+  });
+
+  it("pins the ask-by-default tools to deny so they cannot block a headless run", () => {
+    // external_directory and doom_loop default to `ask` in opencode; left alone
+    // they would hang the job, so the non-bypass config resolves them to deny.
+    const config = permissionConfig({});
+    expect(config.external_directory).toBe("deny");
+    expect(config.doom_loop).toBe("deny");
+  });
+
+  it("never leaves any tool at ask under the non-bypass config", () => {
+    const config = permissionConfig({ allowedCommands: ["npm test"] });
+    for (const [tool, value] of Object.entries(config)) {
+      if (tool === "bash") {
+        for (const rule of Object.values(value as Record<string, string>)) {
+          expect(rule).not.toBe("ask");
+        }
+      } else {
+        expect(value).not.toBe("ask");
+      }
+    }
   });
 });
 

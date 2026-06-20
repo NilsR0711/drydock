@@ -447,7 +447,10 @@ export async function spawnAgentSession(
         broker.publish(job.id, { type: "error", payload: { stderr: chunk } });
       },
     },
-    agentSpawnEnv(provider, db),
+    agentSpawnEnv(provider, db, {
+      bypassPermissions: deps.bypassPermissions,
+      allowedCommands: deps.allowedCommands,
+    }),
   );
 
   registerAbort(job.id, handle.abort);
@@ -642,7 +645,10 @@ export async function resumeAgentSession(
         broker.publish(job.id, { type: "error", payload: { stderr: chunk } });
       },
     },
-    agentSpawnEnv(provider, db),
+    agentSpawnEnv(provider, db, {
+      bypassPermissions: deps.bypassPermissions,
+      allowedCommands: deps.allowedCommands,
+    }),
   );
   registerAbort(job.id, handle.abort);
   const { exitCode, timedOut, costExceeded } = await awaitBounded(handle, {
