@@ -1,6 +1,6 @@
 # ADR 032: OpenRouter as an HTTP agent backend with an auto-syncing model catalog
 
-- **Status:** accepted
+- **Status:** Superseded by [ADR 039](039-retire-openrouter-for-opencode.md)
 - **Date:** 2026-06-11
 
 ## Context
