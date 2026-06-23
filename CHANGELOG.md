@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/NilsR0711/drydock/compare/v1.1.0...v1.1.1) (2026-06-23)
+
+
+### Bug Fixes
+
+* **deps:** ship updated production dependencies in the published bundle ([#373](https://github.com/NilsR0711/drydock/issues/373)) ([d578a6c](https://github.com/NilsR0711/drydock/commit/d578a6c824ba250ac00448ee03d60186422eb4b6))
+
 ## [1.1.0](https://github.com/NilsR0711/drydock/compare/v1.0.1...v1.1.0) (2026-06-20)
 
 
