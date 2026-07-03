@@ -3,6 +3,22 @@
 All automation lives in `.github/workflows/`. Workflows are scoped to the
 `master` branch and pull requests targeting it.
 
+## Action pinning
+
+Every external `uses:` reference is pinned to a full 40-character commit SHA with
+a trailing `# vX.Y.Z` comment, e.g. `actions/checkout@9c091bb…e0 # v7.0.0`
+(issue #391). A mutable major tag (`@v7`) can be moved or force-pushed, which
+would let a compromised action repo run attacker-controlled code with whatever
+permissions the job holds — most sensitive in `npm-publish.yml` (`id-token:
+write`, the OIDC token that publishes to npm) and `release-please.yml`
+(`contents: write` / `pull-requests: write`). Pinning to a SHA removes that
+trust assumption entirely. Dependabot's weekly `github-actions` group
+(`.github/dependabot.yml`) understands SHA pins and bumps the SHA and its version
+comment together, so the pins stay current for free. Local reusable-workflow
+references (`uses: ./.github/workflows/npm-publish.yml`) resolve within this repo
+at the checked-out commit and are intentionally left as paths. The
+`workflow-action-pins` test guards the convention against regression.
+
 ## `ci.yml` — Verify
 
 Runs on every push to `master` and every PR over an OS × Node matrix —
