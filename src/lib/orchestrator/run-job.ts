@@ -169,11 +169,12 @@ export interface RunJobDeps {
    */
   announceNeedsHuman?: (job: Job) => Promise<void>;
   /**
-   * Trigger claude-mem worktree adoption before the worktree is removed (issue
-   * #274), consolidating the job's per-worktree memory into the parent project.
-   * Only invoked for repos that opted in via `adoptClaudeMem`. Injectable for
-   * tests; defaults to {@link adoptWorktreeMemory}. Best-effort — a failure here
-   * never blocks worktree cleanup or alters the job's settled outcome.
+   * Trigger claude-mem worktree adoption as the job settles (issues #274, #375),
+   * consolidating the job's per-worktree memory into the parent project. Runs by
+   * default on every settle path (merged, needs_human, abandoned), including a
+   * preserved needs_human worktree. Injectable for tests; defaults to
+   * {@link adoptWorktreeMemory}. Best-effort — a failure here never blocks
+   * worktree cleanup or alters the job's settled outcome.
    */
   adoptClaudeMem?: (input: { branch: string; cwd: string }) => Promise<void>;
 }
@@ -500,8 +501,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
   const consumeFollowups = deps.consumeFollowups ?? defaultConsumeFollowups;
   const markNeedsHuman =
     deps.markNeedsHuman ?? ((issueNumber: number) => markIssueNeedsHuman(repo.id, issueNumber, db));
-  // claude-mem worktree adoption (issue #274): consolidate the job's per-worktree
-  // memory into the parent project before the worktree is removed.
+  // claude-mem worktree adoption (issues #274, #375): consolidate the job's
+  // per-worktree memory into the parent project as the job settles, on every
+  // outcome (see the deps field and the finally block below).
   const adoptClaudeMem = deps.adoptClaudeMem ?? adoptWorktreeMemory;
   // Resume a job's stored session on its own model and turn budget — the main
   // work resuming with a continuation prompt, not a cheap CI fix. Shared by the
@@ -1256,28 +1258,32 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
     }
     return current;
   } finally {
-    // Keep the worktree when a job parked for a human with real work to resume
-    // from (issue #249); otherwise remove it. Merged/aborted and genuine no-op
-    // runs leave preserveWorktree false and clean up as before. A preserved
-    // needs_human job is non-terminal, so the worktree reaper leaves it alone
-    // too — it is reclaimed on resume (prepare re-creates it) or once the job
-    // reaches a terminal state.
-    if (wt && !preserveWorktree) {
+    if (wt) {
       // Consolidate this job's per-worktree claude-mem memory into the parent
-      // project while the worktree still exists (issue #274). Opt-in and
-      // strictly best-effort: any failure is logged and must never block the
-      // cleanup below, same discipline as the other best-effort steps here.
-      if (repo.adoptClaudeMem) {
-        try {
-          await adoptClaudeMem({ branch: wt.branch, cwd: wt.path });
-        } catch (adoptErr) {
-          logError(`[run-job] claude-mem adoption failed for job ${job.id}`, adoptErr);
-        }
-      }
+      // project while the worktree still exists (issues #274, #375). Runs by
+      // default on every settle path — including a preserved needs_human
+      // worktree that is deliberately NOT removed below — so unmerged outcomes
+      // (needs_human, CI-failed, abandoned) are consolidated too, not just the
+      // merged happy path. Strictly best-effort: any failure is logged and must
+      // never block the cleanup below, same discipline as the other best-effort
+      // steps here.
       try {
-        await worktrees.remove(wt, repo.path);
-      } catch (cleanupErr) {
-        logError(`[run-job] worktree cleanup failed for job ${job.id}`, cleanupErr);
+        await adoptClaudeMem({ branch: wt.branch, cwd: wt.path });
+      } catch (adoptErr) {
+        logError(`[run-job] claude-mem adoption failed for job ${job.id}`, adoptErr);
+      }
+      // Keep the worktree when a job parked for a human with real work to resume
+      // from (issue #249); otherwise remove it. Merged/aborted and genuine no-op
+      // runs leave preserveWorktree false and clean up as before. A preserved
+      // needs_human job is non-terminal, so the worktree reaper leaves it alone
+      // too — it is reclaimed on resume (prepare re-creates it) or once the job
+      // reaches a terminal state.
+      if (!preserveWorktree) {
+        try {
+          await worktrees.remove(wt, repo.path);
+        } catch (cleanupErr) {
+          logError(`[run-job] worktree cleanup failed for job ${job.id}`, cleanupErr);
+        }
       }
     }
   }

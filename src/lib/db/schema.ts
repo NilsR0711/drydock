@@ -191,12 +191,10 @@ export const repos = sqliteTable("repos", {
     .default(false),
   sandboxCpus: text("sandbox_cpus"),
   sandboxMemory: text("sandbox_memory"),
-  // Opt-in claude-mem worktree adoption (issue #274, default off). When on, a
-  // settling job triggers claude-mem's `adopt` for its worktree right before
-  // Drydock removes it, consolidating the per-worktree memory into the parent
-  // project while the worktree still exists. Best-effort and depends on the
-  // external claude-mem plugin being installed, so it is off by default.
-  adoptClaudeMem: integer("adopt_claude_mem", { mode: "boolean" }).notNull().default(false),
+  // claude-mem worktree adoption is no longer a per-repo opt-in (issue #375): a
+  // settling job now consolidates its per-worktree memory into the parent
+  // project by default, on every outcome. The former `adopt_claude_mem` column
+  // was dropped in migration 0047. See run-job.ts / claude-mem-adopt.ts.
   // Quiet mode for the issue thread (issue #289, default off). When on, the
   // purely-informational lifecycle comments — the auto-triage "applied labels"
   // note and the post-PR verification summary — are suppressed (the labels and

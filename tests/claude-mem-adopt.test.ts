@@ -6,6 +6,8 @@ import type { CommandResult } from "@/lib/exec/runner";
 import { adoptWorktreeMemory, resolveClaudeMemPlugin } from "@/lib/orchestrator/claude-mem-adopt";
 
 let configDir: string;
+/** A real, live worktree dir: adoption only fires when its `--cwd` still exists. */
+let worktreeDir: string;
 
 /** Lay down a claude-mem plugin layout with both scripts present. */
 function installPlugin(root: string, opts: { nested?: boolean } = {}): string {
@@ -19,10 +21,12 @@ function installPlugin(root: string, opts: { nested?: boolean } = {}): string {
 
 beforeEach(() => {
   configDir = mkdtempSync(join(tmpdir(), "drydock-claude-mem-"));
+  worktreeDir = mkdtempSync(join(tmpdir(), "drydock-worktree-"));
 });
 
 afterEach(() => {
   rmSync(configDir, { recursive: true, force: true });
+  rmSync(worktreeDir, { recursive: true, force: true });
 });
 
 describe("resolveClaudeMemPlugin", () => {
@@ -70,11 +74,22 @@ describe("resolveClaudeMemPlugin", () => {
 describe("adoptWorktreeMemory", () => {
   const ok: CommandResult = { stdout: "", stderr: "", exitCode: 0 };
 
+  it("skips invocation when the worktree path no longer exists", async () => {
+    const run = vi.fn(async () => ok);
+
+    await adoptWorktreeMemory(
+      { branch: "drydock/issue-1-job-1", cwd: join(worktreeDir, "already-removed") },
+      { resolvePlugin: () => "/plugin", run },
+    );
+
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("skips invocation when the plugin cannot be resolved", async () => {
     const run = vi.fn(async () => ok);
 
     await adoptWorktreeMemory(
-      { branch: "drydock/issue-1-job-1", cwd: "/wt" },
+      { branch: "drydock/issue-1-job-1", cwd: worktreeDir },
       { resolvePlugin: () => null, run },
     );
 
@@ -85,7 +100,7 @@ describe("adoptWorktreeMemory", () => {
     const run = vi.fn(async (_cmd: string, _args: string[], _cwd?: string) => ok);
 
     await adoptWorktreeMemory(
-      { branch: "drydock/issue-1-job-1", cwd: "/wt" },
+      { branch: "drydock/issue-1-job-1", cwd: worktreeDir },
       { resolvePlugin: () => "/plugin", run },
     );
 
@@ -99,9 +114,9 @@ describe("adoptWorktreeMemory", () => {
       "--branch",
       "drydock/issue-1-job-1",
       "--cwd",
-      "/wt",
+      worktreeDir,
     ]);
-    expect(call?.[2]).toBe("/wt");
+    expect(call?.[2]).toBe(worktreeDir);
   });
 
   it("never throws when the worker invocation rejects", async () => {
@@ -110,7 +125,10 @@ describe("adoptWorktreeMemory", () => {
     });
 
     await expect(
-      adoptWorktreeMemory({ branch: "b", cwd: "/wt" }, { resolvePlugin: () => "/plugin", run }),
+      adoptWorktreeMemory(
+        { branch: "b", cwd: worktreeDir },
+        { resolvePlugin: () => "/plugin", run },
+      ),
     ).resolves.toBeUndefined();
   });
 
@@ -118,7 +136,10 @@ describe("adoptWorktreeMemory", () => {
     const run = vi.fn(async () => ({ stdout: "", stderr: "boom", exitCode: 1 }));
 
     await expect(
-      adoptWorktreeMemory({ branch: "b", cwd: "/wt" }, { resolvePlugin: () => "/plugin", run }),
+      adoptWorktreeMemory(
+        { branch: "b", cwd: worktreeDir },
+        { resolvePlugin: () => "/plugin", run },
+      ),
     ).resolves.toBeUndefined();
   });
 });

@@ -1,17 +1,20 @@
 /**
- * Opt-in bridge to claude-mem's "worktree adoption" (issue #274).
+ * Bridge to claude-mem's "worktree adoption" (issues #274, #375).
  *
  * claude-mem keys memory per git worktree: a Drydock job session running inside
  * `.claude/worktrees/<name>` stores its observations under the project key
  * `<repo>/<worktree-name>`, not the parent repo. claude-mem already ships an
- * `adopt` command that migrates a merged worktree's memory into the parent
- * project — but its background scan only sees *live* worktrees, and Drydock
- * removes the worktree the moment a job settles. So adoption almost never fires.
+ * `adopt` command that migrates a worktree's memory into the parent project —
+ * but its background scan only sees *live* worktrees, and Drydock removes the
+ * worktree the moment a job settles. So adoption almost never fires on its own.
  *
- * This module invokes that `adopt` command for a job's worktree right before
- * Drydock removes it, while the worktree still exists. It is strictly
- * best-effort: a missing plugin, a spawn failure, or a non-zero exit is logged
- * and swallowed so it can never block or fail worktree cleanup.
+ * This module invokes that `adopt` command for a job's worktree while the
+ * worktree still exists. run-job calls it by default as every job settles — on
+ * merged, needs_human, and abandoned outcomes alike (#375) — so a job's memory
+ * always ends up consolidated under the parent repo, never stranded in a
+ * throwaway per-worktree bucket. It is strictly best-effort: a missing plugin,
+ * a spawn failure, or a non-zero exit is logged and swallowed so it can never
+ * block or fail worktree cleanup.
  *
  * There is no stable `claude-mem` bin on PATH; the plugin is invoked the way
  * claude-mem's own hooks do — `node <root>/scripts/bun-runner.js
@@ -23,7 +26,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
-import { logError } from "@/lib/log/logger";
+import { logDebug, logError, logWarn } from "@/lib/log/logger";
 
 /** Wall-clock bound for the adopt subprocess; it must not stall job cleanup. */
 const ADOPT_TIMEOUT_MS = 60_000;
@@ -105,10 +108,11 @@ export interface AdoptOptions {
 }
 
 /**
- * Best-effort: trigger claude-mem adoption for a job's worktree before it is
- * removed. `adopt` checks the merge condition itself, so an unmerged branch is
- * a safe no-op — Drydock calls it unconditionally and lets claude-mem decide.
- * Never throws: a missing plugin, spawn failure, or non-zero exit is logged.
+ * Best-effort: trigger claude-mem adoption for a job's worktree as it settles.
+ * `adopt --branch` consolidates the branch's memory into the parent regardless
+ * of merge status, so Drydock calls it on every outcome and lets claude-mem do
+ * the migration. Never throws: a missing worktree, missing plugin, spawn
+ * failure, or non-zero exit is logged and swallowed.
  */
 export async function adoptWorktreeMemory(
   input: { branch: string; cwd: string },
@@ -117,9 +121,19 @@ export async function adoptWorktreeMemory(
   const resolvePlugin = opts.resolvePlugin ?? resolveClaudeMemPlugin;
   const run = opts.run ?? spawnRunner;
   try {
+    // `adopt --cwd` must point at a live worktree to resolve the branch's
+    // bucket. If the worktree is already gone there is nothing to consolidate —
+    // skip quietly (debug, not warn) rather than spawn a doomed subprocess.
+    if (!existsSync(input.cwd)) {
+      logDebug(`[claude-mem] adoption skipped for ${input.branch}: worktree ${input.cwd} is gone`);
+      return;
+    }
     const pluginDir = resolvePlugin(opts.configDir);
     if (!pluginDir) {
-      logError(`[claude-mem] adoption skipped for ${input.branch}: plugin not installed`);
+      // Adoption now runs by default (#375), so this fires for anyone who does
+      // not use claude-mem. It is expected, not a failure — warn (visible on the
+      // Logs page) rather than error so it degrades loudly without console spam.
+      logWarn(`[claude-mem] adoption skipped for ${input.branch}: plugin not installed`);
       return;
     }
     const args = [

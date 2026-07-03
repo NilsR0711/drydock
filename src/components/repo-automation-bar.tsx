@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Brain,
   Container,
   GitPullRequestArrow,
   HeartPulse,
@@ -182,7 +181,6 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [sandboxNetwork, setSandboxNetwork] = useState(repo.sandboxAllowNetwork);
   const [sandboxCpus, setSandboxCpus] = useState(repo.sandboxCpus ?? "");
   const [sandboxMemory, setSandboxMemory] = useState(repo.sandboxMemory ?? "");
-  const [adoptClaudeMem, setAdoptClaudeMem] = useState(repo.adoptClaudeMem);
   const [bypassPermissions, setBypassPermissions] = useState(repo.bypassPermissions);
   const [allowedCommands, setAllowedCommands] = useState(
     parseList(repo.allowedCommands).join(", "),
@@ -692,21 +690,6 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
                 help="A safer middle ground than full bypass above. Each command is pre-approved for headless Bash via Claude Code's --allowedTools (e.g. git, xcodebuild, xcrun, swift), while everything else stays in the default edits-only mode. Leave empty for no headless Bash. Caveats: Bash(git:*) allows ALL git subcommands (including git push --force), and chained commands (xcodebuild && foo) may still be blocked. Ignored when full bypass above is on."
               />
             </div>
-          </Fieldset>
-          <Fieldset
-            icon={Brain}
-            legend="Memory"
-            description="Carry agent memory back to the parent project."
-          >
-            <AutoToggle
-              label="Adopt claude-mem memory on cleanup"
-              checked={adoptClaudeMem}
-              onChange={(v) => {
-                setAdoptClaudeMem(v);
-                persist({ adoptClaudeMem: v });
-              }}
-              help="Requires the claude-mem plugin. Before a job's throwaway worktree is removed, runs claude-mem's adoption so a merged job's memory is consolidated into the parent project instead of being stranded in a per-worktree bucket. Best-effort: skipped silently if claude-mem is not installed."
-            />
           </Fieldset>
           <Fieldset
             icon={MessageSquare}
