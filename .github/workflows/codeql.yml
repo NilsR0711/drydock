@@ -8,6 +8,13 @@ on:
   schedule:
     - cron: "27 3 * * 1"
 
+# Cancel superseded analyses on the same ref to save queue time and reduce
+# check-list noise. github.event_name keeps the weekly scheduled scan in its
+# own group, so a schedule run and a master push never cancel each other.
+concurrency:
+  group: codeql-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
