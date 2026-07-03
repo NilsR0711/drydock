@@ -13,6 +13,7 @@ import type { ForgeClient } from "@/lib/forge/types";
 import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { logError } from "@/lib/log/logger";
 import { repoAutomation } from "@/lib/repos/automation";
+import { getSettings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
 import { spawnAgentSession } from "./agent-session";
 import type { DeploymentContext, DeploymentPlatformAdapter } from "./deployment/adapter";
@@ -220,6 +221,14 @@ async function defaultOpenFixPr(
   const short = session.commitSha.slice(0, 7);
   const branch = `drydock/deploy-fix-${job.id}-${short}`;
   const forge = getForge(repo);
+  // Bound the side session exactly like the main job run (issue #383): a per-repo
+  // override wins, else the global default. Without these a hung deployment-fix
+  // CLI is awaited forever (agent-session short-circuits to a bare `handle.done`
+  // when neither bound is set), which freezes the whole driver tick and never
+  // frees the slot — the tick only reschedules after this sweep returns.
+  const settings = getSettings(db);
+  const timeoutMs = (repo.maxJobMinutes ?? settings.maxJobMinutes) * 60_000;
+  const costCapUsd = repo.maxJobCostUsd ?? settings.maxJobCostUsd;
 
   const wt: Worktree = await worktrees.prepareForNewBranch(repo, branch, `${job.id}-${short}`);
   try {
@@ -231,6 +240,8 @@ async function defaultOpenFixPr(
       provider,
       command,
       sideSession: true,
+      timeoutMs,
+      costCapUsd,
     });
     if (result.exitCode !== 0) throw new Error(`${provider.label} exited non-zero`);
     await worktrees.commitAndPush(
