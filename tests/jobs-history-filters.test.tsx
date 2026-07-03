@@ -45,7 +45,12 @@ describe("JobsHistoryFilters accessible names (issue #401)", () => {
 
   it("names the search Input beyond its placeholder", () => {
     mounted = render(<JobsHistoryFilters {...PROPS} />);
-    const el = required(mounted.container.querySelector<HTMLInputElement>("input"), "search input");
+    // Scope past the status SegmentedControl's radio inputs (issue #400) to the
+    // text search box this test is about.
+    const el = required(
+      mounted.container.querySelector<HTMLInputElement>('input:not([type="radio"])'),
+      "search input",
+    );
     const name = accessibleName(el);
     expect(name).toBe("Search jobs");
     expect(name).not.toBe(el.getAttribute("placeholder"));
