@@ -163,6 +163,7 @@ reel — the **[full feature reference →](docs/FEATURES.md)** has every detail
 - **GitHub & GitLab** — choose per repo; GitLab (cloud or self-hosted) needs no extra CLI.
 - **Sandboxed execution** — run the agent inside a Docker/Podman container with the worktree as the only writable path, network off by default.
 - **Command allowlist / unrestricted shell** — pre-approve specific commands, or open full shell access for builds that need it (e.g. native Xcode).
+- **claude-mem memory consolidation** — as each job settles, its [claude-mem](https://github.com/thedotmack/claude-mem) memory is consolidated from the throwaway per-job worktree into the parent project — on every outcome, by default, best-effort (a no-op when claude-mem isn't installed).
 
 #### 🚀 Beyond merge
 - **Deployment healing** — watch a merged PR's deploy (Vercel/Railway), open a fix PR on failure.

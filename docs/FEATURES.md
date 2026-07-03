@@ -149,6 +149,19 @@ is on. Caveats: `Bash(git:*)` allows **all** git subcommands (including `git pus
 **chained** commands (`xcodebuild && foo`) may still be blocked — so list the single invocations a
 build/test actually needs.
 
+### 🧠 claude-mem memory consolidation
+
+Every job runs in a throwaway per-job git worktree. [claude-mem](https://github.com/thedotmack/claude-mem)
+keys its memory off the worktree, so without help each job's observations would be stranded in a
+one-off `<repo>/<worktree>` bucket instead of accumulating under the real project. As a job settles,
+Drydock runs claude-mem's `adopt` for the worktree — while it still exists — so the memory is
+consolidated into the **parent** project (`<repo>`). This happens **by default, on every outcome**:
+merged, `needs_human` (including a preserved worktree that is deliberately kept for resume), CI-failed,
+and abandoned/unmerged branches alike. It is strictly **best-effort** and needs no configuration: if
+the claude-mem plugin is not installed it is a visible no-op, and any failure is logged (never blocking
+worktree cleanup or changing the job's outcome). The per-job **worktree isolation** itself is unchanged —
+only the memory is carried back to the parent.
+
 ---
 
 ## CI, merge & branch hygiene
