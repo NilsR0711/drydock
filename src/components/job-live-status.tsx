@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { JobStopButton } from "@/components/job-stop-button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -96,4 +97,37 @@ export function JobStopControl({
   initialStatus: JobStatus;
 }) {
   return isInFlight(useLiveStatus(initialStatus)) ? <JobStopButton jobId={jobId} /> : null;
+}
+
+/**
+ * Invisible companion that keeps the *rest* of the job detail page shell live
+ * (issue #398). The header badge and Stop control already track status
+ * client-side off this provider's context, but the surrounding shell — the
+ * "Paused for a human" alert plus its resume panel, and the waiting_limit
+ * provider-limit alert — renders from server-only data (`errorMessage`,
+ * `availableAt`) that the SSE `status` frame never carries. So on every genuine
+ * live transition it triggers a soft `router.refresh()`: that re-runs the server
+ * component, re-deriving `needs_human`/`waiting_limit` and their fresh server
+ * data, without a hard reload — client stream, scroll, and log state are
+ * preserved by React reconciliation.
+ *
+ * Placing it inside the provider means it shares the one EventSource rather than
+ * opening a second: it reads the already-filtered live status from context and
+ * refreshes only when that value actually changes, so no transition-less frame
+ * (heartbeat, reason-only, malformed) causes a needless refetch. Renders nothing.
+ */
+export function JobShellRefresh({ initialStatus }: { initialStatus: JobStatus }) {
+  const router = useRouter();
+  const status = useLiveStatus(initialStatus);
+  // Seed to the load-time status so the first commit (which mirrors the server
+  // render) does not refresh; only a later transition off this value does.
+  const seen = useRef(status);
+
+  useEffect(() => {
+    if (status === seen.current) return;
+    seen.current = status;
+    router.refresh();
+  }, [status, router]);
+
+  return null;
 }
