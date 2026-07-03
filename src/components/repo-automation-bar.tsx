@@ -25,9 +25,11 @@ import { useToast } from "@/components/ui/toast";
 import { HelpTip } from "@/components/ui/tooltip";
 import type { AgentId } from "@/lib/agents/types";
 import type { Repo } from "@/lib/db/schema";
+import { platformSupportsCapability } from "@/lib/forge/types";
 import { defaultModelForAgent } from "@/lib/models";
 import { updateRepoAction } from "@/lib/repos/actions";
 import { AGENT_INSTRUCTIONS_MAX_CHARS } from "@/lib/repos/agent-instructions";
+import { cn } from "@/lib/utils";
 
 function parseList(raw: string): string[] {
   try {
@@ -56,21 +58,40 @@ function AutoToggle({
   checked,
   onChange,
   children,
+  disabled,
+  disabledNote,
 }: {
   label: string;
   help?: ReactNode;
   checked: boolean;
   onChange: (value: boolean) => void;
   children?: ReactNode;
+  /** Render the switch off and non-interactive (e.g. an unsupported platform). */
+  disabled?: boolean;
+  /** Short, always-visible reason shown beside the label when disabled. */
+  disabledNote?: string;
 }) {
+  // A disabled toggle always reads as off, regardless of any persisted value —
+  // the feature can never run, so showing it active would be misleading.
+  const effectiveChecked = disabled ? false : checked;
   return (
     <div>
       <div className="flex items-center gap-2.5">
-        <Switch checked={checked} onChange={onChange} aria-label={label} />
-        <span className="text-sm">{label}</span>
+        <Switch
+          checked={effectiveChecked}
+          onChange={onChange}
+          disabled={disabled}
+          aria-label={label}
+        />
+        <span className={cn("text-sm", disabled && "text-muted-foreground")}>{label}</span>
+        {disabled && disabledNote && (
+          <span className="rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            {disabledNote}
+          </span>
+        )}
         {help && <HelpTip content={help} />}
       </div>
-      {checked && children && (
+      {effectiveChecked && children && (
         <div className="dd-fade-up mt-3 grid gap-3 border-l-2 border-border pl-4 sm:grid-cols-2">
           {children}
         </div>
@@ -189,6 +210,12 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
   const { error } = useToast();
+
+  // Review-feedback and release management need a forge that exposes review
+  // threads / the releases API — GitHub only today. Gate the toggles so a
+  // GitLab operator isn't offered automation that would silently no-op (#407).
+  const supportsReviewFeedback = platformSupportsCapability(repo.platform, "reviewFeedback");
+  const supportsReleases = platformSupportsCapability(repo.platform, "releaseManagement");
 
   function persist(patch: Parameters<typeof updateRepoAction>[1]) {
     setSaved(false);
@@ -456,11 +483,17 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
           <AutoToggle
             label="Address PR review feedback"
             checked={autoFeedback}
+            disabled={!supportsReviewFeedback}
+            disabledNote="GitHub only"
             onChange={(v) => {
               setAutoFeedback(v);
               persist({ autoReviewFeedback: v });
             }}
-            help="Runs the mechanical iteration for trusted reviewers and allowlisted bots."
+            help={
+              supportsReviewFeedback
+                ? "Runs the mechanical iteration for trusted reviewers and allowlisted bots."
+                : "Needs a forge that exposes PR review threads — GitHub only today, so this can't run on this repo's platform."
+            }
           >
             <TagField
               label="Trusted reviewers"
@@ -567,11 +600,17 @@ export function RepoAutomationBar({ repo }: { repo: Repo }) {
             <AutoToggle
               label="Manage releases"
               checked={releaseEnabled}
+              disabled={!supportsReleases}
+              disabledNote="GitHub only"
               onChange={(v) => {
                 setReleaseEnabled(v);
                 persist({ releaseEnabled: v });
               }}
-              help="Evaluates merged PRs since the last tag, picks the semver bump, and publishes — gated by a global kill-switch and fully previewable."
+              help={
+                supportsReleases
+                  ? "Evaluates merged PRs since the last tag, picks the semver bump, and publishes — gated by a global kill-switch and fully previewable."
+                  : "Needs a forge that exposes the releases API — GitHub only today, so this can't run on this repo's platform."
+              }
             />
           </Fieldset>
           <Fieldset
