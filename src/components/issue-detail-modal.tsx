@@ -1,7 +1,7 @@
 "use client";
 
 import { ListChecks, MessageSquare, Play, Save, Settings2, Tag } from "lucide-react";
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { AgentSelect } from "@/components/agent-select";
 import { ModelSelect } from "@/components/model-select";
 import { Alert } from "@/components/ui/alert";
@@ -69,37 +69,71 @@ export function IssueDetailModal({
   const [error, setError] = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const [pending, start] = useTransition();
+  // Stale-response guard (issue #399). The modal stays mounted across issue
+  // switches (issue-board.tsx toggles `open`), so a slow fetch for a previously
+  // viewed issue can land after the user switched and overwrite the wrong
+  // issue's state. Two refs, both read live inside async handlers:
+  //   • activeIssueRef — the issue currently in view. reload() runs from the
+  //     *action's* closure, which after a switch still holds the old issueNumber;
+  //     so a reload triggered by a stale action must not apply its result to the
+  //     issue now on screen. A monotonic id alone can't catch this because
+  //     reload() bumps the id itself.
+  //   • loadRequestId — monotonic, so an older in-flight load for the *same*
+  //     issue can't clobber a newer one. Mirrors detectRequestId in
+  //     add-repo-form.tsx (issue #210).
+  const activeIssueRef = useRef<number | null>(issueNumber);
+  const loadRequestId = useRef(0);
 
   useEffect(() => {
     setOverrideModel(defaultModel);
     setOverrideAgent(defaultAgent as AgentId);
   }, [defaultModel, defaultAgent]);
 
+  // Fetch and apply an issue's detail + subtasks, dropping the result if a newer
+  // load superseded it or the user has since switched away from `target`.
+  const loadIssue = useCallback(
+    (target: number, onDetail?: (d: IssueDetail) => void) => {
+      const requestId = ++loadRequestId.current;
+      const isCurrent = () =>
+        requestId === loadRequestId.current && target === activeIssueRef.current;
+      viewIssueAction(repoId, target)
+        .then((d) => {
+          if (!isCurrent()) return;
+          setDetail(d);
+          onDetail?.(d);
+        })
+        .catch((e) => {
+          if (!isCurrent()) return;
+          setError(e.message);
+        });
+      listSubtasksAction(repoId, target)
+        .then((s) => {
+          if (!isCurrent()) return;
+          setSubtasks(s);
+        })
+        .catch(() => {
+          if (!isCurrent()) return;
+          setSubtasks([]);
+        });
+    },
+    [repoId],
+  );
+
   useEffect(() => {
     if (!open || issueNumber === null) return;
+    activeIssueRef.current = issueNumber;
     setError(null);
     setDetail(null);
     setSubtasks([]);
-    viewIssueAction(repoId, issueNumber)
-      .then((d) => {
-        setDetail(d);
-        setTitle(d.title);
-        setBody(d.body);
-      })
-      .catch((e) => setError(e.message));
-    listSubtasksAction(repoId, issueNumber)
-      .then(setSubtasks)
-      .catch(() => setSubtasks([]));
-  }, [open, issueNumber, repoId]);
+    loadIssue(issueNumber, (d) => {
+      setTitle(d.title);
+      setBody(d.body);
+    });
+  }, [open, issueNumber, loadIssue]);
 
   function reload() {
     if (issueNumber === null) return;
-    viewIssueAction(repoId, issueNumber)
-      .then(setDetail)
-      .catch((e) => setError(e.message));
-    listSubtasksAction(repoId, issueNumber)
-      .then(setSubtasks)
-      .catch(() => setSubtasks([]));
+    loadIssue(issueNumber);
   }
 
   function setState(next: "open" | "closed") {
