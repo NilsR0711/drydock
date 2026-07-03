@@ -49,16 +49,26 @@ function unhide(el: Element): void {
 }
 
 /**
- * Mark every element outside `target`'s ancestor path as inert/aria-hidden.
- * Returns an idempotent restore handle that reverts exactly what this call hid,
- * ref-counted so stacked dialogs don't reveal the background prematurely.
+ * Mark every element outside `target`'s ancestor path as inert/aria-hidden,
+ * walking from `target` up to `root` (default `<body>`). Returns an idempotent
+ * restore handle that reverts exactly what this call hid, ref-counted so stacked
+ * dialogs don't reveal the background prematurely.
+ *
+ * The "keep interactive" guarantee is about `target`: its ancestors and its
+ * whole subtree (backdrop, panel) stay live. A dialog nested inside another
+ * dialog's content is, from the inner dialog's perspective, background — so the
+ * outer dialog's own chrome is inerted while the inner one is open (correct
+ * modal stacking) and restored when it closes. `root` is resolved *after* the
+ * SSR guard so a missing `document` can't throw via default-argument
+ * evaluation.
  */
-export function hideBackground(target: Element, root: Element = document.body): () => void {
+export function hideBackground(target: Element, root?: Element): () => void {
   if (typeof document === "undefined") return () => {};
+  const boundary = root ?? document.body;
 
   const hidden: Element[] = [];
   let node: Element | null = target;
-  while (node && node !== root) {
+  while (node && node !== boundary) {
     const parent: HTMLElement | null = node.parentElement;
     if (!parent) break;
     for (const sibling of Array.from(parent.children)) {
