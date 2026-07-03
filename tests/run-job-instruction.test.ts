@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { type Job, jobEvents, jobs } from "@/lib/db/schema";
 import type { Worktree } from "@/lib/git/worktree";
+import { requeueJobWithEscalation } from "@/lib/orchestrator/escalation";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
 import { resumeJobWithInstruction } from "@/lib/orchestrator/resume-instruction";
 import { runJob } from "@/lib/orchestrator/run-job";
@@ -164,5 +165,60 @@ describe("runJob human-guided resume (issue #257)", () => {
       PRESERVED_BRANCH,
     );
     expect(deps.worktrees.prepare).not.toHaveBeenCalled();
+  });
+});
+
+describe("runJob plain requeue of a branch-carrying job (issue #378)", () => {
+  /**
+   * A needs_human job whose earlier attempt pushed a branch and opened a PR,
+   * requeued *without* an instruction — the state a plain "Requeue" leaves. With
+   * no instruction the run takes the fresh-cut prepare() path (a clean-slate
+   * retry), whose push force-supersedes the stale remote branch; the recorded PR
+   * must be reused rather than re-opened.
+   */
+  function requeuedJob(over: { prNumber?: number } = {}) {
+    const job = createJob({ repoId, issueNumber: 1 }, db);
+    db.update(jobs)
+      .set({
+        status: "needs_human",
+        branch: PRESERVED_BRANCH,
+        sessionId: "sess-1",
+        ...("prNumber" in over ? { prNumber: over.prNumber } : {}),
+      })
+      .where(eq(jobs.id, job.id))
+      .run();
+    requeueJobWithEscalation(job.id, db);
+    return getJob(job.id, db) as Job;
+  }
+
+  it("cuts a fresh branch (not a resume) and reuses the recorded PR instead of re-opening one", async () => {
+    const deps = baseDeps();
+    const job = requeuedJob({ prNumber: 238 });
+    await runJob(job.id, deps as never);
+
+    // No instruction → the clean-slate fresh cut, not a resume-on-branch.
+    expect(deps.worktrees.prepare).toHaveBeenCalled();
+    expect(deps.worktrees.prepareResume).not.toHaveBeenCalled();
+    // The retry's work is pushed…
+    expect(deps.worktrees.commitAndPush).toHaveBeenCalled();
+    // …and the existing PR is reused, never re-opened (gh pr create would error
+    // "already exists" and falsely re-park the job).
+    expect(deps.createPr).not.toHaveBeenCalled();
+    expect(deps.runBabysitter).toHaveBeenCalledWith(expect.anything(), 238);
+    expect(getJob(job.id, db)?.status).toBe("merged");
+  });
+
+  it("cuts a fresh branch and opens a PR when the requeued job never had one", async () => {
+    const deps = baseDeps();
+    // Branch preserved (e.g. a questions/park push) but no PR was ever opened.
+    const job = requeuedJob();
+    await runJob(job.id, deps as never);
+
+    expect(deps.worktrees.prepare).toHaveBeenCalled();
+    expect(deps.worktrees.prepareResume).not.toHaveBeenCalled();
+    // With no recorded PR the finish path opens a fresh one on the (superseded)
+    // branch, then proceeds to CI.
+    expect(deps.createPr).toHaveBeenCalled();
+    expect(getJob(job.id, db)?.status).toBe("merged");
   });
 });

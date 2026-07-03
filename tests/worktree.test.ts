@@ -170,6 +170,17 @@ describe("WorktreeManager", () => {
     expect(wt.base).toBe("deadbeefcafe");
   });
 
+  it("prepare marks the worktree as a fresh cut so its push supersedes a stale remote branch (issue #378)", async () => {
+    // A requeued job's second attempt cuts a fresh branch of the *same* name off
+    // origin/<default>. The earlier attempt's remote branch still lingers (the
+    // janitor only deletes merged jobs' branches), so a plain push is rejected
+    // non-fast-forward. Marking the worktree a fresh cut lets commitAndPush
+    // force-push with a lease and supersede that stale branch.
+    const { run } = recordingRunner();
+    const wt = await new WorktreeManager(run).prepare(repo, 42, 13);
+    expect(wt.freshCut).toBe(true);
+  });
+
   it("prepareForBranch records the base commit it was cut from (issue #206)", async () => {
     const run: CommandRunner = async (_cmd, args) => ({
       stdout: args.includes("rev-parse") ? "cafebabe\n" : "",
@@ -259,6 +270,15 @@ describe("WorktreeManager", () => {
       // resolveBase records the restored branch tip.
       "rev-parse drydock/issue-9-job-3",
     ]);
+  });
+
+  it("prepareResume does not mark a fresh cut, so its push stays a plain fast-forward (issue #378)", async () => {
+    // A resume builds on the branch's own pushed commits, so its push is a
+    // genuine fast-forward — it must NOT force-push, which could clobber commits
+    // added to the branch (e.g. a human fix, a feedback push) since it was cut.
+    const { run } = recordingRunner();
+    const wt = await new WorktreeManager(run).prepareResume(repo, 3, "drydock/issue-9-job-3");
+    expect(wt.freshCut).toBeFalsy();
   });
 
   it("rebaseOntoBase fetches the base, rebases and force-pushes with a lease on success (issue #287)", async () => {
@@ -511,7 +531,7 @@ describe("WorktreeManager", () => {
     });
   });
 
-  it("commitAndPush stages, commits and pushes the branch", async () => {
+  it("commitAndPush stages, commits and force-pushes a fresh-cut prepare() branch (issue #378)", async () => {
     const calls: { cmd: string; args: string[]; cwd?: string }[] = [];
     const run: CommandRunner = async (cmd, args, cwd) => {
       calls.push({ cmd, args, cwd });
@@ -525,13 +545,32 @@ describe("WorktreeManager", () => {
     await m.commitAndPush(wt, "fix #5");
     // prepare()'s mocked rev-parse yields an empty base here, so the attribution
     // scan short-circuits (it has no range to replay) and we go straight to push.
+    // prepare() marks the worktree a fresh cut, so the push supersedes any stale
+    // remote branch of the same name with --force-with-lease (issue #378).
     expect(calls.map((c) => c.args.slice(0, 2))).toEqual([
       ["add", "-A"],
       ["status", "--porcelain"],
       ["commit", "-m"],
-      ["push", "-u"],
+      ["push", "--force-with-lease"],
     ]);
     expect(calls.every((c) => c.cwd === wt.path)).toBe(true);
+  });
+
+  it("commitAndPush plain-pushes a resume worktree that was not a fresh cut (issue #378)", async () => {
+    // A resume/feedback worktree is not a fresh cut: its push is a fast-forward
+    // and must NOT force-push, so it never clobbers commits added to the branch
+    // (a human fix, a feedback push) since the worktree was checked out.
+    const calls: { args: string[] }[] = [];
+    const run: CommandRunner = async (_cmd, args) => {
+      calls.push({ args });
+      const stdout = args[0] === "status" ? " M file.ts\n" : "";
+      return { stdout, stderr: "", exitCode: 0 } satisfies CommandResult;
+    };
+    const m = new WorktreeManager(run);
+    const wt: Worktree = { path: "/wt", branch: "drydock/issue-1-job-1" };
+    await m.commitAndPush(wt, "fix #5");
+    const push = calls.find((c) => c.args[0] === "push");
+    expect(push?.args).toEqual(["push", "-u", "origin", "drydock/issue-1-job-1"]);
   });
 
   it("commitAndPush throws EmptyCommitError and skips commit/push when nothing changed (issue #50)", async () => {
@@ -870,6 +909,70 @@ describe("WorktreeManager", () => {
       // The branch reached the remote.
       const remote = await git(["log", "origin/drydock/issue-1-job-1", "--format=%s"], work);
       expect(remote).toMatch(/feat: add a/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("commitAndPush on a fresh-cut worktree supersedes a stale remote branch of the same name (issue #378)", async () => {
+    // Case 2 of issue #378, end-to-end against real git: a requeued job cuts a
+    // fresh branch of the same name off origin/<default>; the earlier attempt's
+    // divergent remote branch still lingers. A plain push is rejected
+    // non-fast-forward — a fresh-cut worktree must force-push with a lease and
+    // land the retry's commits on the branch, superseding the stale attempt.
+    const root = mkdtempSync(join(tmpdir(), "drydock-supersede-"));
+    const git = async (args: string[], cwd: string) => {
+      const r = await spawnRunner("git", args, cwd);
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+      return r.stdout;
+    };
+    try {
+      const origin = join(root, "origin.git");
+      const work = join(root, "work");
+      await git(["init", "--bare", "-b", "main", origin], root);
+      await git(["init", "-b", "main", work], root);
+      await git(["config", "user.email", "dev@example.com"], work);
+      await git(["config", "user.name", "Dev"], work);
+      await git(["remote", "add", "origin", origin], work);
+      writeFileSync(join(work, "README.md"), "base\n");
+      await git(["add", "-A"], work);
+      await git(["commit", "-m", "chore: init"], work);
+      await git(["push", "origin", "main"], work);
+
+      // An earlier attempt pushed a divergent branch that still lingers on origin.
+      await git(["checkout", "-b", "drydock/issue-1-job-1"], work);
+      writeFileSync(join(work, "old.txt"), "stale attempt\n");
+      await git(["add", "-A"], work);
+      await git(["commit", "-m", "wip: stale attempt"], work);
+      await git(["push", "-u", "origin", "drydock/issue-1-job-1"], work);
+      const staleTip = (await git(["rev-parse", "HEAD"], work)).trim();
+
+      // The requeue cuts a *fresh* branch of the same name off origin/main; the
+      // agent then commits its retry work on top of it (divergent from the stale
+      // attempt, so a plain push here would be rejected non-fast-forward).
+      await git(["checkout", "main"], work);
+      await git(["branch", "-D", "drydock/issue-1-job-1"], work);
+      await git(["checkout", "-b", "drydock/issue-1-job-1", "origin/main"], work);
+      const base = (await git(["rev-parse", "origin/main"], work)).trim();
+      writeFileSync(join(work, "retry.txt"), "retry work\n");
+      await git(["add", "-A"], work);
+      await git(["commit", "-m", "feat: retry work"], work);
+      const head = (await git(["rev-parse", "HEAD"], work)).trim();
+
+      const wt: Worktree = {
+        path: work,
+        branch: "drydock/issue-1-job-1",
+        base,
+        freshCut: true,
+      };
+      await new WorktreeManager(spawnRunner).commitAndPush(wt, "feat: retry work");
+
+      // The stale attempt is superseded: origin's branch now points at the
+      // retry's commit, read straight from the remote (not a tracking ref).
+      const lsRemote = (await git(["ls-remote", origin, "drydock/issue-1-job-1"], work)).trim();
+      const remoteSha = lsRemote.split(/\s+/)[0];
+      expect(remoteSha).toBe(head);
+      expect(remoteSha).not.toBe(staleTip);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

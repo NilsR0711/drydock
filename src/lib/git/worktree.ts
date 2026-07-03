@@ -15,6 +15,18 @@ export interface Worktree {
    * commitAndPush need not supply it.
    */
   base?: string;
+  /**
+   * Whether this worktree cut a fresh branch off the default (issue #378). A
+   * requeued job's clean-slate retry derives the identical branch name and cuts
+   * it anew from origin/<default>, but the earlier attempt's remote branch of
+   * the same name still lingers (the janitor only deletes merged jobs'
+   * branches), so a plain push is rejected non-fast-forward. commitAndPush
+   * force-pushes such a branch with a lease to supersede that stale attempt,
+   * while a resume — which builds on the branch's own pushed commits — stays a
+   * plain fast-forward push. Only `prepare` sets it; the resume/feedback
+   * factories leave it unset.
+   */
+  freshCut?: boolean;
 }
 
 /** Root for app-owned worktrees; override with DRYDOCK_HOME. */
@@ -226,7 +238,11 @@ export class WorktreeManager {
       ]);
       return this.resolveBase(repo.path, branch);
     });
-    return { path, branch, base };
+    // Marked a fresh cut (issue #378): a requeue re-derives this exact branch
+    // name and cuts it anew from origin/<default>, so an earlier attempt's stale
+    // remote branch of the same name must be superseded with a force-with-lease
+    // push rather than rejected non-fast-forward.
+    return { path, branch, base, freshCut: true };
   }
 
   /**
@@ -362,7 +378,23 @@ export class WorktreeManager {
     // the agent made itself. A senior-engineer-style agent often commits its
     // own finished work; discarding it as "no changes" lost correct results
     // (issue #206).
-    await this.git(["push", "-u", "origin", wt.branch], wt.path);
+    await this.pushBranch(wt);
+  }
+
+  /**
+   * Push the worktree's branch to origin, setting upstream. A fresh cut (issue
+   * #378) force-pushes with a lease: a requeue re-derives the same branch name
+   * and cuts it anew from origin/<default>, so the earlier attempt's stale
+   * remote branch of the same name must be superseded — a plain push there is
+   * rejected non-fast-forward. The lease is keyed off our remote-tracking ref,
+   * so a branch that moved on the remote since the worktree was cut (a human
+   * fix, a feedback push) aborts the push instead of being clobbered. A resume
+   * (not a fresh cut) builds on the branch's own pushed commits, so it stays a
+   * plain fast-forward push.
+   */
+  private async pushBranch(wt: Worktree): Promise<void> {
+    const forceArgs = wt.freshCut ? ["--force-with-lease"] : [];
+    await this.git(["push", ...forceArgs, "-u", "origin", wt.branch], wt.path);
   }
 
   /**
@@ -377,7 +409,10 @@ export class WorktreeManager {
     // A branch handed to a human must carry the same attribution guarantee as a
     // PR branch (issue #248): scrub any trailer before it leaves the box.
     await this.stripAttributionFromHistory(wt);
-    await this.git(["push", "-u", "origin", wt.branch], wt.path);
+    // Same fresh-cut force-with-lease rule as commitAndPush (issue #378): a
+    // preserve on a fresh-cut worktree must supersede the earlier attempt's
+    // stale remote branch rather than fail non-fast-forward.
+    await this.pushBranch(wt);
     return true;
   }
 
