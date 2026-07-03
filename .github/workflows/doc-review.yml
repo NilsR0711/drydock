@@ -17,6 +17,7 @@ jobs:
   doc-review:
     name: Check for accompanying docs
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: write

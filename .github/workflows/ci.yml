@@ -21,6 +21,9 @@ jobs:
   verify:
     name: Verify (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
+    # Generous headroom over the slowest matrix leg (ubuntu/Node 22, a few
+    # minutes); trips only on a genuine hang, not on normal timing variance.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
