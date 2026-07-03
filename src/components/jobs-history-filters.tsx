@@ -77,6 +77,7 @@ export function JobsHistoryFilters({
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-muted-foreground" />
           <Input
+            aria-label="Search jobs"
             className="h-9 w-56 pl-8"
             placeholder="Search issue title or #"
             defaultValue={searchParams.get("q") ?? ""}
@@ -91,6 +92,7 @@ export function JobsHistoryFilters({
 
         <div className="w-44">
           <Select
+            aria-label="Filter by repository"
             className="h-9 text-sm"
             value={searchParams.get("repo") ?? ""}
             onChange={(e) => update("repo", e.target.value)}
@@ -106,6 +108,7 @@ export function JobsHistoryFilters({
 
         <div className="w-44">
           <Select
+            aria-label="Filter by model"
             className="h-9 text-sm"
             value={searchParams.get("model") ?? ""}
             onChange={(e) => update("model", e.target.value)}

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import {
   JobLiveStatusProvider,
+  JobShellRefresh,
   JobStatusBadge,
   JobStopControl,
 } from "@/components/job-live-status";
@@ -58,8 +59,13 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     <div className="dd-fade-up space-y-5">
       {/* The header status badge and Stop button track the live job status from
           a single SSE stream the provider owns (issue #337); both the subtitle
-          badge and the actions control read it from context. */}
+          badge and the actions control read it from context. JobShellRefresh
+          shares that same stream to keep the rest of the shell below — the
+          needs_human resume panel and the waiting_limit alert, which render from
+          server-only data — live too, by soft-refreshing on a status change
+          (issue #398). */}
       <JobLiveStatusProvider jobId={job.id} initialStatus={status}>
+        <JobShellRefresh initialStatus={status} />
         <PageHeader
           breadcrumb={[
             { label: "Dashboard", href: "/" },

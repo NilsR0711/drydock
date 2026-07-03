@@ -127,6 +127,39 @@ describe("DashboardLive needs-human alert (issue #258)", () => {
     expect(text()).toContain("43");
   });
 
+  it("re-alerts when a job leaves needs_human and later re-enters it (issue #406)", () => {
+    // A requeue reuses the same job id: it parks, gets requeued (leaves the
+    // needs_human set), and parks again — the common loop for a blocked issue.
+    // Each fresh parking must cross the edge and re-alert, not just the first.
+    const es = mount(true);
+
+    // First parking: alert #1.
+    es.emit("snapshot", snapshot([{ id: 9, issueNumber: 42, repoName: "acme" }]));
+    expect(chime.playChime).toHaveBeenCalledTimes(1);
+
+    // Requeued: the job leaves needs_human, so the list clears back to "All clear"
+    // and the tab must forget its id.
+    es.emit("snapshot", snapshot([]));
+    expect(text()).toContain("All clear");
+
+    // Re-parked under the same id: alert #2, not silence.
+    es.emit("snapshot", snapshot([{ id: 9, issueNumber: 42, repoName: "acme" }]));
+    expect(chime.playChime).toHaveBeenCalledTimes(2);
+  });
+
+  it("alerts only once while a job stays parked across snapshots (issue #406)", () => {
+    // Reconciling the seen-set on every snapshot must not make a job that simply
+    // stays parked re-alert: only the edge into needs_human fires the chime.
+    const es = mount(true);
+    const parked = [{ id: 9, issueNumber: 42, repoName: "acme" }];
+
+    es.emit("snapshot", snapshot(parked));
+    es.emit("snapshot", snapshot(parked));
+    es.emit("snapshot", snapshot(parked));
+
+    expect(chime.playChime).toHaveBeenCalledTimes(1);
+  });
+
   it("arms the autoplay unlock on mount", () => {
     mount(true);
     expect(chime.installAudioUnlock).toHaveBeenCalled();

@@ -107,7 +107,10 @@ export function DashboardLive({
 
       const parked = snap.needsHumanJobs ?? [];
       const fresh = newlyParkedJobs(seenNeedsHuman.current, parked);
-      for (const job of parked) seenNeedsHuman.current.add(job.id);
+      // Reconcile the seen-set with this snapshot rather than only accumulating:
+      // a requeue reuses the same job id, so a job that leaves needs_human and
+      // re-parks must drop out of the set to cross the edge again (issue #406).
+      seenNeedsHuman.current = new Set(parked.map((j) => j.id));
       if (fresh.length === 0) return;
 
       if (soundRef.current) playChime();
