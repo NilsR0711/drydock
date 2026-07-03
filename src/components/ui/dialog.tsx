@@ -3,7 +3,9 @@
 import type { LucideIcon } from "lucide-react";
 import { X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { lockBodyScroll } from "@/lib/ui/body-scroll-lock";
 import { getFocusableElements, wrapFocus } from "@/lib/ui/focus-trap";
+import { hideBackground } from "@/lib/ui/inert-background";
 import { cn } from "@/lib/utils";
 
 type Tone = "neutral" | "primary" | "success" | "warning" | "destructive";
@@ -65,6 +67,7 @@ export function Dialog({
   children,
 }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<Element | null>(null);
   // Keep the panel mounted during the closing transition for the scale-out.
   const [mounted, setMounted] = useState(open);
@@ -96,11 +99,14 @@ export function Dialog({
     return () => clearTimeout(timer);
   }, [open]);
 
-  // Focus management must wait for `mounted`: a dialog instance that was
-  // mounted closed (every persistent ConfirmDialog) still renders null on the
-  // commit where `open` flips to true, so panelRef.current is null until the
-  // setMounted(true) re-render attaches the panel. Depending on `mounted` too
-  // re-runs this effect once the panel actually exists.
+  // Focus management, body scroll lock and background inerting all live in one
+  // effect so their setup/teardown order is guaranteed (inert after focus moves
+  // in, un-inert before focus moves back out). It must wait for `mounted`: a
+  // dialog instance that was mounted closed (every persistent ConfirmDialog)
+  // still renders null on the commit where `open` flips to true, so
+  // panelRef.current / rootRef.current are null until the setMounted(true)
+  // re-render attaches them. Depending on `mounted` too re-runs this effect
+  // once the panel actually exists.
   useEffect(() => {
     if (!open || !mounted) return;
 
@@ -113,6 +119,13 @@ export function Dialog({
       const focusable = getFocusableElements(panel);
       (focusable[0] ?? panel).focus();
     }
+
+    // Lock body scroll and inert the background *after* focus has moved into the
+    // panel, so inerting the trigger (a background element) doesn't blur a node
+    // that is still focused. Both helpers are ref-counted, so stacked dialogs
+    // keep the page locked and hidden until the last one closes (issue #404).
+    const releaseScroll = lockBodyScroll();
+    const restoreBackground = rootRef.current ? hideBackground(rootRef.current) : undefined;
 
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -134,6 +147,11 @@ export function Dialog({
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
+      // Un-inert and unlock *before* restoring focus: the trigger lives in the
+      // background we just made inert, and inert elements refuse focus in real
+      // browsers. Order matters — this must run ahead of the focus() call.
+      restoreBackground?.();
+      releaseScroll();
       // Restore focus to the element that triggered the dialog.
       if (triggerRef.current instanceof HTMLElement) {
         triggerRef.current.focus();
@@ -151,7 +169,10 @@ export function Dialog({
   const hasHeader = title != null || description != null || Icon != null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8">
+    <div
+      ref={rootRef}
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain p-4 sm:p-8"
+    >
       {/* biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop, click outside closes the dialog */}
       <div
         className={cn(

@@ -493,7 +493,7 @@ A file watcher surfaces new `docs/adr/*.md` decisions for approve/reject.
 
 ### 🎨 Polished UX
 
-Light/dark theme, confirm dialogs on destructive actions, toast feedback, and accessible primitives.
+Light/dark theme, confirm dialogs on destructive actions, toast feedback, and accessible primitives. Open modals lock background scroll and mark the rest of the page `inert`, so the page behind never scrolls away and screen readers stay scoped to the dialog.
 
 ---
 
