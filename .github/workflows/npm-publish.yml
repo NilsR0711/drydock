@@ -62,10 +62,14 @@ jobs:
           node-version: "24"
           cache: pnpm
 
-      # Trusted publishing (OIDC, tokenless) requires npm >= 11.5.1; the npm that
-      # ships with Node 22 is 10.x, so upgrade before publishing.
-      - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@latest
+      # Trusted publishing (OIDC, tokenless) requires npm >= 11.5.1. The npm
+      # bundled with Node 24 is a moving target (it tracks whichever 24.x
+      # setup-node resolves), so pin an exact, known-good npm here instead of a
+      # floating `npm@latest`. An explicit pin keeps releases reproducible and
+      # immune to a future npm major (e.g. npm 12) silently changing publish or
+      # OIDC behavior. Bump deliberately when a newer npm is needed.
+      - name: Install pinned npm for trusted publishing
+        run: npm install -g npm@11.18.0
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
