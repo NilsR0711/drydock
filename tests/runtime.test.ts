@@ -12,7 +12,6 @@ import {
   releaseInstanceLock,
   setDrainMode,
   startInstanceLockHeartbeat,
-  stopInstanceLockHeartbeat,
   unregisterActiveJob,
   waitForIdle,
 } from "@/lib/orchestrator/runtime";
@@ -24,7 +23,13 @@ beforeEach(() => {
   setDrainMode(false);
 });
 afterEach(() => {
-  stopInstanceLockHeartbeat();
+  // Reset the process-global runtime singleton so lock ownership never leaks
+  // into a later case. releaseInstanceLock stops the heartbeat and clears
+  // state.holdsLock in place — deleting RUNTIME_STATE_KEY would not help here,
+  // since this suite imports runtime once and its `state` binding already points
+  // at the original object (unlike the resetModules-based *-global suites).
+  releaseInstanceLock();
+  setDrainMode(false);
   delete process.env.DRYDOCK_HOME;
   rmSync(home, { recursive: true, force: true });
 });
