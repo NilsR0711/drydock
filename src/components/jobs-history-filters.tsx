@@ -67,6 +67,7 @@ export function JobsHistoryFilters({
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <SegmentedControl
+        label="Filter jobs by status"
         value={searchParams.get("status") ?? ""}
         onChange={(v) => update("status", v)}
         options={STATUS_FILTERS}

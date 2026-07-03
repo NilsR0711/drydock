@@ -211,8 +211,12 @@ body {
   display: none;
 }
 
-/* ---- Focus ring: ONE consistent ring across all primitives (#113) ---- */
-.focus-ring:focus-visible {
+/* ---- Focus ring: ONE consistent ring across all primitives (#113) ----
+   `.focus-ring-within` is for controls whose focusable element is visually
+   hidden (e.g. an sr-only <input> inside a styled <label>): the ring renders
+   on the wrapper when the inner control is focused. */
+.focus-ring:focus-visible,
+.focus-ring-within:has(:focus-visible) {
   outline: none;
   box-shadow:
     0 0 0 2px hsl(var(--background)),

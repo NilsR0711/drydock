@@ -615,6 +615,7 @@ export function LogViewer({
           <button
             type="button"
             onClick={() => setShowFilter((v) => !v)}
+            aria-expanded={showFilter}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium hover-elevate focus-ring",
               hiddenCount > 0 && "text-primary",
@@ -655,6 +656,7 @@ export function LogViewer({
                 key={t}
                 type="button"
                 onClick={() => toggleType(t)}
+                aria-pressed={on}
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors focus-ring",
                   on
