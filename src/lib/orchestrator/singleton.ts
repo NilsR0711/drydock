@@ -6,6 +6,7 @@ import { logError, logInfo } from "@/lib/log/logger";
 import { setServerLogLevel } from "@/lib/log/server-log";
 import { notifyDraining } from "@/lib/notify/lifecycle";
 import { getSettings } from "@/lib/settings/service";
+import { globalSingleton } from "@/lib/util/global-singleton";
 import { recoverOnStartup } from "./driver";
 import { startDriverLoop, stopDriverLoop } from "./driver-loop";
 import { getJob, transitionJob } from "./jobs";
@@ -22,8 +23,17 @@ import { reapOrphanedWorktrees } from "./worktree-reaper";
  * Orchestrator singleton. instrumentation.ts calls this once on server start.
  * It runs crash recovery (SPEC §8) and installs graceful-shutdown handlers.
  * See ADR 006 and ADR 012.
+ *
+ * The `started` guard lives on `globalThis`, not in a module-local `let`,
+ * because getDb() bootstraps startOrchestrator lazily and every bundle layer
+ * (RSC render, Server Action, Route Handler) evaluates getDb — and this module —
+ * independently. A module-local guard would let the first getDb() in each layer
+ * re-run the whole bootstrap: crash recovery against live jobs, a stolen instance
+ * lock, a second driver loop, and duplicate signal handlers (issue #379). A
+ * process-global guard runs the bootstrap at most once per process.
  */
-let started = false;
+const STARTED_KEY = Symbol.for("drydock.orchestrator.started");
+const bootstrap = globalSingleton(STARTED_KEY, () => ({ started: false }));
 
 /**
  * Registry of running subprocess abort callbacks, keyed by job id.
@@ -178,8 +188,8 @@ function startPruneSweep(): void {
 }
 
 export function startOrchestrator(): void {
-  if (started) return;
-  started = true;
+  if (bootstrap.started) return;
+  bootstrap.started = true;
 
   // Adopt the operator's saved log level now the DB is available — until here
   // the sink ran on the DRYDOCK_LOG_LEVEL bootstrap default (issue #294). A
