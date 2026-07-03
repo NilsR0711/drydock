@@ -40,6 +40,39 @@ export function isForgeId(value: unknown): value is ForgeId {
 }
 
 /**
+ * Optional autonomy features that only some forges implement (issue #407):
+ * the PR review-feedback lifecycle (issue #18) and release management (#59).
+ */
+export type ForgeCapability = "reviewFeedback" | "releaseManagement";
+
+/**
+ * Which optional capabilities each platform's forge client provides. The
+ * orchestrator drivers already gate on the concrete client's methods at
+ * runtime; this table is the client-safe mirror the workspace UI uses to
+ * disable toggles a platform's forge can never honour, so operators aren't
+ * offered automation that would silently no-op. Keep it in lock-step with the
+ * real `ForgeClient` implementations — the `forge-platform-capabilities` test
+ * asserts the declared support matches each client's actual methods.
+ */
+const PLATFORM_CAPABILITIES: Record<ForgeId, readonly ForgeCapability[]> = {
+  github: ["reviewFeedback", "releaseManagement"],
+  gitlab: [],
+};
+
+/**
+ * Whether a platform's forge implements the given optional capability. Unknown
+ * or missing platform values fall back to the default forge (GitHub), matching
+ * how `getForge` resolves them.
+ */
+export function platformSupportsCapability(
+  platform: string | null | undefined,
+  capability: ForgeCapability,
+): boolean {
+  const id = isForgeId(platform) ? platform : DEFAULT_FORGE;
+  return PLATFORM_CAPABILITIES[id].includes(capability);
+}
+
+/**
  * The platform-independent operations Drydock performs against a forge. Both
  * the GitHub (`gh` CLI) and GitLab (REST API) implementations satisfy this
  * contract, so the orchestrator never depends on a concrete platform.
