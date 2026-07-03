@@ -135,4 +135,22 @@ describe("requeueJobWithEscalation", () => {
   it("throws for an unknown job id", () => {
     expect(() => requeueJobWithEscalation(999, db)).toThrow(/not found/);
   });
+
+  it("clears the prior attempt's finishedAt and errorMessage on requeue (issue #381)", () => {
+    const repo = makeRepo(true);
+    const job = createJob({ repoId: repo.id, issueNumber: 1, model: "claude-haiku-4-5" }, db);
+    transitionJob(job.id, "working", {}, db);
+    const parked = transitionJob(
+      job.id,
+      "needs_human",
+      { errorMessage: "previous attempt failed" },
+      db,
+    );
+    expect(parked.finishedAt).toBeTypeOf("number");
+
+    const requeued = requeueJobWithEscalation(job.id, db);
+
+    expect(requeued.finishedAt).toBeNull();
+    expect(requeued.errorMessage).toBeNull();
+  });
 });

@@ -15,10 +15,15 @@ beforeEach(() => {
 });
 
 /** Drive a fresh job to needs_human so it can be unblocked with an instruction. */
-function parkedJob(issueNumber = 1) {
+function parkedJob(issueNumber = 1, patch: Partial<Job> = {}) {
   const job = createJob({ repoId, issueNumber }, db);
   transitionJob(job.id, "working", {}, db);
-  transitionJob(job.id, "needs_human", { branch: "drydock/issue-1-job-1", sessionId: "s1" }, db);
+  transitionJob(
+    job.id,
+    "needs_human",
+    { branch: "drydock/issue-1-job-1", sessionId: "s1", ...patch },
+    db,
+  );
   return getJob(job.id, db) as Job;
 }
 
@@ -61,6 +66,16 @@ describe("resumeJobWithInstruction (issue #257)", () => {
 
   it("throws for an unknown job", () => {
     expect(() => resumeJobWithInstruction(9999, "go", db)).toThrow(/not found/i);
+  });
+
+  it("clears the prior attempt's finishedAt and errorMessage on requeue (issue #381)", () => {
+    const job = parkedJob(3, { errorMessage: "previous attempt failed" });
+    expect(job.finishedAt).toBeTypeOf("number");
+
+    const result = resumeJobWithInstruction(job.id, "try again with the new hint", db);
+
+    expect(result.finishedAt).toBeNull();
+    expect(result.errorMessage).toBeNull();
   });
 
   it("refuses to resume a job that is not awaiting a human", () => {
