@@ -86,6 +86,62 @@ describe("transitionJob atomicity", () => {
   });
 });
 
+describe("transitionJob clears stale finishedAt/errorMessage on requeue (issue #381)", () => {
+  it("clears finishedAt when a needs_human job re-enters queued", () => {
+    const job = createJob({ repoId, issueNumber: 10 }, db);
+    transitionJob(job.id, "working", {}, db);
+    const parked = transitionJob(job.id, "needs_human", { errorMessage: "boom" }, db);
+    expect(parked.finishedAt).toBeTypeOf("number");
+    expect(parked.errorMessage).toBe("boom");
+
+    const requeued = transitionJob(job.id, "queued", {}, db);
+    expect(requeued.finishedAt).toBeNull();
+    expect(requeued.errorMessage).toBeNull();
+  });
+
+  it("keeps finishedAt cleared through the working transition after a requeue", () => {
+    const job = createJob({ repoId, issueNumber: 11 }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "needs_human", { errorMessage: "boom" }, db);
+    transitionJob(job.id, "queued", {}, db);
+
+    const working = transitionJob(job.id, "working", {}, db);
+    expect(working.finishedAt).toBeNull();
+  });
+
+  it("does not resurrect startedAt on the second working transition", () => {
+    const job = createJob({ repoId, issueNumber: 12 }, db);
+    const firstWorking = transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "needs_human", {}, db);
+    transitionJob(job.id, "queued", {}, db);
+
+    const secondWorking = transitionJob(job.id, "working", {}, db);
+    // startedAt still marks the first-ever start; only finishedAt/errorMessage reset on requeue.
+    expect(secondWorking.startedAt).toBe(firstWorking.startedAt);
+  });
+
+  it("clears finishedAt for an interrupted job requeued directly to queued", () => {
+    const job = createJob({ repoId, issueNumber: 13 }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "ci_running", {}, db);
+    transitionJob(job.id, "interrupted", {}, db);
+    expect(getJob(job.id, db)?.finishedAt).toBeNull(); // interrupted never stamps finishedAt
+
+    const requeued = transitionJob(job.id, "queued", {}, db);
+    expect(requeued.finishedAt).toBeNull();
+    expect(requeued.errorMessage).toBeNull();
+  });
+
+  it("an explicit patch value for errorMessage still wins over the requeue clear", () => {
+    const job = createJob({ repoId, issueNumber: 14 }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "needs_human", { errorMessage: "boom" }, db);
+
+    const requeued = transitionJob(job.id, "queued", { errorMessage: "override" }, db);
+    expect(requeued.errorMessage).toBe("override");
+  });
+});
+
 describe("crash recovery", () => {
   it("marks CI-babysitting jobs interrupted but leaves working jobs to the queue", () => {
     const a = createJob({ repoId, issueNumber: 5 }, db);
