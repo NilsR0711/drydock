@@ -229,8 +229,18 @@ export function IssueDetailModal({
             ) : null}
           </div>
 
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} className="font-medium" />
-          <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={8} />
+          <Input
+            aria-label="Issue title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="font-medium"
+          />
+          <Textarea
+            aria-label="Issue body"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            rows={8}
+          />
           <Button
             size="sm"
             disabled={pending}
@@ -271,6 +281,7 @@ export function IssueDetailModal({
                 </button>
               ))}
               <Input
+                aria-label="New label"
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
                 placeholder="add label"
@@ -360,6 +371,7 @@ export function IssueDetailModal({
               )}
             </ul>
             <Textarea
+              aria-label="Comment"
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               rows={3}

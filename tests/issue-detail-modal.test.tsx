@@ -2,6 +2,7 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IssueDetail } from "@/lib/github/gh";
+import { accessibleName, required } from "./fixtures/a11y";
 import { fire, type Rendered, render } from "./fixtures/react";
 
 const actions = vi.hoisted(() => ({
@@ -130,5 +131,64 @@ describe("IssueDetailModal (issue #388)", () => {
     click(buttonByText(confirmDialog(mounted.container), "Close issue"));
     await flush();
     expect(actions.setIssueStateAction).toHaveBeenCalledWith(3, 42, "closed");
+  });
+});
+
+describe("IssueDetailModal accessible names (issue #401)", () => {
+  let mounted: Rendered | undefined;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    actions.viewIssueAction.mockResolvedValue(makeDetail());
+    actions.listSubtasksAction.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    mounted?.unmount();
+    mounted = undefined;
+  });
+
+  it("names the issue title Input", async () => {
+    mounted = render(<IssueDetailModal {...PROPS} />);
+    await flush();
+    const el = required(
+      mounted.container.querySelector<HTMLInputElement>("input.font-medium"),
+      "title input",
+    );
+    expect(accessibleName(el)).toBe("Issue title");
+  });
+
+  it("names the issue body Textarea", async () => {
+    mounted = render(<IssueDetailModal {...PROPS} />);
+    await flush();
+    const el = required(
+      mounted.container.querySelector<HTMLTextAreaElement>('textarea[rows="8"]'),
+      "body textarea",
+    );
+    expect(accessibleName(el)).toBe("Issue body");
+  });
+
+  it("names the add-label Input beyond its placeholder", async () => {
+    mounted = render(<IssueDetailModal {...PROPS} />);
+    await flush();
+    const el = required(
+      mounted.container.querySelector<HTMLInputElement>('input[placeholder="add label"]'),
+      "add-label input",
+    );
+    const name = accessibleName(el);
+    expect(name).toBe("New label");
+    expect(name).not.toBe(el.getAttribute("placeholder"));
+  });
+
+  it("names the comment Textarea beyond its placeholder", async () => {
+    mounted = render(<IssueDetailModal {...PROPS} />);
+    await flush();
+    const el = required(
+      mounted.container.querySelector<HTMLTextAreaElement>('textarea[rows="3"]'),
+      "comment textarea",
+    );
+    const name = accessibleName(el);
+    expect(name).toBe("Comment");
+    expect(name).not.toBe(el.getAttribute("placeholder"));
   });
 });
