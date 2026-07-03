@@ -1,23 +1,23 @@
 import { type DB, getDb } from "@/lib/db/client";
 import type { Job } from "@/lib/db/schema";
 import { type CommandRunner, spawnRunner } from "@/lib/exec/runner";
-import { recordEvent, transitionJob } from "./jobs";
+import { recordEvent, transitionJob } from "@/lib/orchestrator/jobs";
 
 export interface SessionDeps {
   runner?: CommandRunner;
   db?: DB;
-  /** Mock CI outcome for Phase 2 (no real PR yet). Real babysitter arrives in Phase 5. */
+  /** Mock CI outcome: drive the run to merged (default) or ci_failed/needs_human. */
   ciPasses?: boolean;
 }
 
 /**
- * Phase 2 mock lifecycle: drive a job through working -> ci_running -> merged
- * (or needs_human on failure). Replaced by the real stream parser / CI
- * babysitter in later phases. The runner is injectable (ADR 004).
- *
- * @remarks Test-only. The production flow uses spawnClaudeSession / ciBabysitter
- * via run-job.ts; this helper is retained solely for the job-lifecycle tests
- * that exercise the state-machine progression without a real Claude subprocess.
+ * Test-only mock lifecycle: drive a job through working -> ci_running -> merged
+ * (or needs_human on failure) without a real agent subprocess. The production
+ * flow uses spawnAgentSession / ciBabysitter via run-job.ts; this helper is
+ * retained solely for the job-lifecycle tests that exercise the state-machine
+ * progression. It lived in `src/` historically and shipped in the production
+ * bundle; it now lives with the tests that own it (issue #385). The runner is
+ * injectable (ADR 004).
  */
 export async function runMockSession(
   job: Job,

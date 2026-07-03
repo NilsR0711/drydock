@@ -6,9 +6,9 @@ import { jobEvents } from "@/lib/db/schema";
 import { spawnRunner } from "@/lib/exec/runner";
 import { recoverInterruptedJobs, recoverOnStartup } from "@/lib/orchestrator/driver";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
-import { runMockSession } from "@/lib/orchestrator/session";
 import { InvalidTransitionError } from "@/lib/orchestrator/state-machine";
 import { addRepo } from "@/lib/repos/service";
+import { runMockSession } from "./helpers/mock-session";
 
 const MOCK_CLAUDE = fileURLToPath(new URL("./fixtures/mock-claude.js", import.meta.url));
 

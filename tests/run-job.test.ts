@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { registerAdr } from "@/lib/adr/service";
 import { createDb, type DB } from "@/lib/db/client";
 import { type Job, jobs } from "@/lib/db/schema";
-import { EmptyCommitError, type Worktree } from "@/lib/git/worktree";
+import { EmptyCommitError } from "@/lib/git/worktree";
 import { createJob, getJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { runJob } from "@/lib/orchestrator/run-job";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { saveTemplate } from "@/lib/prompts/templates";
 import { addRepo } from "@/lib/repos/service";
+import { baseRunJobDeps, fakeWorktrees, sessionResult } from "./helpers/run-job-deps";
 
 let db: DB;
 let repoId: number;
@@ -17,48 +18,12 @@ beforeEach(() => {
   repoId = addRepo({ path: "/repo", name: "acme", defaultModel: "claude-opus-4-7" }, db).id;
 });
 
-function fakeWorktrees(removed: { v: boolean }) {
-  const wt: Worktree = { path: "/wt", branch: "drydock/issue-1-job-1" };
-  return {
-    prepare: vi.fn(async () => wt),
-    commitAndPush: vi.fn(async () => {}),
-    commitAndPushForHuman: vi.fn(async () => false),
-    remove: vi.fn(async () => {
-      removed.v = true;
-    }),
-  };
-}
-
-function baseDeps(removed: { v: boolean }, over: Record<string, unknown> = {}) {
-  return {
-    db,
-    worktrees: fakeWorktrees(removed),
-    runSession: vi.fn(async (job: Job) => {
-      db.update(jobs).set({ status: "working", sessionId: "s1" }).where(eq(jobs.id, job.id)).run();
-      return { exitCode: 0, sessionId: "s1", costUsd: 0.1, inputTokens: 1, outputTokens: 1 };
-    }),
-    createPr: vi.fn(async () => 55),
-    viewIssue: vi.fn(async () => ({ title: "", body: "" })),
-    runBabysitter: vi.fn(async (job: Job) => {
-      db.update(jobs).set({ status: "merged" }).where(eq(jobs.id, job.id)).run();
-      return getJob(job.id, db) as Job;
-    }),
-    announceNeedsHuman: vi.fn(async () => {}),
-    // Post-PR verification and AI PR audit default on now (issue #254); these
-    // tests assert the core lifecycle, so stub both best-effort passes to no-ops
-    // instead of letting them spawn a real `gh`.
-    verify: vi.fn(async () => {}),
-    audit: vi.fn(async () => {}),
-    ...over,
-  };
-}
-
 describe("runJob", () => {
   it("drives a job to merged and always cleans up the worktree", async () => {
     const removed = { v: false };
-    const deps = baseDeps(removed);
+    const deps = baseRunJobDeps(db, removed);
     const job = createJob({ repoId, issueNumber: 1 }, db);
-    const result = await runJob(job.id, deps as never);
+    const result = await runJob(job.id, deps);
     expect(result.status).toBe("merged");
     expect(result.prNumber).toBe(55);
     expect(deps.worktrees.prepare).toHaveBeenCalled();
@@ -76,9 +41,9 @@ describe("runJob", () => {
       db,
     );
     const removed = { v: false };
-    const deps = baseDeps(removed);
+    const deps = baseRunJobDeps(db, removed);
     const job = createJob({ repoId, issueNumber: 1 }, db);
-    await runJob(job.id, deps as never);
+    await runJob(job.id, deps);
     const prompt = (deps.runSession as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
     expect(prompt).toContain("DO ISSUE 1 ON ");
   });
@@ -86,9 +51,9 @@ describe("runJob", () => {
   it("notifies on pr_opened and pr_merged for a merged outcome", async () => {
     const removed = { v: false };
     const notify = vi.fn(async () => {});
-    const deps = baseDeps(removed, { notify });
+    const deps = baseRunJobDeps(db, removed, { notify });
     const job = createJob({ repoId, issueNumber: 1 }, db);
-    await runJob(job.id, deps as never);
+    await runJob(job.id, deps);
     expect(notify).toHaveBeenCalledWith("pr_opened", expect.stringContaining("PR opened"));
     expect(notify).toHaveBeenCalledWith("pr_merged", expect.stringContaining("Merged"));
   });
@@ -97,9 +62,9 @@ describe("runJob", () => {
     const gatedRepo = addRepo({ path: "/g", name: "gated", adrGating: true }, db);
     registerAdr({ repoId: gatedRepo.id, filePath: "/g/docs/adr/1.md", content: "# Decide" }, db);
     const removed = { v: false };
-    const deps = baseDeps(removed);
+    const deps = baseRunJobDeps(db, removed);
     const job = createJob({ repoId: gatedRepo.id, issueNumber: 1 }, db);
-    const result = await runJob(job.id, deps as never);
+    const result = await runJob(job.id, deps);
     expect(result.status).toBe("needs_human");
     expect(result.errorMessage).toContain("pending ADR");
     expect(deps.createPr).not.toHaveBeenCalled();
@@ -108,14 +73,14 @@ describe("runJob", () => {
 
   it("marks needs_human and cleans up when the session exits non-zero", async () => {
     const removed = { v: false };
-    const deps = baseDeps(removed, {
+    const deps = baseRunJobDeps(db, removed, {
       runSession: vi.fn(async (job: Job) => {
         db.update(jobs).set({ status: "working" }).where(eq(jobs.id, job.id)).run();
-        return { exitCode: 1, sessionId: "s1", costUsd: 0, inputTokens: 0, outputTokens: 0 };
+        return sessionResult({ exitCode: 1, costUsd: 0, inputTokens: 0, outputTokens: 0 });
       }),
     });
     const job = createJob({ repoId, issueNumber: 1 }, db);
-    const result = await runJob(job.id, deps as never);
+    const result = await runJob(job.id, deps);
     expect(result.status).toBe("needs_human");
     expect(deps.createPr).not.toHaveBeenCalled();
     expect(removed.v).toBe(true);
@@ -124,15 +89,15 @@ describe("runJob", () => {
   it("announces the parked job on its issue for every needs_human outcome (issue #250)", async () => {
     const removed = { v: false };
     const announceNeedsHuman = vi.fn(async () => {});
-    const deps = baseDeps(removed, {
+    const deps = baseRunJobDeps(db, removed, {
       announceNeedsHuman,
       runSession: vi.fn(async (job: Job) => {
         db.update(jobs).set({ status: "working" }).where(eq(jobs.id, job.id)).run();
-        return { exitCode: 1, sessionId: "s1", costUsd: 0, inputTokens: 0, outputTokens: 0 };
+        return sessionResult({ exitCode: 1, costUsd: 0, inputTokens: 0, outputTokens: 0 });
       }),
     });
     const job = createJob({ repoId, issueNumber: 1 }, db);
-    const result = await runJob(job.id, deps as never);
+    const result = await runJob(job.id, deps);
     expect(result.status).toBe("needs_human");
     expect(announceNeedsHuman).toHaveBeenCalledTimes(1);
     expect(announceNeedsHuman).toHaveBeenCalledWith(
@@ -143,7 +108,7 @@ describe("runJob", () => {
   it("announces a babysitter-escalated needs_human outcome (issue #250)", async () => {
     const removed = { v: false };
     const announceNeedsHuman = vi.fn(async () => {});
-    const deps = baseDeps(removed, {
+    const deps = baseRunJobDeps(db, removed, {
       announceNeedsHuman,
       runBabysitter: vi.fn(async (job: Job) => {
         db.update(jobs)
@@ -154,7 +119,7 @@ describe("runJob", () => {
       }),
     });
     const job = createJob({ repoId, issueNumber: 1 }, db);
-    const result = await runJob(job.id, deps as never);
+    const result = await runJob(job.id, deps);
     expect(result.status).toBe("needs_human");
     expect(announceNeedsHuman).toHaveBeenCalledTimes(1);
   });
@@ -162,29 +127,28 @@ describe("runJob", () => {
   it("does not announce needs_human for a merged outcome (issue #250)", async () => {
     const removed = { v: false };
     const announceNeedsHuman = vi.fn(async () => {});
-    const deps = baseDeps(removed, { announceNeedsHuman });
+    const deps = baseRunJobDeps(db, removed, { announceNeedsHuman });
     const job = createJob({ repoId, issueNumber: 1 }, db);
-    await runJob(job.id, deps as never);
+    await runJob(job.id, deps);
     expect(announceNeedsHuman).not.toHaveBeenCalled();
   });
 
   it("marks needs_human with a timed-out reason when the session hits the wall-clock limit (issue #47)", async () => {
     const removed = { v: false };
-    const deps = baseDeps(removed, {
+    const deps = baseRunJobDeps(db, removed, {
       runSession: vi.fn(async (job: Job) => {
         db.update(jobs).set({ status: "working" }).where(eq(jobs.id, job.id)).run();
-        return {
+        return sessionResult({
           exitCode: -1,
-          sessionId: "s1",
           costUsd: 0,
           inputTokens: 0,
           outputTokens: 0,
           timedOut: true,
-        };
+        });
       }),
     });
     const job = createJob({ repoId, issueNumber: 1 }, db);
-    const result = await runJob(job.id, deps as never);
+    const result = await runJob(job.id, deps);
     expect(result.status).toBe("needs_human");
     expect(result.errorMessage).toMatch(/timed out/i);
     expect(deps.createPr).not.toHaveBeenCalled();
@@ -193,22 +157,20 @@ describe("runJob", () => {
 
   it("marks needs_human with a cost-limit reason when the session crosses the per-job cap (issue #57)", async () => {
     const removed = { v: false };
-    const deps = baseDeps(removed, {
+    const deps = baseRunJobDeps(db, removed, {
       runSession: vi.fn(async (job: Job) => {
         db.update(jobs).set({ status: "working" }).where(eq(jobs.id, job.id)).run();
-        return {
+        return sessionResult({
           exitCode: -2,
-          sessionId: "s1",
           costUsd: 1.5,
           inputTokens: 0,
           outputTokens: 0,
-          timedOut: false,
           costExceeded: true,
-        };
+        });
       }),
     });
     const job = createJob({ repoId, issueNumber: 1 }, db);
-    const result = await runJob(job.id, deps as never);
+    const result = await runJob(job.id, deps);
     expect(result.status).toBe("needs_human");
     expect(result.errorMessage).toMatch(/cost limit/i);
     expect(deps.createPr).not.toHaveBeenCalled();
@@ -222,9 +184,9 @@ describe("runJob", () => {
       throw new EmptyCommitError();
     });
     const notify = vi.fn(async () => {});
-    const deps = baseDeps(removed, { worktrees: wt, notify });
+    const deps = baseRunJobDeps(db, removed, { worktrees: wt, notify });
     const job = createJob({ repoId, issueNumber: 1 }, db);
-    const result = await runJob(job.id, deps as never);
+    const result = await runJob(job.id, deps);
     expect(result.status).toBe("needs_human");
     expect(result.errorMessage).toMatch(/no changes/i);
     expect(result.errorMessage).not.toMatch(/nothing to commit/i);
@@ -239,9 +201,9 @@ describe("runJob", () => {
     wt.commitAndPush = vi.fn(async () => {
       throw new Error("push rejected");
     });
-    const deps = baseDeps(removed, { worktrees: wt });
+    const deps = baseRunJobDeps(db, removed, { worktrees: wt });
     const job = createJob({ repoId, issueNumber: 1 }, db);
-    const result = await runJob(job.id, deps as never);
+    const result = await runJob(job.id, deps);
     expect(result.status).toBe("needs_human");
     expect(result.errorMessage).toContain("push rejected");
     expect(removed.v).toBe(true);
@@ -249,7 +211,7 @@ describe("runJob", () => {
 
   it("recovers a job to needs_human when a throw lands while it sits in ci_failed", async () => {
     const removed = { v: false };
-    const deps = baseDeps(removed, {
+    const deps = baseRunJobDeps(db, removed, {
       runBabysitter: vi.fn(async (job: Job) => {
         // Simulate a crash between the babysitter's ci_failed and retrying
         // transitions: the job must not strand in non-terminal ci_failed
@@ -259,7 +221,7 @@ describe("runJob", () => {
       }),
     });
     const job = createJob({ repoId, issueNumber: 9 }, db);
-    const result = await runJob(job.id, deps as never);
+    const result = await runJob(job.id, deps);
     expect(result.status).toBe("needs_human");
     expect(result.errorMessage).toContain("resume crashed");
     expect(removed.v).toBe(true);
@@ -267,7 +229,7 @@ describe("runJob", () => {
 
   it("returns the settled row when a concurrent abort lands before failure handling", async () => {
     const removed = { v: false };
-    const deps = baseDeps(removed, {
+    const deps = baseRunJobDeps(db, removed, {
       runBabysitter: vi.fn(async (job: Job) => {
         // An operator abort flips the job terminal while the babysitter dies;
         // the catch block must report the settled row, not throw.
@@ -276,7 +238,7 @@ describe("runJob", () => {
       }),
     });
     const job = createJob({ repoId, issueNumber: 10 }, db);
-    const result = await runJob(job.id, deps as never);
+    const result = await runJob(job.id, deps);
     expect(result.status).toBe("aborted");
     expect(removed.v).toBe(true);
   });
@@ -284,19 +246,19 @@ describe("runJob", () => {
   it("parks the job with a descriptive message when the agent CLI fails to spawn", async () => {
     const removed = { v: false };
     const spawnErr = Object.assign(new Error("spawn __noncli__: ENOENT"), { code: "ENOENT" });
-    const deps = baseDeps(removed, {
-      runSession: vi.fn(async () => ({
-        exitCode: 1,
-        spawnError: spawnErr,
-        costUsd: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        timedOut: false,
-        costExceeded: false,
-      })),
+    const deps = baseRunJobDeps(db, removed, {
+      runSession: vi.fn(async () =>
+        sessionResult({
+          exitCode: 1,
+          spawnError: spawnErr,
+          costUsd: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+        }),
+      ),
     });
     const job = createJob({ repoId, issueNumber: 8 }, db);
-    const result = await runJob(job.id, deps as never);
+    const result = await runJob(job.id, deps);
     expect(result.status).toBe("needs_human");
     expect(result.errorMessage).toMatch(/failed to start/i);
     expect(result.errorMessage).toContain("ENOENT");
