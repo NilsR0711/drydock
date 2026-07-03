@@ -173,7 +173,11 @@ that holds the merge so late bot/human reviews can land and feed the review-feed
 regression re-arms the window), and on red resumes the session with a CI-fix prompt (up to **3
 retries**), then files a follow-up issue and hands off. The failed log is classified by failure type
 (test, type error, lint, build, dependency, timeout, flaky) and reduced to a focused, line-capped
-evidence slice so the fix prompt targets the actual failure.
+evidence slice so the fix prompt targets the actual failure. The merge itself — the one irreversible
+step — is **guarded**: a branch that fell **behind** its base is updated and re-polled instead of
+merged blind (so strict-check auto-merge cannot silently queue forever), a **conflicted** PR is
+escalated rather than merged, and a merge that outright fails parks the job as `needs_human` with an
+actionable reason rather than reporting a false `merged`.
 
 ### 🩹 CI auto-heal
 
