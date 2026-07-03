@@ -1,8 +1,21 @@
 // @vitest-environment jsdom
+import type { ReactNode } from "react";
 import { useEffect } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type ToastInput, ToastProvider, useToast } from "@/components/ui/toast";
 import { type Rendered, render } from "./fixtures/react";
+
+// next/link only performs client-side navigation with a full App Router context,
+// which jsdom cannot provide. Stub it with a marked anchor so the test can assert
+// the toast renders its title *through* next/link (client-side routing) rather
+// than a raw <a> that triggers a full document reload and drops SSE streams.
+vi.mock("next/link", () => ({
+  default: ({ href, children, ...rest }: { href: string; children: ReactNode }) => (
+    <a data-nextlink="true" href={href} {...rest}>
+      {children}
+    </a>
+  ),
+}));
 
 let mounted: Rendered | undefined;
 
@@ -21,8 +34,8 @@ function Trigger({ input }: { input: ToastInput }) {
   return null;
 }
 
-describe("toast link (issue #258)", () => {
-  it("renders the title as a job link when href is provided", () => {
+describe("toast link (issues #258, #405)", () => {
+  it("renders the title as a client-side next/link when href is provided", () => {
     mounted = render(
       <ToastProvider>
         <Trigger input={{ title: "acme #42 needs a human", href: "/jobs/9", variant: "error" }} />
@@ -30,6 +43,7 @@ describe("toast link (issue #258)", () => {
     );
     const link = mounted.container.querySelector<HTMLAnchorElement>("a[href='/jobs/9']");
     expect(link).not.toBeNull();
+    expect(link?.dataset.nextlink).toBe("true");
     expect(link?.textContent).toContain("acme #42 needs a human");
   });
 

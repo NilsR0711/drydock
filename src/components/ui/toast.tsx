@@ -2,7 +2,16 @@
 
 import type { LucideIcon } from "lucide-react";
 import { CircleCheck, CircleX, Info, X } from "lucide-react";
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ariaLiveForVariant } from "@/lib/ui/aria-utils";
 import { cn } from "@/lib/utils";
 
@@ -42,21 +51,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const toast = useCallback(
-    (input: ToastInput) => {
-      const id = Date.now() + Math.random();
-      const next: Toast = {
-        id,
-        title: input.title,
-        description: input.description,
-        variant: input.variant ?? "info",
-        href: input.href,
-      };
-      setToasts((prev) => [...prev, next]);
-      setTimeout(() => remove(id), AUTO_DISMISS_MS);
-    },
-    [remove],
-  );
+  const toast = useCallback((input: ToastInput) => {
+    const id = Date.now() + Math.random();
+    const next: Toast = {
+      id,
+      title: input.title,
+      description: input.description,
+      variant: input.variant ?? "info",
+      href: input.href,
+    };
+    setToasts((prev) => [...prev, next]);
+  }, []);
 
   const value = useMemo<ToastContextValue>(
     () => ({
@@ -98,14 +103,45 @@ const VARIANT_STYLE: Record<ToastVariant, { icon: string; bar: string }> = {
 function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
   const Icon = ICONS[t.variant];
   const style = VARIANT_STYLE[t.variant];
+
+  // Pointer hover and keyboard focus both freeze auto-dismissal so a toast — the
+  // needs_human error toast in particular — stays readable and its link stays
+  // actionable (WCAG 2.2.1). This mirrors the progress bar's CSS pause in
+  // globals.css so the visual affordance and the behaviour agree.
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const paused = hovered || focused;
+
+  // Time left on the dismiss clock, preserved across pauses so leaving/blurring
+  // resumes the countdown from where it stopped rather than restarting it.
+  const remainingRef = useRef(AUTO_DISMISS_MS);
+  const deadlineRef = useRef(0);
+
+  useEffect(() => {
+    if (paused) return;
+    deadlineRef.current = Date.now() + remainingRef.current;
+    const timer = setTimeout(() => onDismiss(t.id), remainingRef.current);
+    return () => {
+      clearTimeout(timer);
+      remainingRef.current = Math.max(0, deadlineRef.current - Date.now());
+    };
+  }, [paused, onDismiss, t.id]);
+
   return (
-    <div className="dd-toast dd-toast-in pointer-events-auto relative flex items-start gap-3 overflow-hidden rounded-xl border border-card-border bg-card p-3.5 shadow-lg">
+    // biome-ignore lint/a11y/noStaticElementInteractions: hover/focus only pause the auto-dismiss timer; there is no click action here and the keyboard path is covered by onFocus/onBlur (the toast's link and dismiss button receive focus)
+    <div
+      className="dd-toast dd-toast-in pointer-events-auto relative flex items-start gap-3 overflow-hidden rounded-xl border border-card-border bg-card p-3.5 shadow-lg"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+    >
       <Icon className={cn("mt-0.5 h-[18px] w-[18px] shrink-0", style.icon)} />
       <div className="min-w-0 flex-1">
         {t.href ? (
-          <a href={t.href} className="text-sm font-medium underline-offset-2 hover:underline">
+          <Link href={t.href} className="text-sm font-medium underline-offset-2 hover:underline">
             {t.title}
-          </a>
+          </Link>
         ) : (
           <p className="text-sm font-medium">{t.title}</p>
         )}
@@ -121,7 +157,10 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: numb
       </button>
       <span
         className={cn("dd-toast-progress absolute bottom-0 left-0 h-0.5 w-full", style.bar)}
-        style={{ animationDuration: `${AUTO_DISMISS_MS}ms` }}
+        style={{
+          animationDuration: `${AUTO_DISMISS_MS}ms`,
+          animationPlayState: paused ? "paused" : "running",
+        }}
       />
     </div>
   );

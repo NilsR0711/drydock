@@ -298,9 +298,8 @@ body {
 .dd-toast-progress {
   transform-origin: left center;
   animation: dd-toast-progress linear forwards;
-}
-.dd-toast:hover .dd-toast-progress {
-  animation-play-state: paused;
+  /* Pause is driven inline by ToastItem's `paused` state (hover or keyboard
+     focus) so the bar and the JS dismiss timer stop and resume in lockstep. */
 }
 
 /* Skeleton shimmer */
