@@ -78,6 +78,14 @@ export function transitionJob(
     const now = Math.floor(Date.now() / 1000);
     const extra: Partial<Job> = {};
     if (to === "working" && !job.startedAt) extra.startedAt = now;
+    // A job re-entering the active lifecycle (requeue after needs_human/
+    // interrupted/waiting_limit) must shed the previous attempt's terminal
+    // stamp and error, or consumers that treat a non-null finishedAt as "the
+    // job has ended" — the jobs list duration, the live metrics ticker, and
+    // analytics' completed-job count — keep reporting the parked attempt
+    // while the requeued job is actively working again (issue #381).
+    if (to === "queued" || to === "working") extra.finishedAt = null;
+    if (to === "queued") extra.errorMessage = null;
     if (isFinishedState(to)) extra.finishedAt = now;
     const updated = tx
       .update(jobs)

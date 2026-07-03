@@ -246,7 +246,8 @@ async function resumeLimitParkedJobs(
   const parked = listJobsByStatus(["waiting_limit"], db).filter((j) => j.agent === agent);
   for (const job of parked) {
     try {
-      transitionJob(job.id, "queued", { availableAt: null, errorMessage: null }, db);
+      // errorMessage is cleared centrally by transitionJob's queued handling (issue #381).
+      transitionJob(job.id, "queued", { availableAt: null }, db);
       recordEvent(job.id, "status", { reason: `${agent}_limit_cleared` }, db);
     } catch (err) {
       // A concurrent operator action (abort, manual requeue) settled the job
