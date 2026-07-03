@@ -522,6 +522,16 @@ header (a CSRF guard — a browser cannot forge it), and additionally a matching
 `x-drydock-control-token` when `DRYDOCK_CONTROL_TOKEN` is set. See
 [ADR 036](adr/036-desktop-menu-bar-shell.md).
 
+### Host/Origin guard
+
+Loopback binding stops non-loopback network connections, but not DNS rebinding: a page open in the
+operator's browser can rebind an attacker hostname to `127.0.0.1` and query the unauthenticated GET
+API surface (dashboard SSE, job SSE, cost export, health) from its own script. `src/proxy.ts` rejects
+any `/api/*` GET/HEAD request whose `Host` (and, if present, `Origin`) isn't `127.0.0.1`, `localhost`,
+`[::1]`, or the host configured via `DRYDOCK_ALLOW_REMOTE`'s `--host`, with `403`. Mutating routes are
+unaffected (they already authenticate themselves) and normal browser access is unaffected. See
+[ADR 041](adr/041-dns-rebinding-guard.md).
+
 ### Background daemon
 
 `drydock start` launches the server detached from the terminal and returns immediately, so closing
