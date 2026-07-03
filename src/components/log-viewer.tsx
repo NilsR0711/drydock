@@ -235,6 +235,56 @@ export function formatLogForClipboard(lines: LogLine[]): string {
     .join("\n");
 }
 
+/**
+ * Build the screen-reader announcement for a batch of newly-arrived log rows
+ * (issue #403). The virtualized list is not a live region — its constant
+ * mount/unmount churn as the viewport moves would make a screen reader announce
+ * old rows on scroll and every chunk during a live run. Instead, this collapses
+ * one batch of genuinely new rows into a single human-scale line for a separate,
+ * throttled `sr-only` announcer.
+ *
+ * A single salient line is chosen by priority so announcements stay low-volume:
+ *   1. Errors — the actionable signal, surfaced even amid churn (and over a
+ *      co-occurring terminal event, since the message is what a user must act on).
+ *   2. Terminal events — the run ended (result / agent exit / a status
+ *      transition into a parked/terminal state).
+ *   3. A non-terminal status transition — the latest target state.
+ *   4. Otherwise the high-frequency chunk rows collapse into an "N new events"
+ *      digest.
+ * Returns "" when there is nothing worth announcing.
+ */
+export function summarizeNewActivity(newLines: LogLine[]): string {
+  if (newLines.length === 0) return "";
+
+  const errors = newLines.filter((l) => l.type === "error");
+  const firstError = errors[0];
+  if (firstError) {
+    if (errors.length > 1) return `${errors.length} errors.`;
+    const msg = field(firstError.payload, "message") ?? field(firstError.payload, "stderr");
+    return msg ? `Error: ${msg}.` : "Error.";
+  }
+
+  const terminal = newLines.find((l) => isTerminalLogEvent(l.type, l.payload));
+  if (terminal) {
+    if (terminal.type === "claude_exit") return "Agent exited.";
+    if (terminal.type === "status") {
+      const to = field(terminal.payload, "to");
+      return to ? `Job ${to.replace(/_/g, " ")}.` : "Job finished.";
+    }
+    return "Job complete.";
+  }
+
+  const statuses = newLines.filter((l) => l.type === "status" && field(l.payload, "to"));
+  const lastStatus = statuses[statuses.length - 1];
+  if (lastStatus) {
+    const to = field(lastStatus.payload, "to");
+    if (to) return `Status: ${to.replace(/_/g, " ")}.`;
+  }
+
+  const n = newLines.length;
+  return `${n} new log ${n === 1 ? "event" : "events"}`;
+}
+
 /** Pretty-print a single event payload, shaped per event type. */
 function PayloadView({ type, payload }: { type: string; payload: unknown }) {
   if (type === "text") {
@@ -390,6 +440,14 @@ function LogRow({ line, showClock }: { line: LogLine; showClock: boolean }) {
 }
 
 /**
+ * How often the screen-reader announcer may speak (issue #403). New rows that
+ * arrive within one window are batched into a single trailing announcement, so
+ * a live run produces a periodic human-scale digest instead of a per-chunk
+ * firehose.
+ */
+export const ANNOUNCE_INTERVAL_MS = 4000;
+
+/**
  * Live log viewer. Subscribes to the SSE endpoint and renders events in a
  * virtualized list (react-virtuoso) so long runs stay smooth. Events are shown
  * newest-first (reverse-chronological), so the latest agent activity stays at
@@ -431,6 +489,18 @@ export function LogViewer({
   const virtuoso = useRef<VirtuosoHandle>(null);
   const hydrated = useHydrated();
   const { success, error } = useToast();
+
+  // Screen-reader announcer (issue #403). The virtualized list is aria-live="off"
+  // (its mount/unmount churn would spam a screen reader on scroll and during
+  // live runs), so a separate visually-hidden polite region carries a throttled,
+  // human-scale summary of genuinely new rows. `announcedCount` seeds at the
+  // replayed-history length so the initial render — and any later scroll, which
+  // never changes `lines` — stays silent.
+  const [announcement, setAnnouncement] = useState("");
+  const announcedCount = useRef(lines.length);
+  const linesRef = useRef(lines);
+  linesRef.current = lines;
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // A finished job has all its events in `initial` — don't open a stream.
@@ -477,6 +547,36 @@ export function LogViewer({
     if (!autoscroll || visible.length === 0) return;
     virtuoso.current?.scrollToIndex({ index: 0, behavior: "smooth" });
   }, [autoscroll, visible.length]);
+
+  // Trailing-throttle the announcer: when new rows arrive, schedule one flush at
+  // most every ANNOUNCE_INTERVAL_MS that collapses everything accumulated since
+  // the last flush into a single line. The timer reads the latest rows via
+  // `linesRef`, so a burst mid-window still announces as one digest.
+  useEffect(() => {
+    if (flushTimer.current) return;
+    if (lines.length <= announcedCount.current) return;
+    flushTimer.current = setTimeout(() => {
+      flushTimer.current = null;
+      const all = linesRef.current;
+      if (all.length <= announcedCount.current) return;
+      const fresh = all.slice(announcedCount.current);
+      announcedCount.current = all.length;
+      const summary = summarizeNewActivity(fresh);
+      if (summary) setAnnouncement(summary);
+    }, ANNOUNCE_INTERVAL_MS);
+  }, [lines]);
+
+  // Drop any pending announcement when the viewer unmounts. Null the ref too so
+  // a StrictMode remount (dev) can schedule again instead of seeing a stale id.
+  useEffect(
+    () => () => {
+      if (flushTimer.current) {
+        clearTimeout(flushTimer.current);
+        flushTimer.current = null;
+      }
+    },
+    [],
+  );
 
   function toggleType(t: string) {
     setHidden((prev) => {
@@ -569,9 +669,20 @@ export function LogViewer({
         </div>
       )}
 
+      {/* Throttled, human-scale announcer (issue #403). Lives outside the
+          virtualized list so scroll/mount churn is never announced — only
+          genuinely new activity, summarized. */}
+      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {announcement}
+      </div>
+
       <div
         role="log"
-        aria-live="polite"
+        // The virtualized subtree must not be a live region: react-virtuoso
+        // mounts/unmounts rows as the viewport moves, which a polite `role="log"`
+        // would announce as new content on every scroll (issue #403). The
+        // sr-only announcer above carries live updates instead.
+        aria-live="off"
         aria-label="Job log stream"
         className="h-[460px] bg-background/40 px-1 py-1 font-mono text-xs"
       >
