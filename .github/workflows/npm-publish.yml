@@ -1,9 +1,13 @@
 name: Publish to npm
 
-# Single source of truth for publishing. Triggered two ways:
-#   • workflow_dispatch — manual publish of the version currently on the chosen
-#     ref (used for the first release and ad-hoc/recovery publishes).
-#   • workflow_call — reused by release-please.yml after it cuts a release.
+# Single source of truth for publishing, and the only workflow registered as an
+# npm trusted publisher for @nilsr0711/drydock. Triggered by workflow_dispatch:
+# the first release and ad-hoc/recovery publishes run it by hand, and
+# release-please.yml dispatches it (with the freshly cut tag as `ref`) after it
+# cuts a release. It is deliberately NOT reusable (workflow_call): npm validates
+# the workflow that runs the publish, so this must be the one that actually
+# runs — being *called* from release-please.yml made that the validated workflow
+# and failed auth (ENEEDAUTH).
 on:
   workflow_dispatch:
     inputs:
@@ -11,12 +15,6 @@ on:
         description: "Git ref (tag/branch) to publish — defaults to the run's ref"
         required: false
         default: ""
-  workflow_call:
-    inputs:
-      ref:
-        description: "Git ref (tag) to publish"
-        type: string
-        required: true
 
 concurrency:
   group: npm-publish
