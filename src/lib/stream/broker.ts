@@ -2,6 +2,7 @@ import { and, desc, eq, gt } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { type JobEvent, jobEvents } from "@/lib/db/schema";
 import { redactSecrets } from "@/lib/log/redact";
+import { globalSingleton } from "@/lib/util/global-singleton";
 
 export interface BrokerEvent {
   type: string;
@@ -133,8 +134,17 @@ export class LogBroker {
   }
 }
 
-let singleton: LogBroker | undefined;
+/**
+ * The shared broker lives on `globalThis`, not in a module-local binding,
+ * because Next.js compiles Server Actions, Route Handlers, and instrumentation
+ * into separate bundle layers that each evaluate this module independently
+ * (issue #379). Agent sessions publish from the orchestrator layer; the SSE
+ * route subscribes from a Route Handler layer. A module-local singleton would
+ * give each layer its own broker, so the route's subscribers would never see the
+ * orchestrator's live events — the SSE tail would go silent after the DB replay.
+ * A process-global broker is the one fan-out every layer shares.
+ */
+const BROKER_KEY = Symbol.for("drydock.stream.broker");
 export function getBroker(): LogBroker {
-  if (!singleton) singleton = new LogBroker();
-  return singleton;
+  return globalSingleton(BROKER_KEY, () => new LogBroker());
 }
