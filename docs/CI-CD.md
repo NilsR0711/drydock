@@ -17,6 +17,16 @@ lint, typecheck, build, and standalone smoke test run on ubuntu only.
 Superseded runs on the same ref are cancelled (`concurrency` with
 `cancel-in-progress: true`).
 
+The suite runs with a small **CI-only retry budget** (`retry: 2` when `CI` is
+set, `0` locally — see `vitest.retry.ts`, issue #393). A few
+timing/parallelism-sensitive suites — real filesystem watchers and `:memory:`
+databases exercised under load — occasionally fail as false negatives on shared
+runners; a retry lets an intermittent flake re-run instead of blocking a merge.
+Because the same suite gates `npm publish` through `prepublishOnly`, this also
+stops a lone flake from aborting a release mid-flow. Locally the budget is `0`,
+so flakiness surfaces immediately, and a genuinely failing test still fails on
+every attempt — the publish gate is unchanged.
+
 A separate **coverage** step (`pnpm test:coverage`, issue #389) runs on a single
 leg (ubuntu, Node 24) so the full suite is not re-instrumented across the whole
 matrix. It uses the `v8` provider scoped to `src/lib/**` (config in

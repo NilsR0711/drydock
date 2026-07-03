@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
+import { ciRetries } from "./vitest.retry";
 
 export default defineConfig({
   test: {
@@ -7,6 +8,11 @@ export default defineConfig({
     include: ["tests/**/*.test.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
     globals: true,
     css: false,
+    // A few timing/parallelism-sensitive suites can flake on loaded CI runners,
+    // and those same suites gate `npm publish` via `prepublishOnly` — a single
+    // false negative blocks a merge or aborts a release (issue #393). Retry only
+    // under CI; locally, surface flakiness immediately. See vitest.retry.ts.
+    retry: ciRetries(process.env),
     // Coverage is opt-in via `pnpm test:coverage` (issue #389); the default
     // `pnpm test` run stays uninstrumented and fast. Scoped to the library
     // code so the report focuses on the logic that matters, not framework
