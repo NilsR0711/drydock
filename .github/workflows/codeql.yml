@@ -20,6 +20,7 @@ jobs:
     # this `if:` guard so the scheduled scan runs unconditionally too.
     if: github.event.repository.visibility == 'public'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       security-events: write
