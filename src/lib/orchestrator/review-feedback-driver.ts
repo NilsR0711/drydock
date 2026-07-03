@@ -9,6 +9,7 @@ import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { withPriority } from "@/lib/github/priority";
 import { logError } from "@/lib/log/logger";
 import { repoAutomation } from "@/lib/repos/automation";
+import { getSettings } from "@/lib/settings/service";
 import { globalSingleton } from "@/lib/util/global-singleton";
 import { commandForAgent } from "./agent-command";
 import { spawnAgentSession } from "./agent-session";
@@ -245,6 +246,14 @@ async function defaultProcessJob(repo: Repo, job: Job, forge: ForgeClient): Prom
   const provider = getAgentProvider(job.agent);
   const command = commandForAgent(provider, db);
   const worktrees = new WorktreeManager();
+  // Bound the side session exactly like the main job run (issue #383): a per-repo
+  // override wins, else the global default. Without these a hung feedback-fix CLI
+  // is awaited forever (agent-session short-circuits to a bare `handle.done` when
+  // neither bound is set), which freezes the whole driver tick and never frees
+  // the slot — the tick only reschedules after this sweep returns.
+  const settings = getSettings(db);
+  const timeoutMs = (repo.maxJobMinutes ?? settings.maxJobMinutes) * 60_000;
+  const costCapUsd = repo.maxJobCostUsd ?? settings.maxJobCostUsd;
 
   const applyFeedback = buildAgentApply({
     repo,
@@ -259,6 +268,8 @@ async function defaultProcessJob(repo: Repo, job: Job, forge: ForgeClient): Prom
         provider,
         command,
         sideSession: true,
+        timeoutMs,
+        costCapUsd,
         // Native-build repos (#283) opt out of the sandbox via this flag; without
         // it the side session falls back to acceptEdits and bash/xcodebuild/simctl
         // are blocked, so review feedback that needs a real build silently fails
