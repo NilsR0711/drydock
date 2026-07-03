@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderGit2, Info, Plus } from "lucide-react";
+import { FolderGit2, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { AddRepoForm } from "@/components/add-repo-form";
@@ -16,7 +16,7 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Sparkline } from "@/components/ui/sparkline";
 import { useToast } from "@/components/ui/toast";
-import { Tooltip } from "@/components/ui/tooltip";
+import { HelpTip } from "@/components/ui/tooltip";
 import type { DashboardSnapshot } from "@/lib/db/queries";
 import { installAudioUnlock, playChime } from "@/lib/ui/chime";
 import {
@@ -217,9 +217,7 @@ export function DashboardLive({
           <Card pad="lg">
             <div className="mb-1 flex items-center justify-between">
               <h3 className="text-base font-semibold">Daily budget</h3>
-              <Tooltip content="Combined spend today against the sum of per-repo daily limits. Turns amber at 80%, red near the cap.">
-                <Info className="h-3.5 w-3.5 text-muted-foreground" />
-              </Tooltip>
+              <HelpTip content="Combined spend today against the sum of per-repo daily limits. Turns amber at 80%, red near the cap." />
             </div>
             <div className="mt-2 flex justify-center">
               <BudgetGauge value={summary.spendToday} limit={limit} />
