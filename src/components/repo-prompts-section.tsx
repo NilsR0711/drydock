@@ -158,6 +158,7 @@ function RepoPromptCard({ repo, stage }: { repo: Repo; stage: StageDef }) {
           <p className="text-xs text-muted-foreground">{stage.desc}</p>
         </div>
         <SegmentedControl
+          label={`${stage.title} prompt mode`}
           value={mode}
           onChange={changeMode}
           disabled={!loaded || pending}

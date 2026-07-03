@@ -147,6 +147,7 @@ export function PromptEditor({
             </Field>
             <Field label="Template">
               <SegmentedControl
+                label="Prompt template"
                 value={name}
                 onChange={(v) => {
                   setName(v);
