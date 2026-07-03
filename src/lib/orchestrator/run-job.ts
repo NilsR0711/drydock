@@ -1086,11 +1086,16 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       // Preserve the branch + commits. A questions-only run with no other
       // change leaves nothing to push (EmptyCommitError) — that is fine; there
       // is simply no partial work to keep, so park on the questions alone.
+      // Track whether the push actually happened: an unpushed branch must
+      // never be recorded on the job, or a later instruction-guided resume
+      // fetches a ref that was never pushed and dead-loops (issue #380).
+      let pushed = false;
       try {
         await worktrees.commitAndPush(
           wt,
           `Partial work for #${job.issueNumber} (parked for review)`,
         );
+        pushed = true;
       } catch (err) {
         if (!(err instanceof EmptyCommitError)) throw err;
       }
@@ -1109,12 +1114,9 @@ async function runJobCore(jobId: number, deps: RunJobDeps, send: NotifyEvent): P
       } catch (err) {
         logError(`[run-job] needs-human label failed for job ${job.id}`, err);
       }
-      return transitionJob(
-        job.id,
-        "needs_human",
-        { errorMessage: "agent has open questions", branch: wt.branch },
-        db,
-      );
+      const patch: Partial<Job> = { errorMessage: "agent has open questions" };
+      if (pushed) patch.branch = wt.branch;
+      return transitionJob(job.id, "needs_human", patch, db);
     }
 
     // Per-repo ADR gate: hold the merge while ADRs await review (SPEC opt-in).
