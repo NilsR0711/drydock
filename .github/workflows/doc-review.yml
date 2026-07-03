@@ -23,7 +23,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
@@ -46,60 +46,24 @@ jobs:
           echo "docs_changed=$docs_changed" >> "$GITHUB_OUTPUT"
 
       - name: Post or update reminder
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           SRC_CHANGED: ${{ steps.diff.outputs.src_changed }}
           DOCS_CHANGED: ${{ steps.diff.outputs.docs_changed }}
+          # `head.repo.full_name` differs from the repo for fork PRs, whose
+          # GITHUB_TOKEN is read-only. The reminder logic degrades to the job
+          # summary in that case so the check stays green (issue #392).
+          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
         with:
           script: |
-            const marker = '<!-- doc-review-reminder -->';
-            const srcChanged = process.env.SRC_CHANGED === 'true';
-            const docsChanged = process.env.DOCS_CHANGED === 'true';
-            const needsReminder = srcChanged && !docsChanged;
-
-            const { owner, repo } = context.repo;
-            const issue_number = context.payload.pull_request.number;
-
-            const comments = await github.paginate(
-              github.rest.issues.listComments,
-              { owner, repo, issue_number, per_page: 100 },
-            );
-            const existing = comments.find(
-              (c) => c.user?.type === 'Bot' && c.body?.includes(marker),
-            );
-
-            if (!needsReminder) {
-              // Nothing to remind about. Clean up a stale reminder if docs
-              // were added in a later push so the thread stays tidy.
-              if (existing && srcChanged && docsChanged) {
-                const resolved = `${marker}\n\n✅ Docs were updated alongside the source changes — thanks!`;
-                if (existing.body !== resolved) {
-                  await github.rest.issues.updateComment({
-                    owner, repo, comment_id: existing.id, body: resolved,
-                  });
-                }
-              }
-              return;
-            }
-
-            const body = [
-              marker,
-              '',
-              '📝 **Documentation reminder**',
-              '',
-              'This PR changes files under `src/` but does not touch `docs/`.',
-              'If the change affects behaviour, configuration, or public surface,',
-              'please update the relevant docs. This is a reminder, not a blocker.',
-            ].join('\n');
-
-            if (existing) {
-              if (existing.body !== body) {
-                await github.rest.issues.updateComment({
-                  owner, repo, comment_id: existing.id, body,
-                });
-              }
-            } else {
-              await github.rest.issues.createComment({
-                owner, repo, issue_number, body,
-              });
-            }
+            const { pathToFileURL } = require('node:url');
+            const modulePath = `${process.env.GITHUB_WORKSPACE}/.github/scripts/doc-review-reminder.mjs`;
+            const { default: docReviewReminder } = await import(pathToFileURL(modulePath).href);
+            await docReviewReminder({
+              github,
+              context,
+              core,
+              srcChanged: process.env.SRC_CHANGED === 'true',
+              docsChanged: process.env.DOCS_CHANGED === 'true',
+              isFork: process.env.IS_FORK === 'true',
+            });

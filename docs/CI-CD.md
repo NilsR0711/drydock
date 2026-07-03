@@ -3,6 +3,23 @@
 All automation lives in `.github/workflows/`. Workflows are scoped to the
 `master` branch and pull requests targeting it.
 
+## Action pinning
+
+Every external `uses:` reference is pinned to a full 40-character commit SHA with
+a trailing `# vX.Y.Z` comment, e.g. `actions/checkout@9c091bb…e0 # v7.0.0`
+(issue #391). A mutable major tag (`@v7`) can be moved or force-pushed, which
+would let a compromised action repo run attacker-controlled code with whatever
+permissions the job holds — most sensitive in `npm-publish.yml` (`id-token:
+write`, the OIDC token that publishes to npm) and `release-please.yml`
+(`contents: write` / `pull-requests: write`). Pinning to a SHA removes that
+trust assumption entirely. Dependabot's weekly `github-actions` group
+(`.github/dependabot.yml`) understands SHA pins and bumps the SHA and its version
+comment together, so the pins stay current for free. A local reusable-workflow
+reference (`uses: ./…`) resolves within this repo at the checked-out commit and
+would be left as a repo-relative path, not a SHA; there is none at present, since
+`release-please.yml` dispatches `npm-publish.yml` rather than calling it. The
+`workflow-action-pins` test guards the convention against regression.
+
 ## `ci.yml` — Verify
 
 Runs on every push to `master` and every PR over an OS × Node matrix —
@@ -16,6 +33,16 @@ signal timing — that predate and are unrelated to this work. The OS-independen
 lint, typecheck, build, and standalone smoke test run on ubuntu only.
 Superseded runs on the same ref are cancelled (`concurrency` with
 `cancel-in-progress: true`).
+
+The suite runs with a small **CI-only retry budget** (`retry: 2` when `CI` is
+set, `0` locally — see `vitest.retry.ts`, issue #393). A few
+timing/parallelism-sensitive suites — real filesystem watchers and `:memory:`
+databases exercised under load — occasionally fail as false negatives on shared
+runners; a retry lets an intermittent flake re-run instead of blocking a merge.
+Because the same suite gates `npm publish` through `prepublishOnly`, this also
+stops a lone flake from aborting a release mid-flow. Locally the budget is `0`,
+so flakiness surfaces immediately, and a genuinely failing test still fails on
+every attempt — the publish gate is unchanged.
 
 A separate **coverage** step (`pnpm test:coverage`, issue #389) runs on a single
 leg (ubuntu, Node 24) so the full suite is not re-instrumented across the whole
@@ -80,10 +107,12 @@ The single source of truth for publishing `@nilsr0711/drydock`, and the only
 workflow registered as an npm trusted publisher for the package. Triggered by
 `workflow_dispatch`: the first release and ad-hoc/recovery publishes run it by
 hand (publishing the version on the chosen `ref`), and `release-please.yml`
-dispatches it with the freshly cut tag after it cuts a release. It upgrades npm
-to `>= 11.5.1` and runs `npm publish --access public`; `npm publish` first runs
-the `prepublishOnly` gate (`pnpm test && pnpm build && pnpm smoke`), so a build
-that fails to boot the standalone server never ships (issue #209).
+dispatches it with the freshly cut tag after it cuts a release. It installs a
+pinned npm (`>= 11.5.1`, an exact version rather than a floating `npm@latest`, so
+releases stay reproducible and immune to a future npm major — issue #395) and
+runs `npm publish --access public`; `npm publish` first runs the `prepublishOnly`
+gate (`pnpm test && pnpm build && pnpm smoke`), so a build that fails to boot the
+standalone server never ships (issue #209).
 Authentication is tokenless via **npm trusted publishing** (OIDC,
 `id-token: write`) — no `NPM_TOKEN` secret — and provenance is attached
 automatically. npm validates the workflow that runs the publish, so this is
@@ -99,5 +128,14 @@ update the docs. The comment is **idempotent**: it is keyed by a hidden marker,
 so re-runs update the existing comment instead of posting a new one. If a later
 push adds docs, the reminder is replaced with a confirmation. This is a nudge,
 not a merge blocker.
+
+**Fork PRs** run with a read-only `GITHUB_TOKEN` — GitHub caps it regardless of
+the job's `pull-requests: write` request — so the comment API would `403`. To
+keep the check green for outside contributors, the reminder degrades gracefully:
+on a fork PR it is written to the **job summary** (and the run log) instead of a
+PR comment. The write path is also wrapped so any future permission surprise
+logs a warning rather than failing the job. The reminder logic lives in
+[`.github/scripts/doc-review-reminder.mjs`](../.github/scripts/doc-review-reminder.mjs)
+so it can be unit-tested (`tests/doc-review-reminder.test.ts`).
 
 [rp]: https://github.com/googleapis/release-please-action
