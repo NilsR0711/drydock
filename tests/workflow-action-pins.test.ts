@@ -95,8 +95,11 @@ describe("workflow action pinning (issue #391)", () => {
   });
 
   it("leaves local reusable-workflow references as repo-relative paths", () => {
-    // Documents the intentional exception: `release-please.yml` calls
-    // `./.github/workflows/npm-publish.yml`, which cannot and must not be pinned.
+    // Documents the intentional exception for `uses: ./…` references, which
+    // resolve within this repo at the checked-out commit and cannot be pinned to
+    // a SHA. There are none at present — release-please.yml dispatches
+    // npm-publish.yml rather than calling it — so this guards the convention in
+    // case one is reintroduced.
     for (const local of localRefs) {
       expect(local.ref).toMatch(/^\.\.?\/.*\.ya?ml$/);
     }

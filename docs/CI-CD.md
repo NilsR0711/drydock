@@ -14,9 +14,10 @@ write`, the OIDC token that publishes to npm) and `release-please.yml`
 (`contents: write` / `pull-requests: write`). Pinning to a SHA removes that
 trust assumption entirely. Dependabot's weekly `github-actions` group
 (`.github/dependabot.yml`) understands SHA pins and bumps the SHA and its version
-comment together, so the pins stay current for free. Local reusable-workflow
-references (`uses: ./.github/workflows/npm-publish.yml`) resolve within this repo
-at the checked-out commit and are intentionally left as paths. The
+comment together, so the pins stay current for free. A local reusable-workflow
+reference (`uses: ./…`) resolves within this repo at the checked-out commit and
+would be left as a repo-relative path, not a SHA; there is none at present, since
+`release-please.yml` dispatches `npm-publish.yml` rather than calling it. The
 `workflow-action-pins` test guards the convention against regression.
 
 ## `ci.yml` — Verify
@@ -67,18 +68,20 @@ once the repo is public.
 
 ## `release-please.yml` — Releases
 
-Turns Conventional Commits into release PRs. Releases are **manual**: this
-workflow runs on `workflow_dispatch` only (Actions tab or
-`gh workflow run release-please.yml`). When you trigger it, [release-please][rp]
-opens/updates a single "release" PR that bumps the version in `package.json` and
-updates `CHANGELOG.md`; merging that PR creates the matching git tag and GitHub
-release.
+Turns Conventional Commits into release PRs. Releases stay **deliberate**: you
+trigger this workflow manually (Actions tab or
+`gh workflow run release-please.yml`) and [release-please][rp] opens/updates a
+single "release" PR that bumps the version in `package.json` and updates
+`CHANGELOG.md`. No release PR appears just because a feature merged.
 
-So releasing stays a deliberate, manual step — no release PR appears just because
-a feature merged. But once you decide to release, the changelog is generated for
-you: trigger release-please → review the release PR → merge it → the changelog
-entry, tag, GitHub release, **and** the npm publish all happen from that one
-merge.
+Merging that release PR pushes the version bump and `CHANGELOG.md` to `master`,
+and the workflow also runs on that push — scoped with a `paths` filter to
+`CHANGELOG.md` and `.release-please-manifest.json`, the only two files a release
+PR touches, so ordinary feature merges never trigger it. That run creates the
+matching git tag and GitHub release **and** dispatches `npm-publish.yml` (see
+below) with the new tag to publish to npm. So the changelog entry, tag, GitHub
+release, and npm publish all happen from that one merge — no second manual
+dispatch.
 
 Configuration:
 
@@ -92,25 +95,29 @@ discipline is needed. Commits that should appear in the changelog use `feat:` or
 `fix:`; everything else is grouped under "Miscellaneous".
 
 When release-please reports that a release was created (`release_created`), it
-reuses the **`npm-publish.yml`** workflow (via `workflow_call`) to publish the
-new tag — see below.
+**dispatches** the **`npm-publish.yml`** workflow (via `gh workflow run`, a
+`workflow_dispatch` that is exempt from the `GITHUB_TOKEN` recursion guard) with
+the new tag to publish it — see below. It dispatches rather than calls that
+workflow so npm validates the workflow that actually runs the publish; only
+`npm-publish.yml` is registered as a trusted publisher.
 
 ## `npm-publish.yml` — npm publish
 
-The single source of truth for publishing `@nilsr0711/drydock`. Triggered two
-ways: `workflow_dispatch` (manual publish of the version on the chosen ref —
-used for the first release and ad-hoc/recovery publishes) and `workflow_call`
-(reused by `release-please.yml` after it cuts a release). It installs a pinned
-npm (`>= 11.5.1`, an exact version rather than a floating `npm@latest`, so
+The single source of truth for publishing `@nilsr0711/drydock`, and the only
+workflow registered as an npm trusted publisher for the package. Triggered by
+`workflow_dispatch`: the first release and ad-hoc/recovery publishes run it by
+hand (publishing the version on the chosen `ref`), and `release-please.yml`
+dispatches it with the freshly cut tag after it cuts a release. It installs a
+pinned npm (`>= 11.5.1`, an exact version rather than a floating `npm@latest`, so
 releases stay reproducible and immune to a future npm major — issue #395) and
-runs `npm publish --access public`; `npm publish` first runs the
-`prepublishOnly` gate (`pnpm test && pnpm build && pnpm smoke`), so a build that
-fails to boot the standalone server never ships (issue #209).
+runs `npm publish --access public`; `npm publish` first runs the `prepublishOnly`
+gate (`pnpm test && pnpm build && pnpm smoke`), so a build that fails to boot the
+standalone server never ships (issue #209).
 Authentication is tokenless via **npm trusted publishing** (OIDC,
 `id-token: write`) — no `NPM_TOKEN` secret — and provenance is attached
-automatically. For reusable workflows npm validates the *calling* workflow, so
-both `release-please.yml` and `npm-publish.yml` are registered as trusted
-publishers for the package on npmjs. See
+automatically. npm validates the workflow that runs the publish, so this is
+deliberately not a reusable (`workflow_call`) workflow: it must be the workflow
+that actually runs, not one called by another. See
 [ADR 026](adr/026-npm-package-and-cli-launcher.md).
 
 ## `doc-review.yml` — Documentation reminder

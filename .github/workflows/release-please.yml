@@ -1,13 +1,23 @@
 name: Release Please
 
-# Releases are cut manually: trigger this workflow from the Actions tab (or
-# `gh workflow run release-please.yml`) when you want to release. release-please
-# then opens/updates a "release" PR with the next version + CHANGELOG entry;
-# merging that PR cuts the tag and GitHub release and, via the publish job below,
-# publishes to npm — changelog and release produced together, but only when you
-# choose to release.
+# Releases stay deliberate. Trigger this workflow manually (Actions tab or
+# `gh workflow run release-please.yml`) and release-please opens/updates a
+# "release" PR with the next version + CHANGELOG entry — no release PR appears
+# just because a feature merged. Merging that PR pushes the version bump +
+# CHANGELOG.md to master, which re-runs this workflow through the `push` trigger
+# below (scoped to the release artifacts so ordinary merges never trigger it).
+# That run cuts the git tag and GitHub release and dispatches npm-publish.yml to
+# publish — everything from the one merge, no second manual dispatch.
 on:
   workflow_dispatch:
+  push:
+    branches: [master]
+    # Only the two files a release PR touches, so a plain feature merge never
+    # cuts a release: release-please updates the PR on dispatch, and the tag is
+    # cut only when the version bump + changelog land on master.
+    paths:
+      - CHANGELOG.md
+      - .release-please-manifest.json
 
 # Only one release run at a time; never cancel an in-flight release.
 concurrency:
@@ -36,22 +46,33 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  # When a release is cut, reuse the single publish definition (npm-publish.yml)
-  # to push the tag to npm. Auth is via OIDC trusted publishing (tokenless), so
-  # no secrets are forwarded. Manual/first publishes call the same workflow via
-  # workflow_dispatch. npm validates the *calling* workflow for reusable
-  # workflows, so both release-please.yml and npm-publish.yml are registered as
-  # trusted publishers for the package on npmjs.
+  # When a release is cut, publish it by *dispatching* npm-publish.yml with the
+  # new tag — not by calling it as a reusable workflow. npm trusted publishing
+  # validates the workflow that actually runs the publish, and only
+  # npm-publish.yml is registered as a trusted publisher (release-please.yml is
+  # not). Calling it via workflow_call made release-please.yml the validated
+  # workflow and failed auth (ENEEDAUTH) on every release; dispatching keeps
+  # npm-publish.yml the running, validated workflow. workflow_dispatch is exempt
+  # from the GITHUB_TOKEN recursion guard, so the default token can trigger it.
   publish:
-    name: Publish to npm
+    name: Dispatch npm publish
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
-    # The called workflow needs id-token: write to mint the OIDC token; a
-    # reusable-workflow caller must grant it here too (capped by this workflow's
-    # token), otherwise the run fails at startup validation.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/npm-publish.yml
-    with:
-      ref: ${{ needs.release-please.outputs.tag_name }}
+      actions: write
+    steps:
+      - name: Dispatch npm-publish.yml for the new tag
+        # All workflow-context values go through env, never interpolated into the
+        # shell command: git ref names may contain shell metacharacters.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          gh workflow run npm-publish.yml \
+            --repo "$REPO" \
+            --ref "$REF" \
+            -f ref="$TAG"
