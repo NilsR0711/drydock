@@ -13,7 +13,7 @@ import { agentSpawnEnv } from "./agent-command";
 import { transitionJob } from "./jobs";
 import { agentLimitBlocked } from "./provider-limit";
 import { recordCodexUsage, saveProviderUsage } from "./provider-usage";
-import { clearAbort, registerAbort } from "./singleton";
+import { registerAbort } from "./singleton";
 
 export interface AgentSessionDeps {
   runner?: StreamRunner;
@@ -453,13 +453,16 @@ export async function spawnAgentSession(
     }),
   );
 
-  registerAbort(job.id, handle.abort);
+  // Dispose by identity, not by job id: a concurrent session (e.g. a review-
+  // feedback side session on the same PR) may register its own handle under this
+  // same id, and clearing by id would drop that sibling's handle too (issue #384).
+  const disposeAbort = registerAbort(job.id, handle.abort);
   const { exitCode, timedOut, costExceeded } = await awaitBounded(handle, {
     timeoutMs: deps.timeoutMs,
     costTripped: guard?.tripped,
     graceMs: deps.graceMs,
   });
-  clearAbort(job.id);
+  disposeAbort();
   // Spawn errors (ENOENT etc.) are readable after done settles; not applicable
   // to the timeout/cost-exceeded paths where done may not have resolved yet.
   const spawnError = !timedOut && !costExceeded ? handle.spawnError : undefined;
@@ -650,13 +653,15 @@ export async function resumeAgentSession(
       allowedCommands: deps.allowedCommands,
     }),
   );
-  registerAbort(job.id, handle.abort);
+  // Dispose by identity so this resume can only ever remove its own handle,
+  // never a concurrently-registered side session's (issue #384).
+  const disposeAbort = registerAbort(job.id, handle.abort);
   const { exitCode, timedOut, costExceeded } = await awaitBounded(handle, {
     timeoutMs: deps.timeoutMs,
     costTripped: guard?.tripped,
     graceMs: deps.graceMs,
   });
-  clearAbort(job.id);
+  disposeAbort();
   const spawnError = !timedOut && !costExceeded ? handle.spawnError : undefined;
   if (timedOut) {
     broker.publish(job.id, {

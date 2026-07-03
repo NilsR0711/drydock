@@ -36,31 +36,82 @@ const STARTED_KEY = Symbol.for("drydock.orchestrator.started");
 const bootstrap = globalSingleton(STARTED_KEY, () => ({ started: false }));
 
 /**
- * Registry of running subprocess abort callbacks, keyed by job id.
+ * Registry of running subprocess abort callbacks, keyed by job id. Each job id
+ * maps to a *Set* of handles, not a single handle, because two agent sessions
+ * can legitimately run at once for one job — the CI babysitter's fix resume and
+ * a review-feedback side session on the same PR both key by the bare job id. A
+ * single-slot Map let the second registration silently overwrite the first, and
+ * whichever session finished first deleted whatever handle was in the slot,
+ * orphaning a still-running `claude` subprocess that Stop, emergency stop,
+ * external-abort reconciliation, and graceful shutdown could no longer reach
+ * (issue #384). A Set keyed per job id keeps every live session abortable, and
+ * disposing by handle identity means a finishing session removes only its own.
  *
- * Lives on `globalThis`, not in a module-local closure, for the same reason as
- * the dashboard bus (issue #232): Next.js compiles Server Actions, Route
- * Handlers, and instrumentation into separate bundle layers that each evaluate
- * this module independently. `registerAbort` runs in the orchestrator layer
- * that spawned the agent; the Stop/Abort Server Action runs in another. A
- * module-local Map would give the action its own empty registry, so `abortJob`
- * would find no handle and only flip the DB row to `aborted` — leaving the
- * agent subprocess running until the much-later driver-tick reconcile (and
- * never, if this process does not hold the driver lock). A process-global Map
- * is shared across every layer, so the action kills the subprocess directly.
+ * The registry lives on `globalThis`, not in a module-local closure, for the
+ * same reason as the dashboard bus (issue #232): Next.js compiles Server
+ * Actions, Route Handlers, and instrumentation into separate bundle layers that
+ * each evaluate this module independently. `registerAbort` runs in the
+ * orchestrator layer that spawned the agent; the Stop/Abort Server Action runs
+ * in another. A module-local Map would give the action its own empty registry,
+ * so `abortJob` would find no handle and only flip the DB row to `aborted` —
+ * leaving the agent subprocess running until the much-later driver-tick
+ * reconcile (and never, if this process does not hold the driver lock). A
+ * process-global Map is shared across every layer, so the action kills the
+ * subprocess directly.
  */
 type AbortHandle = (graceMs?: number) => void;
 const ABORT_HANDLES_KEY = Symbol.for("drydock.orchestrator.abort-handles");
-type GlobalWithAbort = typeof globalThis & { [ABORT_HANDLES_KEY]?: Map<number, AbortHandle> };
+type GlobalWithAbort = typeof globalThis & {
+  [ABORT_HANDLES_KEY]?: Map<number, Set<AbortHandle>>;
+};
 const globalWithAbort = globalThis as GlobalWithAbort;
-globalWithAbort[ABORT_HANDLES_KEY] ??= new Map<number, AbortHandle>();
-const abortHandles: Map<number, AbortHandle> = globalWithAbort[ABORT_HANDLES_KEY];
+globalWithAbort[ABORT_HANDLES_KEY] ??= new Map<number, Set<AbortHandle>>();
+const abortHandles: Map<number, Set<AbortHandle>> = globalWithAbort[ABORT_HANDLES_KEY];
 
-export function registerAbort(jobId: number, abort: (graceMs?: number) => void): void {
-  abortHandles.set(jobId, abort);
+/**
+ * Register a subprocess abort callback for a job and return a disposer that
+ * removes *only that handle*. A session must dispose via the returned function
+ * (not by job id) so that a session finishing can never drop a sibling
+ * session's still-live handle (issue #384).
+ */
+export function registerAbort(jobId: number, abort: AbortHandle): () => void {
+  let handles = abortHandles.get(jobId);
+  if (!handles) {
+    handles = new Set<AbortHandle>();
+    abortHandles.set(jobId, handles);
+  }
+  handles.add(abort);
+  return () => clearAbort(jobId, abort);
 }
-export function clearAbort(jobId: number): void {
-  abortHandles.delete(jobId);
+
+/**
+ * Remove a single previously-registered handle — the explicit form of the
+ * disposer returned by `registerAbort`. Removing the last handle for a job drops
+ * the now-empty Set so `abortJob` reports the job as no longer running.
+ */
+export function clearAbort(jobId: number, abort: AbortHandle): void {
+  const handles = abortHandles.get(jobId);
+  if (!handles) return;
+  handles.delete(abort);
+  if (handles.size === 0) abortHandles.delete(jobId);
+}
+
+/**
+ * Invoke every abort handle for a job, isolating per-handle failures so one
+ * throwing callback cannot leave a sibling session's subprocess running.
+ */
+function fireHandles(jobId: number, handles: Iterable<AbortHandle>, graceMs: number): void {
+  // Snapshot before invoking so a handle that disposes itself mid-flight cannot
+  // mutate the Set we are iterating.
+  for (const abort of [...handles]) {
+    try {
+      // Only invoke callables we registered, mirroring the original single-slot
+      // guard: a caller-supplied job id can then only ever fire our own handles.
+      if (typeof abort === "function") abort(graceMs);
+    } catch (err) {
+      logError(`[orchestrator] abort handle threw for job ${jobId}`, err);
+    }
+  }
 }
 
 const DEFAULT_ABORT_GRACE_MS = 5000;
@@ -70,19 +121,17 @@ const DEFAULT_ABORT_GRACE_MS = 5000;
 const IDLE_WAIT_MS = DEFAULT_ABORT_GRACE_MS + 3000;
 
 /**
- * Terminate the running agent subprocess for a single job by invoking its
- * registered abort handle (SIGTERM → SIGKILL after `graceMs`). Returns true if
- * a live handle was found and invoked, false otherwise. The handle is removed
- * so a repeat call is a no-op. Used by the manual Abort/Stop UI action so
- * marking a row `aborted` actually stops the agent (issue #89).
+ * Terminate every running agent subprocess for a single job by invoking all of
+ * its registered abort handles (SIGTERM → SIGKILL after `graceMs`). A job can
+ * carry more than one live session at a time (issue #384). Returns true if at
+ * least one live handle was found and invoked, false otherwise. The handles are
+ * removed so a repeat call is a no-op. Used by the manual Abort/Stop UI action
+ * so marking a row `aborted` actually stops the agent (issue #89).
  */
 export function abortJob(jobId: number, graceMs = DEFAULT_ABORT_GRACE_MS): boolean {
-  const abort = abortHandles.get(jobId);
-  // The job id reaches here from a server action argument; guard that the
-  // looked-up value is a callable we registered before invoking it, so a
-  // caller-supplied id can only ever fire one of our own abort handles.
-  if (typeof abort !== "function") return false;
-  abort(graceMs);
+  const handles = abortHandles.get(jobId);
+  if (!handles || handles.size === 0) return false;
+  fireHandles(jobId, handles, graceMs);
   abortHandles.delete(jobId);
   return true;
 }
@@ -115,7 +164,7 @@ export function reconcileExternalAborts(db: DB = getDb()): number[] {
  */
 export function abortAllJobs(graceMs = DEFAULT_ABORT_GRACE_MS): number[] {
   const ids = [...abortHandles.keys()];
-  for (const abort of abortHandles.values()) abort(graceMs);
+  for (const [jobId, handles] of abortHandles) fireHandles(jobId, handles, graceMs);
   abortHandles.clear();
   return ids;
 }
