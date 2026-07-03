@@ -160,7 +160,7 @@ reel — the **[full feature reference →](docs/FEATURES.md)** has every detail
 
 #### 🔌 Agents, forges & execution
 - **Pluggable agents** — `claude`, `codex`, or `opencode` (any provider/model via [models.dev](https://models.dev), incl. OpenRouter) per repo.
-- **GitHub & GitLab** — choose per repo; GitLab (cloud or self-hosted) needs no extra CLI.
+- **GitHub & GitLab** — choose per repo; GitLab (cloud or self-hosted) needs no extra CLI. Two autonomy features are GitHub-only for now — **PR review-feedback** and **release management** — because they rely on forge APIs the GitLab client doesn't implement yet; their toggles are disabled on GitLab repos rather than silently no-opping.
 - **Sandboxed execution** — run the agent inside a Docker/Podman container with the worktree as the only writable path, network off by default.
 - **Command allowlist / unrestricted shell** — pre-approve specific commands, or open full shell access for builds that need it (e.g. native Xcode).
 - **claude-mem memory consolidation** — as each job settles, its [claude-mem](https://github.com/thedotmack/claude-mem) memory is consolidated from the throwaway per-job worktree into the parent project — on every outcome, by default, best-effort (a no-op when claude-mem isn't installed).
