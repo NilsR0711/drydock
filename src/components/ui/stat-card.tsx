@@ -1,9 +1,8 @@
 import type { LucideIcon } from "lucide-react";
-import { Info } from "lucide-react";
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 import type { Tone } from "./badge";
-import { Tooltip } from "./tooltip";
+import { HelpTip } from "./tooltip";
 
 type StatToneStyle = { chip: string; val: string; bg: string };
 
@@ -50,23 +49,14 @@ export function StatCard({
   const t = STAT_TONE[tone];
   const inner = (
     <>
-      <div className="flex items-center justify-between">
-        <span
-          className={cn(
-            "flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
-            lit ? t.chip : "bg-secondary text-muted-foreground",
-          )}
-        >
-          {Icon && <Icon className="h-4 w-4" />}
-        </span>
-        {hint && (
-          <span className="text-muted-foreground/60">
-            <Tooltip content={hint}>
-              <Info className="h-3.5 w-3.5" />
-            </Tooltip>
-          </span>
+      <span
+        className={cn(
+          "flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
+          lit ? t.chip : "bg-secondary text-muted-foreground",
         )}
-      </div>
+      >
+        {Icon && <Icon className="h-4 w-4" />}
+      </span>
       <div>
         <div
           className={cn(
@@ -86,14 +76,29 @@ export function StatCard({
     "group relative flex flex-col gap-3 rounded-xl border border-card-border bg-card p-4 text-left shadow-sm transition-colors",
     lit && t.bg,
     onClick && "hover-elevate focus-ring",
+    Boolean(hint) && "h-full",
   );
 
-  if (onClick) {
-    return (
-      <button type="button" onClick={onClick} className={className}>
-        {inner}
-      </button>
-    );
-  }
-  return <div className={className}>{inner}</div>;
+  const card = onClick ? (
+    <button type="button" onClick={onClick} className={className}>
+      {inner}
+    </button>
+  ) : (
+    <div className={className}>{inner}</div>
+  );
+
+  if (!hint) return card;
+
+  // The hint's trigger is a focusable button, so it must not live inside the
+  // clickable card <button> (a <button> may not contain interactive/tabbable
+  // descendants — invalid HTML that also steals the card's activation). Pin it
+  // as a sibling in the top-right corner, vertically centred on the icon chip.
+  return (
+    <div className="relative h-full">
+      {card}
+      <div className="absolute right-4 top-6">
+        <HelpTip content={hint} />
+      </div>
+    </div>
+  );
 }

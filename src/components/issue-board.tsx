@@ -163,13 +163,15 @@ function Row({
       </button>
       {jobStatus && (
         <Tooltip content={`A ${jobStatus.replace(/_/g, " ")} job exists for this issue`}>
-          <Badge status={jobStatus} className="shrink-0" />
+          <Badge status={jobStatus} tabIndex={0} className="shrink-0 focus-ring" />
         </Tooltip>
       )}
       <div className="hidden shrink-0 items-center gap-1.5 md:flex">
         {issue.triagedAt && (
           <Tooltip content="Labels applied by auto-triage — see the issue comment for reasons">
-            <Badge tone="primary">auto-triaged</Badge>
+            <Badge tone="primary" tabIndex={0} className="focus-ring">
+              auto-triaged
+            </Badge>
           </Tooltip>
         )}
         {labels.slice(0, 2).map((l) => (
