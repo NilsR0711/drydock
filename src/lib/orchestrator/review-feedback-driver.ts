@@ -9,6 +9,7 @@ import { type Worktree, WorktreeManager } from "@/lib/git/worktree";
 import { withPriority } from "@/lib/github/priority";
 import { logError } from "@/lib/log/logger";
 import { repoAutomation } from "@/lib/repos/automation";
+import { globalSingleton } from "@/lib/util/global-singleton";
 import { commandForAgent } from "./agent-command";
 import { spawnAgentSession } from "./agent-session";
 import { listJobs } from "./jobs";
@@ -188,7 +189,18 @@ const defaultSweepRunner: SweepRunner = (repoId) =>
   withPriority("low", () => runReviewFeedbackSweep({ repoId }));
 
 let sweepRunner: SweepRunner = defaultSweepRunner;
-const pendingSweeps = new Map<number, ReturnType<typeof setTimeout>>();
+
+// The debounce registry lives on `globalThis`, matching the sweep chain above:
+// the cadence sweep debounces in the driver-loop layer while webhook-triggered
+// sweeps debounce in a Route Handler layer, and a module-local Map would let a
+// driver-tick sweep and a webhook sweep for the same repo schedule separately
+// instead of coalescing (issue #379). setTimeout/clearTimeout handles are
+// process-wide, so any layer can cancel a timer another layer scheduled.
+const PENDING_SWEEPS_KEY = Symbol.for("drydock.review-feedback.pending-sweeps");
+const pendingSweeps = globalSingleton(
+  PENDING_SWEEPS_KEY,
+  () => new Map<number, ReturnType<typeof setTimeout>>(),
+);
 
 /**
  * Schedule a debounced, repo-targeted sweep after a verified review webhook

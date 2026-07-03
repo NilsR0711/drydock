@@ -12,7 +12,6 @@ import {
   releaseInstanceLock,
   setDrainMode,
   startInstanceLockHeartbeat,
-  stopInstanceLockHeartbeat,
   unregisterActiveJob,
   waitForIdle,
 } from "@/lib/orchestrator/runtime";
@@ -24,7 +23,13 @@ beforeEach(() => {
   setDrainMode(false);
 });
 afterEach(() => {
-  stopInstanceLockHeartbeat();
+  // Reset the process-global runtime singleton so lock ownership never leaks
+  // into a later case. releaseInstanceLock stops the heartbeat and clears
+  // state.holdsLock in place — deleting RUNTIME_STATE_KEY would not help here,
+  // since this suite imports runtime once and its `state` binding already points
+  // at the original object (unlike the resetModules-based *-global suites).
+  releaseInstanceLock();
+  setDrainMode(false);
   delete process.env.DRYDOCK_HOME;
   rmSync(home, { recursive: true, force: true });
 });
@@ -88,13 +93,25 @@ describe("instance lock", () => {
     expect(readLockFile().pid).toBe(process.pid);
   });
 
-  it("takes over its own pid's lock (container pid reuse / double init)", () => {
+  it("takes over its own pid's stale lock (container restart / expired heartbeat)", () => {
     // A crashed instance can be restarted with the same pid (pid 1 in a
-    // container) or initialized twice in one server; either way this process
-    // should own the lock rather than refuse forever.
+    // container); its lock still carries our pid but its heartbeat has lapsed,
+    // so this fresh incarnation reclaims it rather than refusing forever.
     writeLockFile({ pid: process.pid, ts: Date.now() - LOCK_TTL_MS - 1000 });
     expect(acquireInstanceLock()).toBe(true);
     expect(readLockFile().pid).toBe(process.pid);
+  });
+
+  it("a redundant in-process init backs off instead of stealing its own fresh lock", () => {
+    // The `started` guard already stops a second bundle layer from re-running
+    // startOrchestrator, but the lock is hardened too (issue #379): once THIS
+    // live process holds a fresh lock, a redundant acquire must not unlink and
+    // re-claim it — that would re-run crash recovery (requeueExpiredLeases) and
+    // steal the lock from itself. It backs off, leaving the lock untouched.
+    expect(acquireInstanceLock()).toBe(true);
+    const held = readLockFile();
+    expect(acquireInstanceLock()).toBe(false);
+    expect(readLockFile()).toEqual(held);
   });
 
   it("treats a live foreign holder with no heartbeat as stale", () => {

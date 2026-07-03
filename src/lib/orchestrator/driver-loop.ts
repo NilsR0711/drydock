@@ -22,6 +22,7 @@ import {
 } from "@/lib/notify/lifecycle";
 import { authorAllowed, type RepoAutomation, repoAutomation } from "@/lib/repos/automation";
 import { getSettings, jobsAllowed, repoJobsAllowed } from "@/lib/settings/service";
+import { globalSingleton } from "@/lib/util/global-singleton";
 import { runBranchJanitorSweep } from "./branch-janitor";
 import { getCredentialFailures } from "./credential-status";
 import { runCredentialProbeSweep, shouldRunCredentialProbe } from "./credential-watchdog";
@@ -544,11 +545,30 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   }
 }
 
-let timer: ReturnType<typeof setTimeout> | undefined;
-let running = false;
-let ticking = false;
-let lastTickAt: number | null = null;
-let loopIntervalMs: number | null = null;
+/**
+ * Driver-loop state lives on `globalThis`, not in module-local `let` bindings,
+ * because the loop runs in the orchestrator bundle layer but `drydock stop`
+ * calls stopDriverLoop from the Route Handler layer (issue #379). A module-local
+ * `running`/`timer` would let the route flip its own idle flag and clear an
+ * undefined timer while the real loop keeps its timer and goes on claiming queued
+ * jobs during the shutdown window. A process-global container is the one loop
+ * every layer starts, inspects, and stops.
+ */
+interface DriverLoopState {
+  timer: ReturnType<typeof setTimeout> | undefined;
+  running: boolean;
+  ticking: boolean;
+  lastTickAt: number | null;
+  loopIntervalMs: number | null;
+}
+const DRIVER_LOOP_STATE_KEY = Symbol.for("drydock.orchestrator.driver-loop-state");
+const loop = globalSingleton<DriverLoopState>(DRIVER_LOOP_STATE_KEY, () => ({
+  timer: undefined,
+  running: false,
+  ticking: false,
+  lastTickAt: null,
+  loopIntervalMs: null,
+}));
 
 export interface StartLoopOptions {
   intervalMs?: number;
@@ -605,7 +625,7 @@ export interface DriverLoopStatus {
 }
 
 export function driverLoopStatus(): DriverLoopStatus {
-  return { running, lastTickAt, intervalMs: loopIntervalMs };
+  return { running: loop.running, lastTickAt: loop.lastTickAt, intervalMs: loop.loopIntervalMs };
 }
 
 /**
@@ -614,8 +634,8 @@ export function driverLoopStatus(): DriverLoopStatus {
  * guard. Default interval comes from settings.pollIntervalSec.
  */
 export function startDriverLoop(opts: StartLoopOptions = {}): void {
-  if (running) return;
-  running = true;
+  if (loop.running) return;
+  loop.running = true;
   const tick = opts.tick ?? (() => driveTick());
   // Read settings at most once, and only when a default is actually needed, so
   // callers that supply both knobs (the unit tests) never touch the DB.
@@ -623,16 +643,16 @@ export function startDriverLoop(opts: StartLoopOptions = {}): void {
   const settings = () => (cachedSettings ??= getSettings());
   const intervalMs = opts.intervalMs ?? settings().pollIntervalSec * 1000;
   const maxTickMs = opts.maxTickMs ?? settings().maxTickSeconds * 1000;
-  loopIntervalMs = intervalMs;
+  loop.loopIntervalMs = intervalMs;
 
   const schedule = () => {
-    timer = setTimeout(run, intervalMs);
+    loop.timer = setTimeout(run, intervalMs);
   };
   const run = async () => {
-    if (!running) return;
-    if (!ticking) {
-      ticking = true;
-      lastTickAt = Date.now();
+    if (!loop.running) return;
+    if (!loop.ticking) {
+      loop.ticking = true;
+      loop.lastTickAt = Date.now();
       try {
         await runTickWithWatchdog(tick, maxTickMs);
       } catch (err) {
@@ -645,20 +665,20 @@ export function startDriverLoop(opts: StartLoopOptions = {}): void {
           logError("[driver] tick failed", err);
         }
       } finally {
-        ticking = false;
+        loop.ticking = false;
       }
     }
-    if (running) schedule();
+    if (loop.running) schedule();
   };
   void run(); // immediate first tick
 }
 
 export function stopDriverLoop(): void {
-  running = false;
-  if (timer) clearTimeout(timer);
-  timer = undefined;
+  loop.running = false;
+  if (loop.timer) clearTimeout(loop.timer);
+  loop.timer = undefined;
   // Reset the re-entrancy guard so a later restart isn't blocked by a tick that
   // was still in flight (or abandoned by the watchdog) at stop time — the basis
   // for restart-based recovery (issue #359). Any orphaned tick settles harmlessly.
-  ticking = false;
+  loop.ticking = false;
 }

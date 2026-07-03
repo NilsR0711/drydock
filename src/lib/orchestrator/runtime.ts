@@ -10,25 +10,47 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { worktreeHome } from "@/lib/git/worktree";
+import { globalSingleton } from "@/lib/util/global-singleton";
 
-let draining = false;
-const activeJobs = new Set<number>();
+/**
+ * Drain flag, active-job set, and lock ownership live on `globalThis`, not in
+ * module-local bindings, because Next.js compiles Server Actions, Route
+ * Handlers, and instrumentation into separate bundle layers that each evaluate
+ * this module independently (issue #379). The real driver loop and its in-flight
+ * jobs run in the orchestrator layer, but `drydock stop` calls gracefulShutdown
+ * from the Route Handler layer: a module-local set would let the route flip its
+ * own drain flag while the real loop keeps claiming work, and waitForIdle would
+ * poll an always-empty set and let process.exit fire mid-cleanup. A process-wide
+ * container shares the state across every layer.
+ */
+interface RuntimeState {
+  draining: boolean;
+  activeJobs: Set<number>;
+  /** True once THIS live process acquired the instance lock (issue #379). */
+  holdsLock: boolean;
+}
+const RUNTIME_STATE_KEY = Symbol.for("drydock.orchestrator.runtime-state");
+const state = globalSingleton<RuntimeState>(RUNTIME_STATE_KEY, () => ({
+  draining: false,
+  activeJobs: new Set<number>(),
+  holdsLock: false,
+}));
 
 export function setDrainMode(on: boolean): void {
-  draining = on;
+  state.draining = on;
 }
 export function isDraining(): boolean {
-  return draining;
+  return state.draining;
 }
 
 export function registerActiveJob(jobId: number): void {
-  activeJobs.add(jobId);
+  state.activeJobs.add(jobId);
 }
 export function unregisterActiveJob(jobId: number): void {
-  activeJobs.delete(jobId);
+  state.activeJobs.delete(jobId);
 }
 export function activeJobCount(): number {
-  return activeJobs.size;
+  return state.activeJobs.size;
 }
 
 /** Resolve once no jobs are active, or after timeoutMs (whichever first). */
@@ -36,7 +58,7 @@ export function waitForIdle(timeoutMs = 30_000, pollMs = 100): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve) => {
     const tick = () => {
-      if (activeJobs.size === 0 || Date.now() >= deadline) return resolve();
+      if (state.activeJobs.size === 0 || Date.now() >= deadline) return resolve();
       setTimeout(tick, pollMs);
     };
     tick();
@@ -120,15 +142,24 @@ function writeLock(path: string): void {
 
 /**
  * Decide whether an existing lock may be taken over. Stale when: the file is
- * corrupt or its pid is malformed; the pid is our own (a crashed instance
- * restarted with the same pid — e.g. pid 1 in a container — or a redundant
- * init in this process); the holder pid is dead; or a live holder's heartbeat
- * has expired past the TTL (pid reuse).
+ * corrupt or its pid is malformed; the holder pid is dead; or a live holder's
+ * heartbeat has expired past the TTL (pid reuse).
+ *
+ * An own-pid lock is two distinct cases (issue #379). If THIS live process does
+ * not already hold the lock, the file belongs to a dead predecessor that got our
+ * pid back (a container restart, e.g. pid 1) and is reclaimable at once, so the
+ * restart does not wait out the TTL. If we DO already hold it, a redundant init
+ * from a second bundle layer is asking again: back off unless our own heartbeat
+ * somehow lapsed, so the redundant init never unlinks and re-claims the lock —
+ * which would re-run crash recovery (requeueExpiredLeases) against live jobs.
  */
 function lockIsStale(record: LockRecord, now: number): boolean {
   const { pid, ts } = record;
   if (pid === null) return true;
-  if (pid === process.pid) return true;
+  if (pid === process.pid) {
+    if (!state.holdsLock) return true;
+    return ts === null || now - ts > LOCK_TTL_MS;
+  }
   if (!pidAlive(pid)) return true;
   return ts === null || now - ts > LOCK_TTL_MS;
 }
@@ -167,6 +198,7 @@ export function acquireInstanceLock(): boolean {
   mkdirSync(dirname(path), { recursive: true });
   try {
     writeLock(path);
+    state.holdsLock = true;
     return true;
   } catch {
     // Lock file already exists — inspect it for staleness.
@@ -179,6 +211,7 @@ export function acquireInstanceLock(): boolean {
   try {
     unlinkSync(path);
     writeLock(path);
+    state.holdsLock = true;
     return true;
   } catch {
     return false;
@@ -249,6 +282,9 @@ export function stopInstanceLockHeartbeat(): void {
  */
 export function releaseInstanceLock(): void {
   stopInstanceLockHeartbeat();
+  // We are giving up the lock: drop ownership so a later acquire in this process
+  // (e.g. a restart-in-place) is treated as a fresh claim, not a redundant init.
+  state.holdsLock = false;
   const path = lockPath();
   if (readLock(path).pid !== process.pid) return;
   try {
