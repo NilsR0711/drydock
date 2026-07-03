@@ -74,8 +74,10 @@ new tag — see below.
 The single source of truth for publishing `@nilsr0711/drydock`. Triggered two
 ways: `workflow_dispatch` (manual publish of the version on the chosen ref —
 used for the first release and ad-hoc/recovery publishes) and `workflow_call`
-(reused by `release-please.yml` after it cuts a release). It upgrades npm to
-`>= 11.5.1` and runs `npm publish --access public`; `npm publish` first runs the
+(reused by `release-please.yml` after it cuts a release). It installs a pinned
+npm (`>= 11.5.1`, an exact version rather than a floating `npm@latest`, so
+releases stay reproducible and immune to a future npm major — issue #395) and
+runs `npm publish --access public`; `npm publish` first runs the
 `prepublishOnly` gate (`pnpm test && pnpm build && pnpm smoke`), so a build that
 fails to boot the standalone server never ships (issue #209).
 Authentication is tokenless via **npm trusted publishing** (OIDC,
