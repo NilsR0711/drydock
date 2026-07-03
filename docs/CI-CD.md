@@ -94,4 +94,13 @@ so re-runs update the existing comment instead of posting a new one. If a later
 push adds docs, the reminder is replaced with a confirmation. This is a nudge,
 not a merge blocker.
 
+**Fork PRs** run with a read-only `GITHUB_TOKEN` — GitHub caps it regardless of
+the job's `pull-requests: write` request — so the comment API would `403`. To
+keep the check green for outside contributors, the reminder degrades gracefully:
+on a fork PR it is written to the **job summary** (and the run log) instead of a
+PR comment. The write path is also wrapped so any future permission surprise
+logs a warning rather than failing the job. The reminder logic lives in
+[`.github/scripts/doc-review-reminder.mjs`](../.github/scripts/doc-review-reminder.mjs)
+so it can be unit-tested (`tests/doc-review-reminder.test.ts`).
+
 [rp]: https://github.com/googleapis/release-please-action
