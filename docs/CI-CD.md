@@ -17,6 +17,16 @@ lint, typecheck, build, and standalone smoke test run on ubuntu only.
 Superseded runs on the same ref are cancelled (`concurrency` with
 `cancel-in-progress: true`).
 
+A separate **coverage** step (`pnpm test:coverage`, issue #389) runs on a single
+leg (ubuntu, Node 24) so the full suite is not re-instrumented across the whole
+matrix. It uses the `v8` provider scoped to `src/lib/**` (config in
+`vitest.config.ts`), prints a per-file summary to the job log, and uploads
+`coverage/lcov.info` as the `coverage-lcov` artifact. It is **non-blocking**
+(`continue-on-error: true`) for now — a baseline signal, not a merge gate. Once a
+baseline is captured, modest per-directory thresholds for `src/lib/orchestrator`
+and `src/lib/github` (see the commented block in `vitest.config.ts`) flip it
+blocking. Plain `pnpm test` stays uninstrumented and fast.
+
 The smoke step (`pnpm smoke` → `scripts/smoke-standalone.mjs`) boots the built
 `.next/standalone/server.js` and requires it to serve the homepage. A clean
 `next build` can still emit a bundle that crashes on boot when the file tracer

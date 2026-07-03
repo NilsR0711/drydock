@@ -74,6 +74,27 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: pnpm test:daemon
 
+      # Coverage instrumentation (issue #389). Non-blocking for now
+      # (`continue-on-error`): it prints a per-file `src/lib/**` summary to the
+      # job log and uploads the lcov report, so coverage gaps in critical paths
+      # (orchestrator drivers, GitHub integration) become visible without gating
+      # merges yet. Runs on a single leg (ubuntu, Node 24) to avoid re-running
+      # the full suite across the matrix. Flip `continue-on-error` off once the
+      # per-directory thresholds land (see vitest.config.ts).
+      - name: Test coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
+        continue-on-error: true
+        run: pnpm test:coverage
+
+      - name: Upload coverage report
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+          if-no-files-found: warn
+
       - name: Build
         if: matrix.os == 'ubuntu-latest'
         run: pnpm build
