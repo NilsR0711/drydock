@@ -2,7 +2,7 @@ import { type AgentId, WAITABLE_LIMIT_KINDS } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import type { Job } from "@/lib/db/schema";
 import { followupIssues } from "@/lib/db/schema";
-import type { ForgeClient, PrCheck } from "@/lib/forge/types";
+import type { ForgeClient, PrCheck, PrMergeState } from "@/lib/forge/types";
 import type { SessionLimitInfo } from "./agent-session";
 import { classifyFailure } from "./ci-failure-classifier";
 import { buildFixPrompt, DEFAULT_EVIDENCE_LINES, extractEvidence } from "./ci-fix-prompt";
@@ -281,6 +281,115 @@ async function escalateCiTimeout(
 }
 
 /**
+ * Outcome of a guarded merge attempt (issue #386): a settled job to return
+ * (merged, or parked for a human), or a request to re-poll after
+ * auto-recovering a branch that was behind its base.
+ */
+type MergeAttempt = { kind: "done"; job: Job } | { kind: "retry" };
+
+/**
+ * Park a job for a human because a merge could not be completed (issue #386),
+ * with an actionable message rather than a raw `gh` stderr dump. Records an
+ * audit event and, like the babysitter's other escalations, relies on
+ * run-job's needs_human announcer for GitHub-side visibility (issue #250) — so
+ * no forge call here can turn a settled park back into a thrown error.
+ */
+function escalateMergeFailure(job: Job, prNumber: number, detail: string, db: DB): Job {
+  const message = `PR #${prNumber} could not be merged: ${detail}`;
+  recordEvent(
+    job.id,
+    "status",
+    { reason: "merge failed", prNumber, detail: detail.slice(0, 300) },
+    db,
+  );
+  return transitionJob(job.id, "needs_human", { errorMessage: message.slice(0, 500) }, db);
+}
+
+/**
+ * The single guarded merge behind every merge site (issue #386). The merge is
+ * the only irreversible step of the pipeline, and `gh pr merge --squash --auto`
+ * miscarries two ways that were previously unpinned:
+ *
+ *   1. It throws — auto-merge disabled on the repo, a conflicted PR, or an
+ *      auth/network fault. The raw `gh` stderr would otherwise bubble out of
+ *      the babysitter into run-job's generic catch and park the job with an
+ *      opaque message that no test guards.
+ *   2. It exits 0 but only *queues* auto-merge — a branch behind its base under
+ *      strict status checks — so the PR may never actually merge while the job
+ *      already reports `merged`, silently stranding it outside the autonomy
+ *      loop.
+ *
+ * A `prMergeState` pre-check (when the forge supports it) prevents the silent
+ * case: a `behind` branch is updated and re-polled instead of merged blind, and
+ * a `conflicted` one is escalated. A throwing merge is caught and escalated
+ * with an actionable message. `--auto` is kept for its intended purpose —
+ * absorbing the brief window where a just-green check is not yet reflected on
+ * the merge endpoint.
+ */
+async function mergeOrEscalate(
+  job: Job,
+  prNumber: number,
+  deps: BabysitterDeps,
+  db: DB,
+): Promise<MergeAttempt> {
+  // Pre-check: never merge a conflicted PR blind; auto-recover a behind branch.
+  if (deps.gh.prMergeState) {
+    let state: PrMergeState;
+    try {
+      state = await deps.gh.prMergeState(prNumber);
+    } catch {
+      // A probe failure must not block an otherwise-clean merge; `--auto`
+      // still guards the merge itself. Treat it as "not computed" and proceed.
+      state = "unknown";
+    }
+    if (state === "conflicted") {
+      return {
+        kind: "done",
+        job: escalateMergeFailure(
+          job,
+          prNumber,
+          "the PR conflicts with its base branch and needs a manual rebase",
+          db,
+        ),
+      };
+    }
+    if (state === "behind" && deps.gh.updatePrBranch) {
+      try {
+        await deps.gh.updatePrBranch(prNumber);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        return {
+          kind: "done",
+          job: escalateMergeFailure(
+            job,
+            prNumber,
+            `the PR is behind its base branch and could not be updated: ${reason}`,
+            db,
+          ),
+        };
+      }
+      recordEvent(
+        job.id,
+        "status",
+        { reason: "merge deferred: updated a behind branch", prNumber },
+        db,
+      );
+      // The head moved and CI must re-run; re-poll the refreshed PR instead of
+      // merging against a stale green verdict.
+      return { kind: "retry" };
+    }
+  }
+
+  try {
+    await deps.gh.mergePr(prNumber);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return { kind: "done", job: escalateMergeFailure(job, prNumber, reason, db) };
+  }
+  return { kind: "done", job: transitionJob(job.id, "merged", { prNumber }, db) };
+}
+
+/**
  * Poll `gh pr checks` every pollMs. All green → merge (auto). Any red → if under
  * the retry budget, pull the failed log and resume Claude with Haiku, else mark
  * needs_human, comment on the issue, and file a follow-up issue.
@@ -366,8 +475,23 @@ export async function ciBabysitter(
         { reason: "merging without CI verification (no checks reported)", prNumber },
         db,
       );
-      await deps.gh.mergePr(prNumber);
-      return transitionJob(job.id, "merged", { prNumber }, db);
+      const merge = await mergeOrEscalate(job, prNumber, deps, db);
+      if (merge.kind === "done") return merge.job;
+      // A behind branch was updated; re-poll the refreshed PR, bounded by the
+      // CI wait budget so a branch that never settles clean escalates instead
+      // of re-polling forever.
+      if (now() >= deadline) {
+        return escalateCiTimeout(
+          job,
+          prNumber,
+          ciWaitMs,
+          deps,
+          db,
+          "the PR stayed behind its base",
+        );
+      }
+      await sleep(pollMs);
+      continue;
     }
 
     if (outcome === "passed") {
@@ -388,8 +512,23 @@ export async function ciBabysitter(
       // landed since the poll started must win over the green verdict.
       const aborted = externallySettled(job.id, db);
       if (aborted) return aborted;
-      await deps.gh.mergePr(prNumber);
-      return transitionJob(job.id, "merged", { prNumber }, db);
+      const merge = await mergeOrEscalate(job, prNumber, deps, db);
+      if (merge.kind === "done") return merge.job;
+      // The behind branch was updated, so this green verdict is stale — re-arm
+      // the settle gate and re-poll the refreshed head (bounded by the budget).
+      if (now() >= deadline) {
+        return escalateCiTimeout(
+          job,
+          prNumber,
+          ciWaitMs,
+          deps,
+          db,
+          "the PR stayed behind its base",
+        );
+      }
+      gate.reset();
+      await sleep(pollMs);
+      continue;
     }
 
     // failed
@@ -576,14 +715,29 @@ async function autoHealLoop(
       // A heal in flight cannot be verified once every check has vanished; free
       // its slot rather than leaving it stranded across the merge.
       if (pending) closeHealingSession(pending.sessionId, "superseded", db);
+      pending = undefined;
       recordEvent(
         job.id,
         "status",
         { reason: "merging without CI verification (no checks reported)", prNumber },
         db,
       );
-      await deps.gh.mergePr(prNumber);
-      return transitionJob(job.id, "merged", { prNumber }, db);
+      const merge = await mergeOrEscalate(job, prNumber, deps, db);
+      if (merge.kind === "done") return merge.job;
+      // A behind branch was updated; re-poll the refreshed PR, bounded by the
+      // CI wait budget so a branch that never settles clean escalates.
+      if (now() >= deadline) {
+        return escalateCiTimeout(
+          job,
+          prNumber,
+          ciWaitMs,
+          deps,
+          db,
+          "the PR stayed behind its base",
+        );
+      }
+      await sleep(pollMs);
+      continue;
     }
 
     if (outcome === "passed") {
@@ -614,9 +768,28 @@ async function autoHealLoop(
         finalizeHealingAttempt(pending.attemptId, { status: "healed", afterSha: after }, db);
         transitionHealingSession(pending.sessionId, "verifying", db);
         transitionHealingSession(pending.sessionId, "healed", db);
+        // The heal is finalized to a terminal state before the merge, so a
+        // merge failure below leaks no in-flight slot; drop the handle so a
+        // re-poll cannot double-finalize it.
+        pending = undefined;
       }
-      await deps.gh.mergePr(prNumber);
-      return transitionJob(job.id, "merged", { prNumber }, db);
+      const merge = await mergeOrEscalate(job, prNumber, deps, db);
+      if (merge.kind === "done") return merge.job;
+      // The behind branch was updated, so this green verdict is stale — re-arm
+      // the settle gate and re-poll the refreshed head (bounded by the budget).
+      if (now() >= deadline) {
+        return escalateCiTimeout(
+          job,
+          prNumber,
+          ciWaitMs,
+          deps,
+          db,
+          "the PR stayed behind its base",
+        );
+      }
+      gate.reset();
+      await sleep(pollMs);
+      continue;
     }
 
     // --- failed ---
