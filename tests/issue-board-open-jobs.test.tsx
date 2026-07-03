@@ -145,3 +145,61 @@ describe("IssueBoard reflects open-job scheduler state (issue #286)", () => {
     expect(rowsIn(container, "queue")).toEqual([]);
   });
 });
+
+/** Locate the trigger element that a tooltip bubble describes, by bubble text. */
+function tooltipTrigger(container: HTMLElement, textMatch: RegExp) {
+  const tip = Array.from(container.querySelectorAll<HTMLElement>('[role="tooltip"]')).find((t) =>
+    textMatch.test(t.textContent ?? ""),
+  );
+  if (!tip) throw new Error(`tooltip matching ${textMatch} not found`);
+  const trigger = Array.from(container.querySelectorAll<HTMLElement>("[aria-describedby]")).find(
+    (el) => el.getAttribute("aria-describedby")?.split(/\s+/).includes(tip.id),
+  );
+  return { tip, trigger };
+}
+
+describe("IssueBoard badge tooltips are keyboard-reachable (issue #402)", () => {
+  let mounted: Rendered | undefined;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    actions.syncRepoIssuesAction.mockResolvedValue([]);
+    actions.listOpenIssueJobsAction.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    mounted?.unmount();
+    mounted = undefined;
+    document.body.innerHTML = "";
+  });
+
+  test("the auto-triaged badge is focusable and described by its tooltip", () => {
+    const issue = { ...makeIssue(1, true), triagedAt: 1234 };
+    mounted = render(
+      <IssueBoard
+        repoId={1}
+        queueLabel={QUEUE_LABEL}
+        initialIssues={[issue]}
+        initialOpenJobs={{}}
+        pollIntervalSec={60}
+        defaultModel="claude-sonnet-4-5"
+        defaultAgent="claude"
+      />,
+    );
+    const { tip, trigger } = tooltipTrigger(mounted.container, /auto-triage/i);
+    expect(trigger).toBeDefined();
+    expect(trigger?.textContent).toContain("auto-triaged");
+    trigger?.focus();
+    expect(document.activeElement).toBe(trigger);
+    expect(tip.className).toMatch(/\binvisible\b/);
+  });
+
+  test("the job-status badge is focusable and described by its tooltip", () => {
+    mounted = mountBoard([makeIssue(5, false)], { 5: "working" });
+    const { tip, trigger } = tooltipTrigger(mounted.container, /job exists for this issue/i);
+    expect(trigger).toBeDefined();
+    trigger?.focus();
+    expect(document.activeElement).toBe(trigger);
+    expect(tip.getAttribute("role")).toBe("tooltip");
+  });
+});

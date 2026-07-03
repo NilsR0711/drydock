@@ -1,5 +1,5 @@
 import { CircleHelp } from "lucide-react";
-import type { ReactNode } from "react";
+import { cloneElement, isValidElement, type ReactNode, useId } from "react";
 import { cn } from "@/lib/utils";
 
 type Side = "top" | "bottom" | "left" | "right";
@@ -18,15 +18,34 @@ export interface TooltipProps {
   className?: string;
 }
 
+/**
+ * Hover/focus tooltip. The bubble is genuinely hidden (`invisible`) while
+ * closed so it stays out of the accessibility tree — opacity alone would let
+ * screen readers read the text inline at all times. It is revealed only on
+ * hover or when the trigger takes focus.
+ *
+ * The single child element is the trigger: it is cloned to carry
+ * `aria-describedby` pointing at the bubble, so assistive tech announces the
+ * tooltip as the trigger's description while it is open. Pass a
+ * keyboard-focusable trigger (a `<button>`, or an element with `tabIndex={0}`)
+ * so the focus reveal works; for icon-only affordances use {@link HelpTip}.
+ */
 export function Tooltip({ content, children, side = "top", className }: TooltipProps) {
+  const id = useId();
+  const trigger = isValidElement<{ "aria-describedby"?: string }>(children)
+    ? cloneElement(children, {
+        "aria-describedby": [children.props["aria-describedby"], id].filter(Boolean).join(" "),
+      })
+    : children;
   return (
     <span className="group/tt relative inline-flex">
-      {children}
+      {trigger}
       <span
+        id={id}
         role="tooltip"
         className={cn(
-          "pointer-events-none absolute z-50 w-max max-w-[260px] rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs leading-relaxed text-popover-foreground shadow-lg",
-          "translate-y-0.5 opacity-0 transition-all duration-150 group-focus-within/tt:opacity-100 group-hover/tt:translate-y-0 group-hover/tt:opacity-100",
+          "pointer-events-none invisible absolute z-50 w-max max-w-[260px] rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs leading-relaxed text-popover-foreground shadow-lg",
+          "translate-y-0.5 opacity-0 transition-all duration-150 group-hover/tt:visible group-hover/tt:translate-y-0 group-hover/tt:opacity-100 group-focus-within/tt:visible group-focus-within/tt:translate-y-0 group-focus-within/tt:opacity-100",
           SIDE_POS[side],
           className,
         )}

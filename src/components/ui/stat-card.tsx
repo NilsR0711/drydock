@@ -1,9 +1,8 @@
 import type { LucideIcon } from "lucide-react";
-import { Info } from "lucide-react";
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 import type { Tone } from "./badge";
-import { Tooltip } from "./tooltip";
+import { HelpTip } from "./tooltip";
 
 type StatToneStyle = { chip: string; val: string; bg: string };
 
@@ -59,13 +58,9 @@ export function StatCard({
         >
           {Icon && <Icon className="h-4 w-4" />}
         </span>
-        {hint && (
-          <span className="text-muted-foreground/60">
-            <Tooltip content={hint}>
-              <Info className="h-3.5 w-3.5" />
-            </Tooltip>
-          </span>
-        )}
+        {/* On a clickable card the hint is rendered as a sibling overlay
+            below, so it never becomes a nested (invalid) button. */}
+        {hint && !onClick && <HelpTip content={hint} />}
       </div>
       <div>
         <div
@@ -89,10 +84,23 @@ export function StatCard({
   );
 
   if (onClick) {
+    // A nested <button> is invalid HTML and would hijack the card click, so
+    // the Help trigger lives outside the card button. It overlays the same
+    // top-right slot the inline hint would occupy; the overlay wrapper is
+    // click-through (pointer-events-none) except for the trigger itself.
     return (
-      <button type="button" onClick={onClick} className={className}>
-        {inner}
-      </button>
+      <div className="relative flex">
+        <button type="button" onClick={onClick} className={cn(className, "w-full")}>
+          {inner}
+        </button>
+        {hint && (
+          <div className="pointer-events-none absolute inset-x-4 top-4 flex h-8 items-center justify-end">
+            <span className="pointer-events-auto">
+              <HelpTip content={hint} />
+            </span>
+          </div>
+        )}
+      </div>
     );
   }
   return <div className={className}>{inner}</div>;
