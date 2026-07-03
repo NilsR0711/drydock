@@ -101,6 +101,9 @@ describe("runJob — agent open questions (issue #251)", () => {
     expect(deps.createPr).not.toHaveBeenCalled();
     expect(final.status).toBe("needs_human");
     expect(final.errorMessage).toBe("agent has open questions");
+    // No branch was ever pushed (EmptyCommitError), so the job must not record
+    // one — a stale branch here breaks instruction-guided resume (issue #380).
+    expect(final.branch).toBeNull();
   });
 
   it("opens a PR normally when no questions file is present", async () => {
