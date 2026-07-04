@@ -5,6 +5,7 @@ import { JobsHistoryFilters } from "@/components/jobs-history-filters";
 import { JobsHistoryPagination } from "@/components/jobs-history-pagination";
 import { JobsLiveRefresh } from "@/components/jobs-live-refresh";
 import { LiveDuration } from "@/components/live-duration";
+import { LogMatchSnippet } from "@/components/log-match-snippet";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -28,9 +29,18 @@ export default async function JobsIndexPage({
   const status = sp.status || undefined;
   const model = sp.model || undefined;
   const search = sp.q || undefined;
+  const searchScope = sp.scope === "logs" ? "logs" : undefined;
 
   const repos = listRepos();
-  const result = listJobsPage({ page, pageSize: PAGE_SIZE, repoId, status, model, search });
+  const result = listJobsPage({
+    page,
+    pageSize: PAGE_SIZE,
+    repoId,
+    status,
+    model,
+    search,
+    searchScope,
+  });
 
   // Single render-time clock seeds every in-flight row's live duration ticker so
   // SSR and the first client render agree (issue #282).
@@ -84,12 +94,23 @@ export default async function JobsIndexPage({
                     href={`/jobs/${row.id}`}
                     className="grid w-full grid-cols-1 gap-1 border-b border-card-border/60 px-4 py-3 text-left last:border-0 hover-elevate focus-ring sm:grid-cols-[1fr_auto_auto_auto_auto] sm:items-center sm:gap-4"
                   >
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <Badge status={row.status} className="shrink-0" />
-                      <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                        {row.repoName} {row.kind === "release" ? "Release" : `#${row.issueNumber}`}
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <Badge status={row.status} className="shrink-0" />
+                        <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                          {row.repoName}{" "}
+                          {row.kind === "release" ? "Release" : `#${row.issueNumber}`}
+                        </span>
+                        {row.issueTitle && (
+                          <span className="truncate text-sm">{row.issueTitle}</span>
+                        )}
                       </span>
-                      {row.issueTitle && <span className="truncate text-sm">{row.issueTitle}</span>}
+                      {row.logSnippet && (
+                        <LogMatchSnippet
+                          snippet={row.logSnippet}
+                          className="truncate pl-0.5 font-mono text-xs text-muted-foreground"
+                        />
+                      )}
                     </span>
                     <span className="hidden text-right font-mono text-xs text-muted-foreground sm:block">
                       {modelLabel(row.model)}
