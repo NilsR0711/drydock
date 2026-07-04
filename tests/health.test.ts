@@ -3,6 +3,7 @@ process.env.DRYDOCK_DB = ":memory:";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/lib/db/client";
 import { jobs, oneShotCosts, repos, settings } from "@/lib/db/schema";
+import { RateLimitGovernor } from "@/lib/github/rate-limit";
 import { getHealth } from "@/lib/orchestrator/health";
 import { saveSettings } from "@/lib/settings/service";
 
@@ -190,5 +191,53 @@ describe("getHealth", () => {
     expect(body.budget).toBeNull();
     expect(body.version).toBe("1.2.3");
     expect(body.driver.lockHeld).toBe(true);
+  });
+
+  describe("github rate-limit budget (issue #408)", () => {
+    /** Reset one hour out, in epoch seconds relative to the frozen NOW. */
+    const resetSec = Math.floor(NOW / 1000) + 3600;
+    const govNow = () => NOW;
+
+    it("reports null per resource when nothing has been observed", () => {
+      const { body } = getHealth({
+        ...baseDeps,
+        governor: () => new RateLimitGovernor({ now: govNow }),
+      });
+      expect(body.github).toEqual({ core: null, graphql: null });
+    });
+
+    it("surfaces observed budgets with an ISO reset and a derived gated flag", () => {
+      const gov = new RateLimitGovernor({ now: govNow });
+      gov.observe("core", { remaining: 4000, limit: 5000, reset: resetSec }); // 80%
+      gov.observe("graphql", { remaining: 1000, limit: 5000, reset: resetSec }); // 20% → gated
+      const { body } = getHealth({ ...baseDeps, governor: () => gov });
+      expect(body.github.core).toEqual({
+        remaining: 4000,
+        limit: 5000,
+        reset: new Date(resetSec * 1000).toISOString(),
+        gated: false,
+      });
+      expect(body.github.graphql).toEqual({
+        remaining: 1000,
+        limit: 5000,
+        reset: new Date(resetSec * 1000).toISOString(),
+        gated: true,
+      });
+    });
+
+    it("keeps the github budget when the database is unreachable (DB-independent)", () => {
+      const gov = new RateLimitGovernor({ now: govNow });
+      gov.observe("core", { remaining: 4000, limit: 5000, reset: resetSec });
+      const { httpStatus, body } = getHealth({
+        ...baseDeps,
+        governor: () => gov,
+        db: () => {
+          throw new Error("boom");
+        },
+      });
+      expect(httpStatus).toBe(503);
+      expect(body.reasons).toContain("db_unreachable");
+      expect(body.github.core?.remaining).toBe(4000);
+    });
   });
 });

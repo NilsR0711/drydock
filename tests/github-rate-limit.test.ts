@@ -130,6 +130,58 @@ describe("parseRateLimitHeaders", () => {
   });
 });
 
+describe("RateLimitGovernor.budget", () => {
+  it("returns null for a resource nothing has been observed for", () => {
+    const { gov } = makeGovernor();
+    expect(gov.budget("core")).toBeNull();
+  });
+
+  it("surfaces the observed snapshot with gated:false above the reserve fraction", () => {
+    const { gov } = makeGovernor(1_000_000);
+    gov.observe("core", { remaining: 4000, limit: 5000, reset: 2000 }); // 80%
+    expect(gov.budget("core")).toEqual({
+      remaining: 4000,
+      limit: 5000,
+      reset: 2000,
+      gated: false,
+    });
+  });
+
+  it("marks gated when below the reserve fraction (background sweeps deferred)", () => {
+    const { gov } = makeGovernor(1_000_000);
+    gov.observe("core", { remaining: 1000, limit: 5000, reset: 2000 }); // 20% < 30%
+    expect(gov.budget("core")?.gated).toBe(true);
+  });
+
+  it("marks gated below the hard floor", () => {
+    const { gov } = makeGovernor(1_000_000);
+    gov.observe("core", { remaining: 100, limit: 5000, reset: 2000 }); // 2% < 5%
+    expect(gov.budget("core")?.gated).toBe(true);
+  });
+
+  it("marks gated during a 429 backoff window even with budget remaining", () => {
+    const { gov } = makeGovernor(1_000_000);
+    gov.observe("core", { remaining: 5000, limit: 5000, reset: 2000 }); // full
+    gov.note429("core", 1_030); // reset 30s out (epoch seconds)
+    expect(gov.budget("core")?.gated).toBe(true);
+  });
+
+  it("clears gated once the reset window has elapsed (stale, refilled budget)", () => {
+    const { gov, setNow } = makeGovernor(1_000_000);
+    gov.observe("core", { remaining: 10, limit: 5000, reset: 1001 }); // starved, resets at 1001s
+    expect(gov.budget("core")?.gated).toBe(true);
+    setNow(1_002_000); // past the reset: budget has refilled, state is stale
+    expect(gov.budget("core")?.gated).toBe(false);
+  });
+
+  it("scopes budgets per resource", () => {
+    const { gov } = makeGovernor(1_000_000);
+    gov.observe("graphql", { remaining: 100, limit: 5000, reset: 2000 });
+    expect(gov.budget("core")).toBeNull();
+    expect(gov.budget("graphql")?.gated).toBe(true);
+  });
+});
+
 describe("exported thresholds", () => {
   it("uses a 0.3 reserve fraction and a 0.05 hard floor", () => {
     expect(RESERVE_FRACTION).toBe(0.3);

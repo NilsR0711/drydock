@@ -40,6 +40,10 @@ describe("GET /api/health", () => {
     // non-negative number in the documented shape.
     expect(typeof body.budget.dailyLimitUsd).toBe("number");
     expect(body.budget.dailyLimitUsd).toBeGreaterThanOrEqual(0);
+    // GitHub rate-limit budget is always present (per-resource, null when
+    // unobserved) and serialized by the route (issue #408).
+    expect(body.github).toHaveProperty("core");
+    expect(body.github).toHaveProperty("graphql");
   });
 
   it("counts seeded jobs in the queue map", async () => {

@@ -377,6 +377,9 @@ once the budget drops below a reserve fraction, while interactive actions stay *
 anything from draining the budget to zero, a 429 backs off until reset, and unchanged single-page issue
 lists are fetched with conditional ETag requests so they cost nothing (multi-page lists are always
 refetched — GitHub's ETag only validates the first page). See [ADR 018](adr/018-rate-limit-governor.md).
+That back-pressure is now **visible**: a navbar pill and dashboard card show the per-resource (REST/GraphQL)
+remaining budget, its reset countdown, and a distinct **"sweeps deferred"** state below the reserve
+fraction, and `GET /api/health` exposes the same per-resource snapshots for monitoring probes (issue #408).
 
 ### 📦 Export/import repo settings
 
@@ -395,12 +398,16 @@ reproduces the same effective config.
 ### 💸 Cost tracking
 
 Per-job and aggregate spend from the agent's reported `total_cost_usd` (or estimated from tokens), with a
-**daily cost limit** that gates the driver loop (global + per-repo, both **`0` = off / unlimited**) and an
-optional **per-job cost ceiling** that aborts a single runaway session mid-stream (global default +
-per-repo override; off when unset). Every cost ceiling can be turned off with `0`, leaving only the per-job
-cap, provider usage-limit auto-wait, and pause/drain as stops. Spend is **exportable** to CSV or JSON from
-the cost dashboard — line items (jobs plus one-shot agent calls) or aggregates by repo/model, scoped to a
-date range and repo, with totals that reconcile with the dashboard.
+**daily cost limit** and a **monthly cost limit** that gate the driver loop (global + per-repo, all
+**`0` = off / unlimited**) and an optional **per-job cost ceiling** that aborts a single runaway session
+mid-stream (global default + per-repo override; off when unset). The monthly gate measures month-to-date
+spend (jobs + one-shot costs) the same way the daily one measures today. Every cost ceiling can be turned
+off with `0`, leaving only the per-job cap, provider usage-limit auto-wait, and pause/drain as stops. The
+**Costs** page complements the retrospective view with a **month-end projection** from the trailing 7-day
+run rate (flagged when it would exceed the monthly budget) and a **daily pacing** readout (how much of
+today's budget is spent, and by what time), so overspend is visible before a gate trips. Spend is
+**exportable** to CSV or JSON from the cost dashboard — line items (jobs plus one-shot agent calls) or
+aggregates by repo/model, scoped to a date range and repo, with totals that reconcile with the dashboard.
 
 ### 📊 Proactive OAuth usage gauges
 
@@ -527,10 +534,14 @@ warn when it is stale or missing (the sweep may have stopped), skip on a fresh i
 `GET /api/health` returns a machine-readable liveness snapshot for Uptime-Kuma/Prometheus probes:
 `status` (`ok`/`degraded`) with `reasons`, `version`, `uptimeSeconds`, `driver` (whether this
 instance holds the driver lock, paused/draining flags, last tick timestamp), `queue` (job counts
-per state), `budget` (today's spend vs the daily limit), and `lastBackupAt` (ISO-8601 of the newest
-DB snapshot, or `null`) so monitoring can alert on a backup sweep that stopped writing. HTTP 200
-while the driver loop ticks; 503 when the loop is stalled (no tick within 3 poll intervals), not
-running, or the DB is unreachable. Read-only and secret-free.
+per state), `budget` (today's spend vs the daily limit), `lastBackupAt` (ISO-8601 of the newest DB
+snapshot, or `null`, so monitoring can alert on a backup sweep that stopped writing — issue #411),
+and `github` (per-resource GitHub API rate-limit budget for `core`/`graphql` — `remaining`, `limit`,
+ISO-8601 `reset`, and a `gated` flag when background sweeps are being deferred; `null` per resource
+until one is observed, issue #408). HTTP 200 while the driver loop ticks; 503 when the loop is
+stalled (no tick within 3 poll intervals), not running, or the DB is unreachable. Read-only and
+secret-free — the `github` section is read from the in-process governor with no forge call, so it
+survives even a `db_unreachable` degrade.
 
 ### Tick watchdog
 

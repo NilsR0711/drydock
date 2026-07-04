@@ -170,6 +170,13 @@ describe("settings", () => {
     expect(s.paused).toBe(true);
     expect(s.dailyCostLimitUsd).toBe(25);
   });
+
+  it("defaults the monthly cost limit to off (0), persists it, and rejects negatives (issue #413)", () => {
+    expect(getSettings(db).monthlyCostLimitUsd).toBe(0);
+    saveSettings({ monthlyCostLimitUsd: 200 }, db);
+    expect(getSettings(db).monthlyCostLimitUsd).toBe(200);
+    expect(() => saveSettings({ monthlyCostLimitUsd: -1 }, db)).toThrow();
+  });
 });
 
 describe("openrouter key bridge (issue #349, ADR 039)", () => {
@@ -241,6 +248,47 @@ describe("jobsAllowed gate", () => {
     expect(jobsAllowed(db).allowed).toBe(true);
   });
 
+  it("blocks when month-to-date cost reaches the monthly limit (issue #413)", () => {
+    // Daily limit stays off (0), so only the monthly gate can trip here.
+    saveSettings({ monthlyCostLimitUsd: 50 }, db);
+    db.insert(jobs)
+      .values({
+        repoId,
+        issueNumber: 1,
+        status: "merged",
+        startedAt: Math.floor(Date.now() / 1000),
+        costUsd: 60,
+      })
+      .run();
+    expect(jobsAllowed(db)).toEqual({ allowed: false, reason: "cost_limit" });
+  });
+
+  it("allows when month-to-date is under the monthly limit (issue #413)", () => {
+    saveSettings({ monthlyCostLimitUsd: 500 }, db);
+    db.insert(jobs)
+      .values({
+        repoId,
+        issueNumber: 1,
+        startedAt: Math.floor(Date.now() / 1000),
+        costUsd: 20,
+      })
+      .run();
+    expect(jobsAllowed(db).allowed).toBe(true);
+  });
+
+  it("treats a monthly cost limit of 0 as unlimited (issue #413)", () => {
+    saveSettings({ monthlyCostLimitUsd: 0 }, db);
+    db.insert(jobs)
+      .values({
+        repoId,
+        issueNumber: 1,
+        startedAt: Math.floor(Date.now() / 1000),
+        costUsd: 9999,
+      })
+      .run();
+    expect(jobsAllowed(db).allowed).toBe(true);
+  });
+
   it("blocks with reason auth while credential failures are persisted (issue #177)", () => {
     saveCredentialStatus(
       {
@@ -300,6 +348,39 @@ describe("repoJobsAllowed gate", () => {
 
   it("treats a repo daily cost limit of 0 as unlimited (issue #234)", () => {
     const repo = addRepo({ path: "/r7", name: "r7", dailyCostLimitUsd: 0 }, db);
+    db.insert(jobs)
+      .values({
+        repoId: repo.id,
+        issueNumber: 1,
+        startedAt: Math.floor(Date.now() / 1000),
+        costUsd: 999,
+      })
+      .run();
+    expect(repoJobsAllowed(repo.id, db).allowed).toBe(true);
+  });
+
+  it("blocks when the repo's month-to-date cost hits its monthly limit (issue #413)", () => {
+    const repo = addRepo({ path: "/rm1", name: "rm1", monthlyCostLimitUsd: 50 }, db);
+    db.insert(jobs)
+      .values({
+        repoId: repo.id,
+        issueNumber: 1,
+        startedAt: Math.floor(Date.now() / 1000),
+        costUsd: 60,
+      })
+      .run();
+    const gate = repoJobsAllowed(repo.id, db);
+    expect(gate.allowed).toBe(false);
+    expect(gate.reason).toBe("repo_cost_limit");
+  });
+
+  it("allows below the repo monthly limit (issue #413)", () => {
+    const repo = addRepo({ path: "/rm2", name: "rm2", monthlyCostLimitUsd: 50 }, db);
+    expect(repoJobsAllowed(repo.id, db).allowed).toBe(true);
+  });
+
+  it("treats a repo monthly cost limit of 0 as unlimited (issue #413)", () => {
+    const repo = addRepo({ path: "/rm3", name: "rm3", monthlyCostLimitUsd: 0 }, db);
     db.insert(jobs)
       .values({
         repoId: repo.id,

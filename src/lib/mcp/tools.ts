@@ -104,6 +104,7 @@ const addRepoShape = {
     .refine(isKnownModelId, { message: "unknown model id" })
     .optional(),
   dailyCostLimitUsd: z.number().nonnegative().optional(),
+  monthlyCostLimitUsd: z.number().nonnegative().optional(),
 } satisfies ZodRawShape;
 
 const setLabelsShape = {
@@ -140,6 +141,7 @@ const trackedPrIdShape = { trackedPrId: z.number().int().positive() } satisfies 
 const updateSettingsShape = {
   paused: z.boolean().optional(),
   dailyCostLimitUsd: z.number().nonnegative().optional(),
+  monthlyCostLimitUsd: z.number().nonnegative().optional(),
   pollIntervalSec: z.number().int().positive().optional(),
   maxParallelJobs: z.number().int().positive().optional(),
   // 0 = unlimited turn budget (issue #254); a positive value caps it.

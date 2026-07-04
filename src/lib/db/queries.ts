@@ -1,6 +1,8 @@
 import { and, asc, count, desc, eq, or, type SQL, sql } from "drizzle-orm";
 import { type ClaudeUsageView, deriveClaudeUsageView } from "@/lib/agents/claude-usage";
 import { buildCodexUsageView, type CodexUsageView } from "@/lib/agents/codex-usage";
+import { deriveGithubBudgetView, type GithubBudgetView } from "@/lib/github/budget-view";
+import { sharedGovernor } from "@/lib/github/rate-limit";
 import { providerLimitBlocked } from "@/lib/orchestrator/provider-limit";
 import { getCodexUsage, getProviderUsage } from "@/lib/orchestrator/provider-usage";
 import { type DB, getDb } from "./client";
@@ -157,6 +159,8 @@ export interface DashboardSnapshot {
   claudeUsage: ClaudeUsageView;
   /** Proactive Codex OAuth quota indicator (issue #189). */
   codexUsage: CodexUsageView;
+  /** Proactive GitHub API rate-limit budget indicator (issue #408). */
+  githubBudget: GithubBudgetView;
 }
 
 /**
@@ -184,6 +188,19 @@ export function getCodexUsageView(db: DB = getDb()): CodexUsageView {
     snapshot: getCodexUsage(db),
     latchedUntil: providerLimitBlocked("codex", db, now)?.blockedUntil,
     now,
+  });
+}
+
+/**
+ * Render-ready GitHub API rate-limit budget for the navbar pill and dashboard
+ * card (issue #408). Read straight from the shared governor's last-observed
+ * snapshots — process memory, no DB and no forge call — so it reflects the same
+ * back-pressure the governor applies to background sweeps.
+ */
+export function getGithubBudgetView(): GithubBudgetView {
+  return deriveGithubBudgetView({
+    core: sharedGovernor.budget("core"),
+    graphql: sharedGovernor.budget("graphql"),
   });
 }
 
@@ -254,6 +271,7 @@ export function dashboardSnapshot(db: DB = getDb()): DashboardSnapshot {
     })),
     claudeUsage: getClaudeUsageView(db),
     codexUsage: getCodexUsageView(db),
+    githubBudget: getGithubBudgetView(),
   };
 }
 

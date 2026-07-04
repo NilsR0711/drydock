@@ -11,8 +11,9 @@ import { defaultTransports, dispatch, type NotifyTransports } from "./notifier";
  * re-arm once it clears.
  */
 
-const COST_LIMIT_MESSAGE =
-  "💸 Daily cost limit reached — new jobs are paused until the budget resets.";
+// Neutral wording so it fits both the daily and the monthly budget gate (issue
+// #413), which share the same `cost_limit` reason and edge notification.
+const COST_LIMIT_MESSAGE = "💸 Cost limit reached — new jobs are paused until the budget resets.";
 const PAUSED_MESSAGE = "⏸️ Automation paused — no new jobs will start until it resumes.";
 const DRAINING_MESSAGE = "🌙 Automation draining — finishing in-flight jobs, then shutting down.";
 

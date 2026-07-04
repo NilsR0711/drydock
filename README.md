@@ -224,8 +224,9 @@ only act on work you already started). The **AI PR audit** and **release managem
 > [!WARNING]
 > Once you enable auto-processing, a repo with auto-merge on and no cost ceiling can incur
 > **unbounded API spend** — including on prompt-injected or low-quality issues. Set a **daily
-> cost limit** and/or **max job cost** in **Settings** or per repo, and keep
-> `minAuthorAssociation` at `approved` on public repos.
+> cost limit**, a **monthly cost limit**, and/or **max job cost** in **Settings** or per repo, and
+> keep `minAuthorAssociation` at `approved` on public repos. The **Costs** page also projects
+> month-end spend from the trailing 7-day run rate so you see overspend coming.
 
 Drydock is configured at runtime from the **Settings** page and per-repo controls — no `.env`
 required. Optional environment variables:

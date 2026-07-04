@@ -233,6 +233,18 @@ export function SettingsForm({ initial }: { initial: Settings }) {
                 onChange={(e) => set("dailyCostLimitUsd", Number(e.target.value))}
               />
             </Field>
+            <Field
+              label="Monthly cost limit (USD)"
+              hint="Stops new runs once month-to-date spend is reached. 0 disables the monthly budget (unlimited)."
+            >
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                value={s.monthlyCostLimitUsd}
+                onChange={(e) => set("monthlyCostLimitUsd", Number(e.target.value))}
+              />
+            </Field>
             <Field label="Max turns" hint="Hard cap on agent turns per job. 0 = unlimited.">
               <Input
                 type="number"

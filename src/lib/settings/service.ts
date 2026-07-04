@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { type DB, getDb } from "@/lib/db/client";
-import { todayCost } from "@/lib/db/cost-queries";
+import { monthCost, todayCost } from "@/lib/db/cost-queries";
 import { repos, settings } from "@/lib/db/schema";
 import { setServerLogLevel } from "@/lib/log/server-log";
 import { LOG_LEVELS } from "@/lib/log/types";
@@ -24,6 +24,15 @@ export const settingsSchema = z.object({
   // per-repo to cap spend. A per-repo daily limit applies the same 0 = off
   // semantics independently.
   dailyCostLimitUsd: z.number().nonnegative().default(0),
+  // Monthly USD budget gating new runs (issue #413), the longer-horizon sibling
+  // of the daily limit. 0 is off (unlimited) with identical semantics: the gate
+  // compares month-to-date spend (jobs + one-shot costs) and, when it reaches a
+  // positive ceiling, stops new work for the rest of the month. Defaults to 0 so
+  // a fresh install stays fully autonomous out of the box (issue #254); set a
+  // positive ceiling here or per-repo to cap monthly spend. Most billing is
+  // monthly, so this lets an operator express "no more than $200/month" directly
+  // instead of translating it to a daily number.
+  monthlyCostLimitUsd: z.number().nonnegative().default(0),
   pollIntervalSec: z.number().int().positive().default(30),
   // Hard per-tick watchdog deadline for the scheduler loop, in seconds (issue
   // #359). A single hung tick — e.g. a `gh` call stalling on a dead connection
@@ -203,6 +212,13 @@ export function jobsAllowed(db: DB = getDb()): GateResult {
   if (s.dailyCostLimitUsd > 0 && todayCost(db) >= s.dailyCostLimitUsd) {
     return { allowed: false, reason: "cost_limit" };
   }
+  // Monthly budget gate (issue #413): same 0 = off semantics as the daily one,
+  // measured against month-to-date spend. Reported under the shared `cost_limit`
+  // reason so the existing edge notification and MCP gate messaging cover both
+  // horizons without change — a spend cap tripped, daily or monthly.
+  if (s.monthlyCostLimitUsd > 0 && monthCost(db) >= s.monthlyCostLimitUsd) {
+    return { allowed: false, reason: "cost_limit" };
+  }
   return { allowed: true };
 }
 
@@ -212,6 +228,12 @@ export function repoJobsAllowed(repoId: number, db: DB = getDb()): GateResult {
   if (!repo) return { allowed: false, reason: "repo_cost_limit" };
   // 0 = off / unlimited for the repo's daily budget too (issue #234).
   if (repo.dailyCostLimitUsd > 0 && todayCost(db, repoId) >= repo.dailyCostLimitUsd) {
+    return { allowed: false, reason: "repo_cost_limit" };
+  }
+  // Per-repo monthly budget gate (issue #413), mirroring the global monthly gate
+  // and the repo's own daily one: 0 = off, otherwise month-to-date repo spend
+  // against the ceiling. Same `repo_cost_limit` reason as the daily case.
+  if (repo.monthlyCostLimitUsd > 0 && monthCost(db, repoId) >= repo.monthlyCostLimitUsd) {
     return { allowed: false, reason: "repo_cost_limit" };
   }
   return { allowed: true };

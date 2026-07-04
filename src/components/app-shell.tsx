@@ -20,11 +20,13 @@ import { ClaudeUsagePill } from "@/components/claude-usage";
 import { CodexUsagePill } from "@/components/codex-usage";
 import { CredentialBanner } from "@/components/credential-banner";
 import { EmergencyStopButton } from "@/components/emergency-stop-button";
+import { GithubBudgetPill } from "@/components/github-budget";
 import { PauseToggle } from "@/components/pause-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UpdateBanner } from "@/components/update-banner";
 import type { ClaudeUsageView } from "@/lib/agents/claude-usage";
 import type { CodexUsageView } from "@/lib/agents/codex-usage";
+import type { GithubBudgetView } from "@/lib/github/budget-view";
 import type { CredentialFailure } from "@/lib/orchestrator/credential-status";
 import { cn } from "@/lib/utils";
 import type { InstallKind } from "@/lib/version/current";
@@ -56,6 +58,7 @@ export function AppShell({
   credentialFailures = [],
   claudeUsage,
   codexUsage,
+  githubBudget,
 }: {
   children: React.ReactNode;
   adrPending?: number;
@@ -66,6 +69,7 @@ export function AppShell({
   credentialFailures?: CredentialFailure[];
   claudeUsage?: ClaudeUsageView;
   codexUsage?: CodexUsageView;
+  githubBudget?: GithubBudgetView;
 }) {
   const pathname = usePathname();
   return (
@@ -117,6 +121,7 @@ export function AppShell({
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
             {claudeUsage && <ClaudeUsagePill view={claudeUsage} />}
             {codexUsage && <CodexUsagePill view={codexUsage} />}
+            {githubBudget && <GithubBudgetPill view={githubBudget} />}
             {updateStatus && <UpdateBanner status={updateStatus} installKind={installKind} />}
             <PauseToggle paused={paused} />
             <EmergencyStopButton />
