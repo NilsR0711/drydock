@@ -1,5 +1,62 @@
 # Changelog
 
+## [1.2.0](https://github.com/NilsR0711/drydock/compare/v1.1.1...v1.2.0) (2026-07-04)
+
+
+### Features
+
+* bulk requeue/abort on the needs-human screen ([#410](https://github.com/NilsR0711/drydock/issues/410)) ([d95c9d4](https://github.com/NilsR0711/drydock/commit/d95c9d40ca0b6ff833faa6abe4c47894fad2f326))
+* **costs:** add monthly budget gate and month-end spend projection ([#413](https://github.com/NilsR0711/drydock/issues/413)) ([#468](https://github.com/NilsR0711/drydock/issues/468)) ([b730969](https://github.com/NilsR0711/drydock/commit/b730969c0e87f958f215e6a5e48da0b8b155a273))
+* full-text search over job logs (cross-job + in the log viewer) ([#470](https://github.com/NilsR0711/drydock/issues/470)) ([6ce38ce](https://github.com/NilsR0711/drydock/commit/6ce38cebb624c1f31320c83364bb8fc5cdb08b07)), closes [#409](https://github.com/NilsR0711/drydock/issues/409)
+* **jobs:** keep the job detail shell live on status transitions ([#456](https://github.com/NilsR0711/drydock/issues/456)) ([d64980a](https://github.com/NilsR0711/drydock/commit/d64980a3cc6cb2d8d2fde8266266614e012a3952)), closes [#398](https://github.com/NilsR0711/drydock/issues/398)
+* **notify:** add a generic webhook notification channel ([#475](https://github.com/NilsR0711/drydock/issues/475)) ([1022b19](https://github.com/NilsR0711/drydock/commit/1022b19af3fd73703436d6a2fdad1eea09e5236f)), closes [#414](https://github.com/NilsR0711/drydock/issues/414)
+* opt-out daily in-process DB backup sweep ([#467](https://github.com/NilsR0711/drydock/issues/467)) ([4105f2b](https://github.com/NilsR0711/drydock/commit/4105f2b9bc699e6f3c0298246ac3e4221b0572c8)), closes [#411](https://github.com/NilsR0711/drydock/issues/411)
+* **orchestrator:** consolidate job memory into the parent project by default ([#375](https://github.com/NilsR0711/drydock/issues/375)) ([#440](https://github.com/NilsR0711/drydock/issues/440)) ([72b0556](https://github.com/NilsR0711/drydock/commit/72b0556ff1f1475765f0466f3336cc2c7503976c))
+* **settings:** export/import the full instance configuration ([#412](https://github.com/NilsR0711/drydock/issues/412)) ([11ea167](https://github.com/NilsR0711/drydock/commit/11ea16775fe2f063f3d9f6b0e239a0dc9d01dcff))
+* surface GitHub API rate-limit budget in /api/health and the dashboard ([#465](https://github.com/NilsR0711/drydock/issues/465)) ([fb394ab](https://github.com/NilsR0711/drydock/commit/fb394ab7d2ec1e637d1d155b3f900af81af087ce))
+
+
+### Bug Fixes
+
+* **a11y:** accessible names for issue modal and jobs filter controls ([#401](https://github.com/NilsR0711/drydock/issues/401)) ([#454](https://github.com/NilsR0711/drydock/issues/454)) ([4e54e5e](https://github.com/NilsR0711/drydock/commit/4e54e5efa7ee421fa0f6b680fdb46e8af3b55258))
+* **a11y:** decouple aria-live announcements from the virtualized log list ([#460](https://github.com/NilsR0711/drydock/issues/460)) ([5d9be89](https://github.com/NilsR0711/drydock/commit/5d9be893e227c5d9cc3ca0d8129439ffc996e66d)), closes [#403](https://github.com/NilsR0711/drydock/issues/403)
+* **a11y:** keep tooltips out of the a11y tree until open and keyboard-reachable ([#402](https://github.com/NilsR0711/drydock/issues/402)) ([#461](https://github.com/NilsR0711/drydock/issues/461)) ([c233ed0](https://github.com/NilsR0711/drydock/commit/c233ed058a909dc18399eecc1170aee773eb0d08))
+* **a11y:** pause toast auto-dismiss on hover/focus and route links client-side ([#458](https://github.com/NilsR0711/drydock/issues/458)) ([5148762](https://github.com/NilsR0711/drydock/commit/5148762b8a7f0920dec91625872bc05a642a7c81)), closes [#405](https://github.com/NilsR0711/drydock/issues/405)
+* **ci:** keep doc-review green on fork PRs ([#449](https://github.com/NilsR0711/drydock/issues/449)) ([ad55b0d](https://github.com/NilsR0711/drydock/commit/ad55b0d213f6b244ec5865efd8f5386f9e9826ae)), closes [#392](https://github.com/NilsR0711/drydock/issues/392)
+* **ci:** publish on release-PR merge instead of a second manual dispatch ([#452](https://github.com/NilsR0711/drydock/issues/452)) ([d9866fb](https://github.com/NilsR0711/drydock/commit/d9866fbb13882f153c52efba47b92ab209e5a02c)), closes [#394](https://github.com/NilsR0711/drydock/issues/394)
+* **dashboard:** re-alert re-parked needs_human jobs after requeue ([#455](https://github.com/NilsR0711/drydock/issues/455)) ([ee3ba15](https://github.com/NilsR0711/drydock/commit/ee3ba159f05f3c892425738c675e32bb8ba2a8d5)), closes [#406](https://github.com/NilsR0711/drydock/issues/406)
+* **db:** cascade-delete followup_issues with their job ([#418](https://github.com/NilsR0711/drydock/issues/418)) ([#474](https://github.com/NilsR0711/drydock/issues/474)) ([7477872](https://github.com/NilsR0711/drydock/commit/74778727f96ce4966299807663c223db4e827ae3))
+* **db:** diagnose pre-existing FK corruption instead of blaming the next migration ([#471](https://github.com/NilsR0711/drydock/issues/471)) ([3267071](https://github.com/NilsR0711/drydock/commit/3267071b1fa0076c3ca10be43d4ed798d9838e19)), closes [#417](https://github.com/NilsR0711/drydock/issues/417)
+* degrade corrupt job-event payloads instead of bricking detail pages ([#473](https://github.com/NilsR0711/drydock/issues/473)) ([6e5edae](https://github.com/NilsR0711/drydock/commit/6e5edae9c2df1dd79e24a1b790c50ee8b57ae8ba)), closes [#419](https://github.com/NilsR0711/drydock/issues/419)
+* **deploy-heal:** log getLogs failures instead of silently swallowing them ([#476](https://github.com/NilsR0711/drydock/issues/476)) ([361510d](https://github.com/NilsR0711/drydock/commit/361510d5e21d40b02b6a85b9f29a3b4324e90717)), closes [#423](https://github.com/NilsR0711/drydock/issues/423)
+* **deps:** bump hono to 4.12.27 to clear HIGH CORS advisory ([#477](https://github.com/NilsR0711/drydock/issues/477)) ([fa27ce0](https://github.com/NilsR0711/drydock/commit/fa27ce047333892d690583c2a1ff6be645cabe76)), closes [#426](https://github.com/NilsR0711/drydock/issues/426)
+* **deps:** override monaco's pinned dompurify to a patched release ([#428](https://github.com/NilsR0711/drydock/issues/428)) ([#484](https://github.com/NilsR0711/drydock/issues/484)) ([bc9a899](https://github.com/NilsR0711/drydock/commit/bc9a899bffa9a4aeded73dfc0d716828840ae191))
+* **deps:** remove unused prod dependencies zustand and nuqs ([#478](https://github.com/NilsR0711/drydock/issues/478)) ([4569738](https://github.com/NilsR0711/drydock/commit/45697382bb35e22f0931594e957fa6178426cf44)), closes [#427](https://github.com/NilsR0711/drydock/issues/427)
+* **orchestrator:** bound review-feedback and deployment-healing side sessions ([#383](https://github.com/NilsR0711/drydock/issues/383)) ([#439](https://github.com/NilsR0711/drydock/issues/439)) ([2edebc7](https://github.com/NilsR0711/drydock/commit/2edebc7f1b187361893af3538b0cb5bc7f815911))
+* **orchestrator:** clear stale finishedAt/errorMessage on requeue ([#434](https://github.com/NilsR0711/drydock/issues/434)) ([87a5b03](https://github.com/NilsR0711/drydock/commit/87a5b0301ce9eda76b623b50f9e9ccd18fe3dc37)), closes [#381](https://github.com/NilsR0711/drydock/issues/381)
+* **orchestrator:** don't record an unpushed branch on questions-only park ([#433](https://github.com/NilsR0711/drydock/issues/433)) ([5e54ab1](https://github.com/NilsR0711/drydock/commit/5e54ab1c82dd5dce3a7db310ca5a6baac442037c)), closes [#380](https://github.com/NilsR0711/drydock/issues/380)
+* **orchestrator:** force-with-lease the fresh-cut push so a requeue supersedes its stale remote branch ([#436](https://github.com/NilsR0711/drydock/issues/436)) ([dacaf59](https://github.com/NilsR0711/drydock/commit/dacaf59baf4991485d16ac80b30aafd66cf16359)), closes [#378](https://github.com/NilsR0711/drydock/issues/378)
+* **orchestrator:** guard fire-and-forget edge notifications in the driver loop ([#483](https://github.com/NilsR0711/drydock/issues/483)) ([55639d4](https://github.com/NilsR0711/drydock/commit/55639d44f8d7eebacc5e2195369925a98fb94aed)), closes [#420](https://github.com/NilsR0711/drydock/issues/420)
+* **orchestrator:** guard the babysitter merge against silent queue and failure ([#386](https://github.com/NilsR0711/drydock/issues/386)) ([#446](https://github.com/NilsR0711/drydock/issues/446)) ([b500028](https://github.com/NilsR0711/drydock/commit/b500028ddb6c20fcce261675201bc85164804c04))
+* **orchestrator:** hold a set of abort handles per job so overlapping sessions stay killable ([#384](https://github.com/NilsR0711/drydock/issues/384)) ([#438](https://github.com/NilsR0711/drydock/issues/438)) ([034e3a3](https://github.com/NilsR0711/drydock/commit/034e3a355074cc7d7b50553b8856667cac001709))
+* **orchestrator:** share in-memory singletons across Next.js bundle layers ([#379](https://github.com/NilsR0711/drydock/issues/379)) ([891c02b](https://github.com/NilsR0711/drydock/commit/891c02b3ef316a2b48803e60579358d7ea31b925))
+* **orchestrator:** unify the five one-shot generator wrappers and restore provider-limit latching ([#487](https://github.com/NilsR0711/drydock/issues/487)) ([8f3bf54](https://github.com/NilsR0711/drydock/commit/8f3bf546db10ebd53d14940231b72b3a8d812655))
+* **prompts:** serve Monaco from the bundle instead of the jsdelivr CDN ([#486](https://github.com/NilsR0711/drydock/issues/486)) ([ff02f8d](https://github.com/NilsR0711/drydock/commit/ff02f8d257ea29b647303d0e1f788044522906f2)), closes [#429](https://github.com/NilsR0711/drydock/issues/429)
+* **prune:** skip the scheduled VACUUM when nothing was deleted ([#472](https://github.com/NilsR0711/drydock/issues/472)) ([d200ff5](https://github.com/NilsR0711/drydock/commit/d200ff5e5c1a98dfd27edd31e8e0492854bb57fa)), closes [#416](https://github.com/NilsR0711/drydock/issues/416)
+* **release:** surface the real reason when release evaluation fails ([#482](https://github.com/NilsR0711/drydock/issues/482)) ([09454cc](https://github.com/NilsR0711/drydock/commit/09454cc9b3e47f14e3865a97b8bf703c364fdb08)), closes [#424](https://github.com/NilsR0711/drydock/issues/424)
+* **security:** guard API GET routes against DNS-rebinding ([#435](https://github.com/NilsR0711/drydock/issues/435)) ([6d7b865](https://github.com/NilsR0711/drydock/commit/6d7b86576c037f696f76fe69a04edee259349880))
+* **settings:** recover a corrupt global settings row instead of silently wiping it ([#481](https://github.com/NilsR0711/drydock/issues/481)) ([6770311](https://github.com/NilsR0711/drydock/commit/67703114ff302e4266d99784bc26dcd9956ccc6e)), closes [#421](https://github.com/NilsR0711/drydock/issues/421)
+* **subtasks:** log decompose one-shot failures instead of silently returning [] ([#480](https://github.com/NilsR0711/drydock/issues/480)) ([994cae3](https://github.com/NilsR0711/drydock/commit/994cae3fc4f44dcc816a61efa720934f98fa4ec9)), closes [#422](https://github.com/NilsR0711/drydock/issues/422)
+* **ui:** expose SegmentedControl and log-viewer filter toggle state via ARIA ([#457](https://github.com/NilsR0711/drydock/issues/457)) ([92c6be3](https://github.com/NilsR0711/drydock/commit/92c6be3369057fc7d4e99611231addfddfd51bc7)), closes [#400](https://github.com/NilsR0711/drydock/issues/400)
+* **ui:** guard IssueDetailModal against stale issue-detail responses ([#453](https://github.com/NilsR0711/drydock/issues/453)) ([60fafd6](https://github.com/NilsR0711/drydock/commit/60fafd66bac3cecd2f8a334bf4e12506b57b5afc)), closes [#399](https://github.com/NilsR0711/drydock/issues/399)
+* **ui:** lock scroll and inert the background while a Dialog is open ([#462](https://github.com/NilsR0711/drydock/issues/462)) ([62779e6](https://github.com/NilsR0711/drydock/commit/62779e6eab8a679b1fa20fb9b316df1cd7fe2de8)), closes [#404](https://github.com/NilsR0711/drydock/issues/404)
+* **ui:** surface subtask read failures in the issue detail modal ([#425](https://github.com/NilsR0711/drydock/issues/425)) ([#479](https://github.com/NilsR0711/drydock/issues/479)) ([ba06b87](https://github.com/NilsR0711/drydock/commit/ba06b87a3c33eb3b0f51502caee2ecdb00948225))
+
+
+### Performance Improvements
+
+* **dashboard:** aggregate SSE snapshot in SQL and share it across clients ([#415](https://github.com/NilsR0711/drydock/issues/415)) ([c55afe7](https://github.com/NilsR0711/drydock/commit/c55afe76110221501bbdcebc0c937e982270e333))
+
 ## [1.1.1](https://github.com/NilsR0711/drydock/compare/v1.1.0...v1.1.1) (2026-06-23)
 
 
