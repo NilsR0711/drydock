@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import {
   type EdgeState,
@@ -12,7 +12,7 @@ import { NOTIFY_DISPATCH_BUDGET_MS, type NotifyTransports } from "@/lib/notify/n
 import { saveSettings } from "@/lib/settings/service";
 
 let db: DB;
-let postJson: ReturnType<typeof vi.fn>;
+let postJson: Mock<NotifyTransports["postJson"]>;
 let transports: NotifyTransports;
 
 beforeEach(() => {
