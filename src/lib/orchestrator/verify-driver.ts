@@ -19,7 +19,7 @@ import {
 import { logError } from "@/lib/log/logger";
 import { redactSecrets } from "@/lib/log/redact";
 import { recordEvent } from "./jobs";
-import { runOneShotAndRecordCost } from "./one-shot-runner";
+import { buildOneShotGenerator, type OneShotGeneratorDeps } from "./one-shot-generator";
 import type { SubtaskStatus } from "./subtask-state";
 
 /**
@@ -53,39 +53,20 @@ export function verifyCommentMarker(jobId: number): string {
  * A {@link VerificationGenerator} backed by a one-shot agent run. The CLI shape
  * comes from the repo's {@link AgentProvider} (Claude `-p`, Codex `exec`), and a
  * tight timeout is enforced by the runner. Best-effort: a non-zero exit,
- * unparseable output, or a thrown error (e.g. a timeout) all yield `null`.
+ * unparseable output, or a thrown error (e.g. a timeout) all yield `null` —
+ * except a waitable provider limit (issues #167/#430), which latches the agent
+ * and throws {@link ProviderLimitError} so the caller defers instead of
+ * silently recording no verification result against an exhausted quota.
  */
-export function buildVerificationGenerator(deps: {
-  provider: AgentProvider;
-  command: string;
-  model: string;
-  cwd: string;
-  repoId?: number;
-  db?: DB;
-  runner?: CommandRunner;
-  timeoutMs?: number;
-}): VerificationGenerator {
-  const timeoutMs = deps.timeoutMs ?? VERIFY_TIMEOUT_MS;
-  return async (input) => {
-    try {
-      const { text, exitCode } = await runOneShotAndRecordCost({
-        provider: deps.provider,
-        command: deps.command,
-        model: deps.model,
-        cwd: deps.cwd,
-        prompt: buildVerificationPrompt(input),
-        repoId: deps.repoId,
-        type: "verify",
-        timeoutMs,
-        runner: deps.runner,
-        db: deps.db,
-      });
-      if (exitCode !== 0) return null;
-      return parseVerification(text);
-    } catch {
-      return null;
-    }
-  };
+export function buildVerificationGenerator(deps: OneShotGeneratorDeps): VerificationGenerator {
+  return buildOneShotGenerator<VerificationInput, VerificationResult | null>(deps, {
+    type: "verify",
+    defaultTimeoutMs: VERIFY_TIMEOUT_MS,
+    buildPrompt: buildVerificationPrompt,
+    onResult: (text) => parseVerification(text),
+    onExit: () => null,
+    onError: () => null,
+  });
 }
 
 /** Step a subtask forward to `done`, walking the state machine; best-effort. */

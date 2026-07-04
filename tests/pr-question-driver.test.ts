@@ -37,8 +37,13 @@ import {
   runPrQuestion,
 } from "@/lib/orchestrator/pr-question-driver";
 import { createPrQuestion, getPrQuestion } from "@/lib/orchestrator/pr-questions";
+import { ProviderLimitError, providerLimitBlocked } from "@/lib/orchestrator/provider-limit";
 import { openFeedbackItem } from "@/lib/orchestrator/review-feedback";
 import { addRepo } from "@/lib/repos/service";
+import { saveSettings } from "@/lib/settings/service";
+
+/** A Claude usage-limit stderr shape the classifier recognizes (issue #166). */
+const USAGE_LIMIT_STDERR = "Claude AI usage limit reached|9999999999";
 
 let db: DB;
 beforeEach(() => {
@@ -158,6 +163,33 @@ describe("buildAnswerGenerator", () => {
     await gen(input);
     const opts = (runner as ReturnType<typeof vi.fn>).mock.calls[0]?.[3];
     expect(opts).toMatchObject({ timeoutMs: 4321 });
+  });
+
+  it("latches the provider and throws on a waitable limit (issues #167/#430)", async () => {
+    const gen = buildAnswerGenerator({
+      provider,
+      command: "claude",
+      model: "m",
+      cwd: "/t",
+      db,
+      runner: fakeRunner({ exitCode: 1, stderr: USAGE_LIMIT_STDERR }),
+    });
+    await expect(gen(input)).rejects.toBeInstanceOf(ProviderLimitError);
+    expect(providerLimitBlocked("claude", db)?.kind).toBe("usage_limit");
+  });
+
+  it("treats a limited exit as a plain null failure when auto-wait is off", async () => {
+    saveSettings({ claudeLimitAutoWait: false }, db);
+    const gen = buildAnswerGenerator({
+      provider,
+      command: "claude",
+      model: "m",
+      cwd: "/t",
+      db,
+      runner: fakeRunner({ exitCode: 1, stderr: USAGE_LIMIT_STDERR }),
+    });
+    expect(await gen(input)).toBeNull();
+    expect(providerLimitBlocked("claude", db)).toBeUndefined();
   });
 });
 

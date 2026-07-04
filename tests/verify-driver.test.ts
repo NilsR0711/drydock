@@ -8,6 +8,7 @@ import { syncIssuesFromGh } from "@/lib/issues/service";
 import { listSubtasks, replaceSubtasks, transitionSubtask } from "@/lib/issues/subtasks";
 import type { VerificationResult } from "@/lib/issues/verify";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
+import { ProviderLimitError, providerLimitBlocked } from "@/lib/orchestrator/provider-limit";
 import {
   applyVerification,
   buildVerificationGenerator,
@@ -15,6 +16,10 @@ import {
   verifyCommentMarker,
 } from "@/lib/orchestrator/verify-driver";
 import { addRepo } from "@/lib/repos/service";
+import { saveSettings } from "@/lib/settings/service";
+
+/** A Claude usage-limit stderr shape the classifier recognizes (issue #166). */
+const USAGE_LIMIT_STDERR = "Claude AI usage limit reached|9999999999";
 
 /** Build a minimal stream-json one-shot response that embeds the given text. */
 function oneShotNdjson(text: string, costUsd = 0.002): string {
@@ -133,6 +138,33 @@ describe("buildVerificationGenerator", () => {
     await gen(input);
     const opts = (runner as ReturnType<typeof vi.fn>).mock.calls[0]?.[3];
     expect(opts).toMatchObject({ timeoutMs: 1234 });
+  });
+
+  it("latches the provider and throws on a waitable limit (issues #167/#430)", async () => {
+    const gen = buildVerificationGenerator({
+      provider,
+      command: "claude",
+      model: "m",
+      cwd: "/t",
+      db,
+      runner: fakeRunner({ exitCode: 1, stderr: USAGE_LIMIT_STDERR }),
+    });
+    await expect(gen(input)).rejects.toBeInstanceOf(ProviderLimitError);
+    expect(providerLimitBlocked("claude", db)?.kind).toBe("usage_limit");
+  });
+
+  it("treats a limited exit as a plain null failure when auto-wait is off", async () => {
+    saveSettings({ claudeLimitAutoWait: false }, db);
+    const gen = buildVerificationGenerator({
+      provider,
+      command: "claude",
+      model: "m",
+      cwd: "/t",
+      db,
+      runner: fakeRunner({ exitCode: 1, stderr: USAGE_LIMIT_STDERR }),
+    });
+    expect(await gen(input)).toBeNull();
+    expect(providerLimitBlocked("claude", db)).toBeUndefined();
   });
 });
 

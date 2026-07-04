@@ -2,8 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_AGENT, getAgentProvider, isAgentId } from "@/lib/agents/registry";
-import type { AgentProvider } from "@/lib/agents/types";
-import { type AgentId, WAITABLE_LIMIT_KINDS } from "@/lib/agents/types";
+import type { AgentId } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import { getRepo } from "@/lib/db/queries";
 import type { Job, Repo } from "@/lib/db/schema";
@@ -32,8 +31,8 @@ import { defaultModelForAgent } from "@/lib/models";
 import { getSettings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
 import { getJob, recordEvent } from "./jobs";
-import { runOneShotAndRecordCost } from "./one-shot-runner";
-import { latchProviderLimit, limitAutoWaitEnabled, ProviderLimitError } from "./provider-limit";
+import { buildOneShotGenerator, type OneShotGeneratorDeps } from "./one-shot-generator";
+import { ProviderLimitError } from "./provider-limit";
 
 /**
  * The driver-side glue for the opt-in AI PR audit (issue #168): resolving the
@@ -105,50 +104,15 @@ export function resolveAuditConfig(repo: Repo): AuditConfig {
  * throws {@link ProviderLimitError} so the caller defers instead of posting a
  * failure comment against a quota that is known to be exhausted.
  */
-export function buildPrAuditGenerator(deps: {
-  provider: AgentProvider;
-  command: string;
-  model: string;
-  cwd: string;
-  repoId?: number;
-  db?: DB;
-  runner?: CommandRunner;
-  timeoutMs?: number;
-}): PrAuditGenerator {
-  const timeoutMs = deps.timeoutMs ?? PR_AUDIT_TIMEOUT_MS;
-  return async (input) => {
-    let text: string;
-    let exitCode: number;
-    let stderr: string;
-    try {
-      ({ text, exitCode, stderr } = await runOneShotAndRecordCost({
-        provider: deps.provider,
-        command: deps.command,
-        model: deps.model,
-        cwd: deps.cwd,
-        prompt: buildPrAuditPrompt(input),
-        repoId: deps.repoId,
-        type: "pr_audit",
-        timeoutMs,
-        runner: deps.runner,
-        db: deps.db,
-      }));
-    } catch {
-      return null;
-    }
-    if (exitCode !== 0) {
-      const limit = deps.provider.classifyFailure?.({ exitCode, stderr, resultText: text });
-      if (limit && WAITABLE_LIMIT_KINDS.includes(limit.kind)) {
-        const db = deps.db ?? getDb();
-        if (limitAutoWaitEnabled(deps.provider.id, db)) {
-          latchProviderLimit(limit, db);
-          throw new ProviderLimitError(limit);
-        }
-      }
-      return null;
-    }
-    return parsePrAudit(text);
-  };
+export function buildPrAuditGenerator(deps: OneShotGeneratorDeps): PrAuditGenerator {
+  return buildOneShotGenerator<PrAuditInput, PrAuditResult | null>(deps, {
+    type: "pr_audit",
+    defaultTimeoutMs: PR_AUDIT_TIMEOUT_MS,
+    buildPrompt: buildPrAuditPrompt,
+    onResult: (text) => parsePrAudit(text),
+    onExit: () => null,
+    onError: () => null,
+  });
 }
 
 /**

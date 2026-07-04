@@ -13,12 +13,13 @@ import {
   type PrAnswerGenerator,
   type PrCheckSummary,
   type PrQuestionContext,
+  type PrQuestionInput,
   parseAnswer,
 } from "@/lib/issues/pr-question";
 import { listIssues } from "@/lib/issues/service";
 import { redactSecrets } from "@/lib/log/redact";
 import { recordEvent } from "./jobs";
-import { runOneShotAndRecordCost } from "./one-shot-runner";
+import { buildOneShotGenerator, type OneShotGeneratorDeps } from "./one-shot-generator";
 import { markQuestionAnswered, markQuestionError } from "./pr-questions";
 import { listFeedbackItems } from "./review-feedback";
 
@@ -50,39 +51,20 @@ export interface QuestionForge {
  * A {@link PrAnswerGenerator} backed by a one-shot agent run. The CLI shape
  * comes from the repo's {@link AgentProvider}, and a tight timeout is enforced
  * by the runner. Best-effort: a non-zero exit, an empty answer, or a thrown
- * error (e.g. a timeout) all yield `null`.
+ * error (e.g. a timeout) all yield `null` — except a waitable provider limit
+ * (issues #167/#430), which latches the agent and throws
+ * {@link ProviderLimitError} so the caller defers instead of marking the
+ * question errored against an exhausted quota.
  */
-export function buildAnswerGenerator(deps: {
-  provider: AgentProvider;
-  command: string;
-  model: string;
-  cwd: string;
-  repoId?: number;
-  db?: DB;
-  runner?: CommandRunner;
-  timeoutMs?: number;
-}): PrAnswerGenerator {
-  const timeoutMs = deps.timeoutMs ?? PR_QUESTION_TIMEOUT_MS;
-  return async (input) => {
-    try {
-      const { text, exitCode } = await runOneShotAndRecordCost({
-        provider: deps.provider,
-        command: deps.command,
-        model: deps.model,
-        cwd: deps.cwd,
-        prompt: buildQuestionPrompt(input),
-        repoId: deps.repoId,
-        type: "pr-question",
-        timeoutMs,
-        runner: deps.runner,
-        db: deps.db,
-      });
-      if (exitCode !== 0) return null;
-      return parseAnswer(text);
-    } catch {
-      return null;
-    }
-  };
+export function buildAnswerGenerator(deps: OneShotGeneratorDeps): PrAnswerGenerator {
+  return buildOneShotGenerator<PrQuestionInput, string | null>(deps, {
+    type: "pr-question",
+    defaultTimeoutMs: PR_QUESTION_TIMEOUT_MS,
+    buildPrompt: buildQuestionPrompt,
+    onResult: (text) => parseAnswer(text),
+    onExit: () => null,
+    onError: () => null,
+  });
 }
 
 /** Run an async forge read, returning a fallback on any failure (best-effort). */

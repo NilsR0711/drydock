@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { codexProvider } from "@/lib/agents/codex";
 import { createDb, type DB } from "@/lib/db/client";
 import type { CreateReleaseInput, ForgeMergedPr, ReleaseSummary } from "@/lib/forge/types";
+import { ProviderLimitError, providerLimitBlocked } from "@/lib/orchestrator/provider-limit";
 import {
   buildReleaseEvaluationGenerator,
   previewRelease,
@@ -10,6 +12,10 @@ import {
 import type { ReleaseEvaluation, ReleaseEvaluationResult } from "@/lib/release/release";
 import { createReleaseRun, transitionReleaseRun } from "@/lib/release/release-service";
 import { addRepo } from "@/lib/repos/service";
+import { saveSettings } from "@/lib/settings/service";
+
+/** A Codex usage-limit stderr shape the classifier recognizes (issue #167). */
+const USAGE_LIMIT_STDERR = "ERROR: You've hit your usage limit. Try again at 9:01 PM.";
 
 let db: DB;
 beforeEach(() => {
@@ -317,5 +323,33 @@ describe("buildReleaseEvaluationGenerator", () => {
       ok: true,
       evaluation: { release: true, bump: "patch", title: "v0.0.1", notes: "x" },
     });
+  });
+
+  it("latches the provider and throws on a waitable limit (issues #167/#430)", async () => {
+    const generate = buildReleaseEvaluationGenerator({
+      provider: codexProvider,
+      command: "codex",
+      model: "gpt-5-codex",
+      cwd: "/tmp",
+      db,
+      runner: async () => ({ stdout: "", stderr: USAGE_LIMIT_STDERR, exitCode: 1 }),
+    });
+    await expect(generate({ fromTag: null, prs: [] })).rejects.toBeInstanceOf(ProviderLimitError);
+    expect(providerLimitBlocked("codex", db)?.kind).toBe("usage_limit");
+  });
+
+  it("reports a plain failure result when auto-wait is off, without latching", async () => {
+    saveSettings({ codexLimitAutoWait: false }, db);
+    const generate = buildReleaseEvaluationGenerator({
+      provider: codexProvider,
+      command: "codex",
+      model: "gpt-5-codex",
+      cwd: "/tmp",
+      db,
+      runner: async () => ({ stdout: "", stderr: USAGE_LIMIT_STDERR, exitCode: 1 }),
+    });
+    const result = await generate({ fromTag: null, prs: [] });
+    expect(result.ok).toBe(false);
+    expect(providerLimitBlocked("codex", db)).toBeUndefined();
   });
 });
