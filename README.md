@@ -173,6 +173,7 @@ reel — the **[full feature reference →](docs/FEATURES.md)** has every detail
 - **Cost tracking** — per-job and aggregate spend, daily + per-job ceilings (`0` = off), CSV/JSON export.
 - **Proactive usage gauges** — warn *before* a job hits the provider's subscription/rate limit; park and auto-resume when it resets.
 - **Rate-limit budgeting · credential watchdog · webhooks · external notifications** (Telegram/Slack/email) · **crash-safe lease queue**.
+- **Config export/import** — snapshot the global settings + every repo's automation profile to a versioned, secret-redacted JSON bundle and re-apply it on another machine, live (no downtime, no job history, no secrets).
 
 #### 🖥️ Surfaces
 - **MCP server** · **native macOS menu-bar shell** · **first-run onboarding** · **versioned prompt editor** · **ADR review queue** · light/dark **polished UX**.
@@ -272,7 +273,7 @@ Non-loopback binds need an explicit opt-in because the dashboard has no auth:
 | `/analytics` | Merge rate, time-to-merge p50/p90, CI retries, throughput, cost-per-merge |
 | `/prompts` · `/adrs` | Versioned prompt editor · ADR review queue |
 | `/costs` · `/logs` | Cost dashboard (CSV/JSON export) · structured server logs with live tail |
-| `/settings` | Global settings |
+| `/settings` | Global settings · backup &amp; sharing (config export/import) |
 
 ## MCP server
 

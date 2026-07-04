@@ -388,6 +388,19 @@ what will change before applying. Identity and secrets — `path`, `name`, `defa
 fields are skipped with a warning instead of failing the whole import, and a round-trip into a fresh repo
 reproduces the same effective config.
 
+### 🗄️ Export/import the whole configuration
+
+From **Settings → Backup & sharing**, export the **entire instance configuration** — the global settings
+plus every repo's automation profile — as one **versioned JSON document** (download via
+`/api/settings/export`, or copy). Import it on a second machine or after a database reset to recreate a
+working setup without re-clicking every toggle. Unlike `drydock backup`, it carries **no job history and
+no secrets**: every credential (Telegram/Slack/SMTP, the OpenRouter key, per-repo API tokens) is redacted
+on export and **never applied on import**, so a redacted bundle can never blank stored credentials. Repo
+profiles are matched to local repos **by name**; machine-specific clone paths never travel, and a profile
+with no local match is reported and skipped (add the repo first, then re-import). Import previews global
+settings and per-repo changes before applying, and — unlike `drydock restore` — it works **while the
+server is running**, with no downtime.
+
 ---
 
 ## Cost & limits
