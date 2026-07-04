@@ -77,6 +77,24 @@ describe("package.json publishability (issue #12)", () => {
     expect(pkg.scripts.dev).not.toMatch(/next dev/);
   });
 
+  it("overrides monaco's pinned dompurify to a patched release (issue #428)", () => {
+    // monaco-editor 0.55.1 exact-pins dompurify@3.2.7, which carries a family
+    // of XSS / prototype-pollution advisories fixed only in dompurify >=3.4.x
+    // (the highest vulnerable range is <=3.3.3). monaco has no newer release,
+    // so a pnpm override is the only way to pull a patched dompurify into the
+    // tree. Guard against the override being dropped, which would let the whole
+    // advisory family creep back into `pnpm audit --prod`.
+    const override = pkg.pnpm?.overrides?.dompurify;
+    expect(typeof override).toBe("string");
+
+    const parsed = override.match(/(\d+)\.(\d+)\.(\d+)/);
+    expect(parsed).not.toBeNull();
+    const [major, minor, patch] = parsed.slice(1).map(Number);
+    const floor = major * 1_000_000 + minor * 1_000 + patch;
+    // Require a floor strictly above the last vulnerable release (3.3.3).
+    expect(floor).toBeGreaterThanOrEqual(3 * 1_000_000 + 4 * 1_000 + 9);
+  });
+
   it("does not declare the unused UI-state packages zustand or nuqs (issue #427)", () => {
     // Both were listed as prod dependencies but imported nowhere in src/,
     // tests/, scripts/, bin/, or any config. They inflated the install size
