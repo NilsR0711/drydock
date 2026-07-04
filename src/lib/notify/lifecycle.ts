@@ -5,6 +5,33 @@ import type { NotificationEvent } from "./events";
 import { defaultTransports, dispatch, type NotifyTransports } from "./notifier";
 
 /**
+ * Move the edge latch to `next`, then dispatch. The latch flips *before* the
+ * await so an overlapping tick (these helpers run fire-and-forget) can't fire a
+ * duplicate while the first dispatch is in flight. If the dispatch rejects —
+ * e.g. a transient `SQLITE_BUSY` from the settings read inside {@link dispatch}
+ * — the latch is rolled back to `prev` so the transition is retried on the next
+ * tick instead of being latched away, and the error is re-thrown so the
+ * caller's `.catch` can log it (issue #420).
+ */
+async function latchAndDispatch(
+  state: EdgeState,
+  next: boolean,
+  event: NotificationEvent,
+  text: string,
+  db: DB,
+  transports: NotifyTransports,
+): Promise<void> {
+  const prev = state.active;
+  state.active = next;
+  try {
+    await dispatch(event, text, db, transports);
+  } catch (err) {
+    state.active = prev;
+    throw err;
+  }
+}
+
+/**
  * Edge-triggered notifications for orchestrator-level state (issue #22). These
  * states are polled on every driver tick, so naive dispatching would spam the
  * channels. The helpers fire only on the transition into the notable state and
@@ -35,8 +62,7 @@ export async function notifyCostLimitEdge(
 ): Promise<void> {
   if (blocked) {
     if (state.active) return;
-    state.active = true;
-    await dispatch("cost_limit", COST_LIMIT_MESSAGE, db, transports);
+    await latchAndDispatch(state, true, "cost_limit", COST_LIMIT_MESSAGE, db, transports);
   } else {
     state.active = false;
   }
@@ -86,12 +112,10 @@ export async function notifyProviderLimitEdge(
   const messages = PROVIDER_LIMIT_MESSAGES[agent];
   if (blocked) {
     if (state.active) return;
-    state.active = true;
-    await dispatch(messages.event, messages.blocked, db, transports);
+    await latchAndDispatch(state, true, messages.event, messages.blocked, db, transports);
   } else {
     if (!state.active) return;
-    state.active = false;
-    await dispatch(messages.event, messages.cleared, db, transports);
+    await latchAndDispatch(state, false, messages.event, messages.cleared, db, transports);
   }
 }
 
@@ -109,9 +133,10 @@ export async function notifyCredentialEdge(
 ): Promise<void> {
   if (failures.length > 0) {
     if (state.active) return;
-    state.active = true;
     const targets = failures.map((f) => `${f.label}: ${f.message}`).join("; ");
-    await dispatch(
+    await latchAndDispatch(
+      state,
+      true,
       "auth_expired",
       `🔑 Credential check failed — new jobs are paused until auth is restored. ${targets}`,
       db,
@@ -119,8 +144,9 @@ export async function notifyCredentialEdge(
     );
   } else {
     if (!state.active) return;
-    state.active = false;
-    await dispatch(
+    await latchAndDispatch(
+      state,
+      false,
       "auth_expired",
       "🔑 Credentials restored — the queue is resuming.",
       db,

@@ -373,13 +373,17 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
 
   // Edge-triggered cost-limit notification (issue #22): fire once when the
   // daily budget gate first closes, not on every poll tick.
-  void notifyCostLimitEdge(jobsAllowed(db).reason === "cost_limit", costLimitState, db);
+  void notifyCostLimitEdge(jobsAllowed(db).reason === "cost_limit", costLimitState, db).catch(
+    (err) => logError("[driver] cost-limit edge notify failed", err),
+  );
 
   // Credential watchdog (issue #177): notify on the failed↔healthy edge and
   // kick a probe round when one is due (on startup, then every interval).
   // Fire-and-forget with an in-flight guard inside the sweep — a slow `gh`
   // or GitLab probe must never block this tick's job claims.
-  void notifyCredentialEdge(getCredentialFailures(db), credentialEdgeState, db);
+  void notifyCredentialEdge(getCredentialFailures(db), credentialEdgeState, db).catch((err) =>
+    logError("[driver] credential edge notify failed", err),
+  );
   try {
     if (shouldRunCredentialProbe()) {
       const credentialProbe =
@@ -419,7 +423,9 @@ export async function driveTick(deps: DriveTickDeps = {}): Promise<void> {
   const latchedAgents: AgentId[] = [];
   for (const agent of LIMIT_AGENT_IDS) {
     const latch = agentLimitBlocked(agent, db);
-    void notifyProviderLimitEdge(agent, !!latch, providerLimitStates[agent], db);
+    void notifyProviderLimitEdge(agent, !!latch, providerLimitStates[agent], db).catch((err) =>
+      logError(`[driver] ${agent} provider-limit edge notify failed`, err),
+    );
     if (latch) {
       latchedAgents.push(agent);
       continue;
