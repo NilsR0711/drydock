@@ -501,27 +501,36 @@ Light/dark theme, confirm dialogs on destructive actions, toast feedback, and ac
 
 ### Backups & restore
 
-`drydock backup [path]` writes a consistent SQLite snapshot (default target `<data
-dir>/backups/`, never prunes); `drydock restore <path>` rolls back — it refuses while a drydock
-instance is running and clears stale WAL/SHM sidecars. Both are WAL-aware via better-sqlite3's
-native `.backup()`, so a backup taken under a live server is still consistent. From a source
-checkout, `pnpm backup` writes into `data/backups/` and prunes anything older than 7 days
-(schedule it daily via cron/launchd).
+The server runs an **automatic daily backup sweep** (ADR 042): at startup and every 24h the
+lock-holding instance writes a WAL-safe snapshot into `<data dir>/backups/` and prunes snapshots
+older than the **backup retention** window (Settings → default 7 days). Set backup retention to
+`0` to disable the sweep. Failures are logged, never fatal — so `drydock start` and `drydock
+service install` get hands-off, retention-bounded backups with no cron needed.
+
+`drydock backup [path]` writes a consistent SQLite snapshot on demand (default target `<data
+dir>/backups/`, never prunes — an explicit command must not delete files unasked); `drydock
+restore <path>` rolls back — it refuses while a drydock instance is running and clears stale
+WAL/SHM sidecars. All are WAL-aware via better-sqlite3's native `.backup()`, so a backup taken
+under a live server is still consistent. From a source checkout, `pnpm backup` runs the same
+snapshot-and-prune once for ad-hoc use.
 
 ### Diagnostics — `drydock doctor`
 
 Prints one line per probe (gh auth, claude/codex CLIs, GitLab token validity per configured base
-URL, free disk space at the data dir, `PRAGMA integrity_check`, instance lock) and exits non-zero
-on any failed probe, so it drops straight into cron/CI scripts.
+URL, free disk space at the data dir, `PRAGMA integrity_check`, the most recent DB backup, and the
+instance lock) and exits non-zero on any failed probe, so it drops straight into cron/CI scripts.
+The "last backup" probe reports the newest snapshot's age and path — ok within the daily window,
+warn when it is stale or missing (the sweep may have stopped), skip on a fresh install.
 
 ### Health endpoint
 
 `GET /api/health` returns a machine-readable liveness snapshot for Uptime-Kuma/Prometheus probes:
 `status` (`ok`/`degraded`) with `reasons`, `version`, `uptimeSeconds`, `driver` (whether this
 instance holds the driver lock, paused/draining flags, last tick timestamp), `queue` (job counts
-per state), and `budget` (today's spend vs the daily limit). HTTP 200 while the driver loop ticks;
-503 when the loop is stalled (no tick within 3 poll intervals), not running, or the DB is
-unreachable. Read-only and secret-free.
+per state), `budget` (today's spend vs the daily limit), and `lastBackupAt` (ISO-8601 of the newest
+DB snapshot, or `null`) so monitoring can alert on a backup sweep that stopped writing. HTTP 200
+while the driver loop ticks; 503 when the loop is stalled (no tick within 3 poll intervals), not
+running, or the DB is unreachable. Read-only and secret-free.
 
 ### Tick watchdog
 
@@ -572,7 +581,10 @@ it. (For an ad-hoc background run without a login service, use `drydock start`.)
 Finished jobs' verbose log events are pruned past the **log retention** window (default 30 days;
 cost summary rows are kept). A daily in-process sweep runs automatically; for a manual run use
 `pnpm db:prune [--days <n>] [--no-vacuum]`, which deletes expired events and runs `VACUUM` to
-reclaim disk. See [ADR 023](adr/023-log-retention-and-pruning.md).
+reclaim disk. See [ADR 023](adr/023-log-retention-and-pruning.md). DB backups have their own
+**backup retention** window (default 7 days; `0` disables the sweep), pruned by the same daily
+backup sweep — see [Backups & restore](#backups--restore) and [ADR
+042](adr/042-scheduled-in-process-backup-sweep.md).
 
 ### Secret redaction
 
