@@ -10,6 +10,7 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -97,6 +98,32 @@ export function resolveBackupTarget(pathArg, { dataDir, now = new Date() }) {
   return pathArg;
 }
 
+/**
+ * The most recent `drydock-*.db` snapshot in `backupDir`, or null when the
+ * directory is absent or holds none. Mirrors `latestBackup` in
+ * `src/lib/backup/backup.ts` so the CLI and server agree on what "the last
+ * backup" is.
+ *
+ * @param {string} backupDir
+ * @returns {{ path: string, mtimeMs: number } | null}
+ */
+export function latestBackup(backupDir) {
+  let files;
+  try {
+    files = readdirSync(backupDir);
+  } catch {
+    return null;
+  }
+  let latest = null;
+  for (const file of files) {
+    if (!file.startsWith("drydock-")) continue;
+    const full = join(backupDir, file);
+    const { mtimeMs } = statSync(full);
+    if (!latest || mtimeMs > latest.mtimeMs) latest = { path: full, mtimeMs };
+  }
+  return latest;
+}
+
 // better-sqlite3 is a native dependency; load it lazily so `drydock --help`
 // and friends never pay for (or crash on) the binding when it is not needed.
 async function loadDatabase() {
@@ -107,9 +134,10 @@ async function loadDatabase() {
 /**
  * `drydock backup [path]`: write a consistent snapshot of the SQLite database
  * via better-sqlite3's native `.backup()`, which is WAL-aware — safe while the
- * server is running. Unlike the server's scheduled backup job this never
- * prunes anything: a manual command must not delete files the operator did not
- * ask it to touch.
+ * server is running. Unlike the orchestrator's daily backup sweep (ADR 042),
+ * which prunes past its retention window, this manual command never deletes
+ * anything: an explicit command must not remove files the operator did not ask
+ * it to touch.
  *
  * @param {string | undefined} pathArg
  * @param {{ dbPath: string, dataDir: string, now?: Date,
@@ -235,6 +263,23 @@ const DISK_FAIL_BYTES = 200 * 1024 * 1024; // SQLite + WAL need headroom to comm
 const DISK_WARN_BYTES = 1024 * 1024 * 1024;
 
 /**
+ * A backup older than this means the daily sweep likely stopped. Two days
+ * gives the once-a-day sweep a full grace period before doctor flags it.
+ */
+const BACKUP_STALE_MS = 2 * 24 * 60 * 60 * 1000;
+
+/** Compact human age for a millisecond duration: "45s", "3m", "5h", "2d". */
+function humanAge(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
+/**
  * Run a CLI and capture its output; rejects on spawn failure or timeout.
  *
  * @param {string} cmd
@@ -322,16 +367,18 @@ async function probeCliVersion(runner, command) {
 /**
  * `drydock doctor`: one health probe per line — GitHub CLI auth, agent CLIs,
  * GitLab token validity per configured base URL, free disk space at the data
- * dir, `PRAGMA integrity_check`, and the instance lock. Returns a non-zero
- * exit code when any probe fails so the command is scriptable. Definitive
- * failures (bad auth, missing required CLI, corrupt DB, full disk) fail;
- * transient conditions (network errors, stale locks) only warn.
+ * dir, `PRAGMA integrity_check`, the most recent DB backup, and the instance
+ * lock. Returns a non-zero exit code when any probe fails so the command is
+ * scriptable. Definitive failures (bad auth, missing required CLI, corrupt DB,
+ * full disk) fail; transient conditions (network errors, stale locks, a stale
+ * or missing backup) only warn.
  *
  * @param {{ dbPath: string, dataDir: string, lockPath: string,
  *           runner?: (cmd: string, args: string[]) => Promise<{ exitCode: number, stdout: string, stderr: string }>,
  *           fetchImpl?: typeof fetch,
  *           statfsImpl?: (path: string) => { bavail: number | bigint, bsize: number | bigint },
  *           pidAlive?: (pid: number) => boolean,
+ *           now?: Date,
  *           log?: (line: string) => void, error?: (line: string) => void }} deps
  * @returns {Promise<number>} exit code
  */
@@ -343,6 +390,7 @@ export async function runDoctorCommand({
   fetchImpl = fetch,
   statfsImpl = statfsSync,
   pidAlive,
+  now = new Date(),
   log = console.log,
   error = console.error,
 }) {
@@ -482,6 +530,33 @@ export async function runDoctorCommand({
         detail: `could not open database (${firstLine(String(err))})`,
       });
     }
+  }
+
+  // Most recent backup: catches a scheduled sweep that stopped writing (issue
+  // #411). A backup within the daily window is ok; an old one warns; none warns
+  // once a DB exists (the sweep should have written one), but a fresh install
+  // with no DB yet simply skips.
+  const latest = latestBackup(join(dataDir, "backups"));
+  if (latest) {
+    const ageMs = now.getTime() - latest.mtimeMs;
+    const detail = `last backup ${humanAge(ageMs)} ago (${latest.path})`;
+    results.push(
+      ageMs > BACKUP_STALE_MS
+        ? {
+            name: "last backup",
+            status: "warn",
+            detail: `${detail} — the daily sweep may have stopped`,
+          }
+        : { name: "last backup", status: "ok", detail },
+    );
+  } else if (!existsSync(dbPath)) {
+    results.push({ name: "last backup", status: "skip", detail: "no database yet" });
+  } else {
+    results.push({
+      name: "last backup",
+      status: "warn",
+      detail: `no backups in ${join(dataDir, "backups")} — enable the sweep or run \`drydock backup\``,
+    });
   }
 
   // Instance lock: informative — a running dock is healthy, a stale lock warns.
