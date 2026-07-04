@@ -194,16 +194,19 @@ describe("webhook channel (issue #414)", () => {
     vi.restoreAllMocks();
   });
 
-  it("isolates its own failure and never leaks the secret into the log", async () => {
+  it("isolates its own failure and scrubs the secret from the log even when the error embeds it", async () => {
     saveSettings({ webhookUrl: WEBHOOK_URL, webhookSecret: "top-secret-value" }, db);
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     postJson.mockImplementationOnce(async () => {
-      throw new Error("HTTP 500");
+      // A transport/library could echo the request context — including the
+      // secret header — into its error; the notifier must still never log it.
+      throw new Error("POST failed; sent X-Drydock-Secret: top-secret-value");
     });
     await expect(dispatch("needs_human", "help", db, transports)).resolves.toBeUndefined();
     const logged = spy.mock.calls.flat().join(" ");
     expect(logged).toContain("webhook");
     expect(logged).not.toContain("top-secret-value");
+    expect(logged).toContain("[REDACTED]");
     spy.mockRestore();
   });
 
@@ -215,6 +218,19 @@ describe("webhook channel (issue #414)", () => {
     expect(url).toBe(WEBHOOK_URL);
     expect(body).toMatchObject({ event: "test" });
     expect(typeof (body as { text: unknown }).text).toBe("string");
+  });
+
+  it("scrubs the secret from a sendTest failure surfaced to the UI", async () => {
+    saveSettings({ webhookUrl: WEBHOOK_URL, webhookSecret: "top-secret-value" }, db);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    postJson.mockImplementationOnce(async () => {
+      throw new Error("bad request: X-Drydock-Secret top-secret-value");
+    });
+    const results = await sendTest(db, transports);
+    const webhookResult = results.find((r) => r.channel === "webhook");
+    expect(webhookResult?.ok).toBe(false);
+    expect(webhookResult?.error).not.toContain("top-secret-value");
+    vi.restoreAllMocks();
   });
 });
 

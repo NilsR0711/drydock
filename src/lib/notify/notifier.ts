@@ -1,6 +1,6 @@
 import { type DB, getDb } from "@/lib/db/client";
 import { redactSecrets } from "@/lib/log/redact";
-import { getSettings, type Settings } from "@/lib/settings/service";
+import { getSettings, SECRET_SETTING_KEYS, type Settings } from "@/lib/settings/service";
 import type { NotificationEvent } from "./events";
 
 /** SMTP connection details, derived from settings, handed to the mail transport. */
@@ -126,6 +126,23 @@ function configuredChannels(s: Settings): Channel[] {
 }
 
 /**
+ * Scrub a delivery error before it is logged or surfaced to the UI. On top of
+ * the pattern-based {@link redactSecrets}, this masks the configured secret
+ * *values* verbatim: the webhook shared secret is arbitrary operator text no
+ * pattern would recognise, so a transport or library that echoes request context
+ * (e.g. the `X-Drydock-Secret` header) into its error could otherwise leak it.
+ * Driven off {@link SECRET_SETTING_KEYS} so it covers every stored credential.
+ */
+function redactForLog(text: string, s: Settings): string {
+  let out = text;
+  for (const key of SECRET_SETTING_KEYS) {
+    const value = s[key];
+    if (typeof value === "string" && value !== "") out = out.split(value).join("[REDACTED]");
+  }
+  return redactSecrets(out);
+}
+
+/**
  * Resolve when `work` settles or `ms` elapses, whichever comes first — never
  * rejects. On timeout `onTimeout` runs and the promise resolves anyway, so an
  * awaited caller is freed while `work` continues in the background.
@@ -184,7 +201,7 @@ async function deliver(
     try {
       await channel.send(msg, s, transports);
     } catch (err) {
-      console.error(`[notify] ${channel.id} delivery failed`, redactSecrets(String(err)));
+      console.error(`[notify] ${channel.id} delivery failed`, redactForLog(String(err), s));
     }
   }
 }
@@ -218,8 +235,8 @@ export async function sendTest(
       );
       results.push({ channel: channel.id, ok: true });
     } catch (err) {
-      console.error(`[notify] ${channel.id} test failed`, redactSecrets(String(err)));
-      results.push({ channel: channel.id, ok: false, error: redactSecrets(errorMessage(err)) });
+      console.error(`[notify] ${channel.id} test failed`, redactForLog(String(err), s));
+      results.push({ channel: channel.id, ok: false, error: redactForLog(errorMessage(err), s) });
     }
   }
   return results;
