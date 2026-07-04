@@ -18,7 +18,13 @@ import { getPrQuestion } from "@/lib/orchestrator/pr-questions";
 import { resumeJobWithInstruction } from "@/lib/orchestrator/resume-instruction";
 import { isGitRepoPath } from "@/lib/repos/path";
 import { addRepo } from "@/lib/repos/service";
-import { getSettings, jobsAllowed, repoJobsAllowed, saveSettings } from "@/lib/settings/service";
+import {
+  getSettings,
+  jobsAllowed,
+  redactSettingsSecrets,
+  repoJobsAllowed,
+  saveSettings,
+} from "@/lib/settings/service";
 import { getBroker } from "@/lib/stream/broker";
 import { addTrackedPrByUrl } from "@/lib/tracked-prs/resolve";
 import { getTrackedPr, listTrackedPrs, untrackPr } from "@/lib/tracked-prs/service";
@@ -46,18 +52,6 @@ export interface ToolDef {
 
 function parseArgs<S extends ZodRawShape>(shape: S, args: unknown): z.infer<z.ZodObject<S>> {
   return z.object(shape).parse(args);
-}
-
-/** Settings keys that carry credentials and must never be returned verbatim. */
-const SECRET_SETTINGS = ["telegramBotToken", "slackWebhookUrl", "smtpPass"] as const;
-
-/** Mask non-empty credential fields so secrets never leave the process. */
-function redactSettings(settings: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...settings };
-  for (const key of SECRET_SETTINGS) {
-    if (typeof out[key] === "string" && out[key] !== "") out[key] = "***";
-  }
-  return out;
 }
 
 /**
@@ -333,7 +327,7 @@ export const tools: ToolDef[] = [
     name: "get_settings",
     description: "Get the global Drydock settings (credential fields are redacted).",
     inputSchema: {},
-    handler: (_args, { db }) => redactSettings(getSettings(db) as Record<string, unknown>),
+    handler: (_args, { db }) => redactSettingsSecrets(getSettings(db) as Record<string, unknown>),
   },
   {
     name: "update_settings",
@@ -343,7 +337,7 @@ export const tools: ToolDef[] = [
     handler: (args, { db }) => {
       const patch = parseArgs(updateSettingsShape, args);
       const merged = saveSettings(patch, db) as Record<string, unknown>;
-      return redactSettings(merged);
+      return redactSettingsSecrets(merged);
     },
   },
   {

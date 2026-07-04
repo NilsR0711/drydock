@@ -165,6 +165,41 @@ export const settingsSchema = z.object({
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
+/**
+ * Global-settings keys that carry credentials and must never leave the process
+ * verbatim. This is the single source of truth for "which settings are secrets":
+ * the MCP `get_settings` tool and the settings export/import bundle (issue #412)
+ * both redact against it, so a field added here is masked everywhere at once.
+ * `openrouterApiKey` lives here too — its schema comment already promises it is
+ * "redacted from logs/events like all other secrets" (ADR 039).
+ */
+export const SECRET_SETTING_KEYS = [
+  "telegramBotToken",
+  "slackWebhookUrl",
+  "smtpPass",
+  "openrouterApiKey",
+] as const satisfies readonly (keyof Settings)[];
+
+export type SecretSettingKey = (typeof SECRET_SETTING_KEYS)[number];
+
+/** Fixed mask substituted for a non-empty secret; also the sentinel an import ignores. */
+export const SETTINGS_REDACTION_PLACEHOLDER = "***";
+
+/**
+ * Return a copy of `settings` with every non-empty credential field masked. An
+ * empty secret stays empty (nothing to hide), and non-secret fields are copied
+ * through untouched. The input is never mutated.
+ */
+export function redactSettingsSecrets<T extends Record<string, unknown>>(settings: T): T {
+  const out = { ...settings };
+  for (const key of SECRET_SETTING_KEYS) {
+    if (typeof out[key] === "string" && out[key] !== "") {
+      (out as Record<string, unknown>)[key] = SETTINGS_REDACTION_PLACEHOLDER;
+    }
+  }
+  return out;
+}
+
 const KEY = "global";
 
 export function getSettings(db: DB = getDb()): Settings {

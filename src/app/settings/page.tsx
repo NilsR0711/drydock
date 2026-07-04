@@ -1,6 +1,7 @@
 import { Settings as SettingsIcon } from "lucide-react";
 import { OpenOnboardingButton } from "@/components/onboarding/open-onboarding-button";
 import { PageHeader } from "@/components/page-header";
+import { SettingsConfigBundlePanel } from "@/components/settings-config-bundle-panel";
 import { SettingsForm } from "@/components/settings-form";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { getSettings } from "@/lib/settings/service";
@@ -27,6 +28,9 @@ export default function SettingsPage() {
         <OpenOnboardingButton />
       </Card>
       <SettingsForm initial={settings} />
+      <Card pad="lg" className="mt-6">
+        <SettingsConfigBundlePanel />
+      </Card>
     </div>
   );
 }
