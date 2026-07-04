@@ -22,6 +22,21 @@ export function resolveMigrationsDir(): string {
 // skips them and manages FK enforcement at the connection level instead.
 const FOREIGN_KEYS_PRAGMA = /^PRAGMA\s+foreign_keys\s*=/i;
 
+// One row of `PRAGMA foreign_key_check` output: a dangling reference in `table`
+// (the child) at `rowid`, pointing at the missing `parent` row via foreign key
+// index `fkid`. https://sqlite.org/pragma.html#pragma_foreign_key_check
+interface ForeignKeyViolation {
+  table: string;
+  rowid: number | null;
+  parent: string;
+  fkid: number;
+}
+
+/** Distinct child tables named in a `foreign_key_check` result, sorted. */
+function affectedTables(violations: ForeignKeyViolation[]): string {
+  return [...new Set(violations.map((v) => v.table))].sort().join(", ");
+}
+
 /**
  * Apply generated drizzle SQL migrations directly via better-sqlite3. We avoid
  * drizzle's own migrator because it imports `node:crypto`, which webpack pulls
@@ -36,6 +51,14 @@ const FOREIGN_KEYS_PRAGMA = /^PRAGMA\s+foreign_keys\s*=/i;
  * transaction, the in-file FK pragmas are skipped, referential integrity is
  * verified with `PRAGMA foreign_key_check` before commit (a violation rolls
  * the whole migration back), and enforcement is restored afterwards.
+ *
+ * `foreign_key_check` scans the whole database, not just the tables a migration
+ * touched, so a dangling row that predates the migration (e.g. an out-of-band
+ * `sqlite3` edit with FK enforcement off) would otherwise be misattributed to
+ * the first pending migration and permanently block every schema upgrade. To
+ * keep pre-existing corruption diagnosable, the runner checks integrity once up
+ * front — but only when there is migration work to do, so an already-current DB
+ * that runs fine today is never newly rejected (issue #417).
  */
 function applyMigrations(sqlite: Database.Database): void {
   const migrationsFolder = resolveMigrationsDir();
@@ -54,10 +77,24 @@ function applyMigrations(sqlite: Database.Database): void {
       .all()
       .map((r) => (r as { name: string }).name),
   );
+  const pending = files.filter((f) => !applied.has(f));
+  if (pending.length === 0) return;
+
+  // Catch corruption that predates the pending migrations so the per-migration
+  // check below can only ever fire on violations a migration actually creates.
+  const preExisting = sqlite.pragma("foreign_key_check") as ForeignKeyViolation[];
+  if (preExisting.length > 0) {
+    throw new Error(
+      `database has ${preExisting.length} pre-existing foreign key violation(s) ` +
+        `before any migration ran (affected table(s): ${affectedTables(preExisting)}); ` +
+        `the database was likely modified out-of-band with foreign key enforcement off — ` +
+        `repair or restore it before upgrading`,
+    );
+  }
+
   const record = sqlite.prepare("INSERT INTO __migrations (name) VALUES (?)");
 
-  for (const file of files) {
-    if (applied.has(file)) continue;
+  for (const file of pending) {
     const sql = readFileSync(join(migrationsFolder, file), "utf8");
     sqlite.pragma("foreign_keys = OFF");
     try {
