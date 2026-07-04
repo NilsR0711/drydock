@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import type { CreateReleaseInput, ForgeMergedPr, ReleaseSummary } from "@/lib/forge/types";
 import {
@@ -7,13 +7,17 @@ import {
   publishRelease,
   type ReleaseForge,
 } from "@/lib/orchestrator/release-driver";
-import type { ReleaseEvaluation } from "@/lib/release/release";
+import type { ReleaseEvaluation, ReleaseEvaluationResult } from "@/lib/release/release";
 import { createReleaseRun, transitionReleaseRun } from "@/lib/release/release-service";
 import { addRepo } from "@/lib/repos/service";
 
 let db: DB;
 beforeEach(() => {
   db = createDb(":memory:");
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function fakeForge(over: Partial<ReleaseForge> = {}): ReleaseForge {
@@ -35,7 +39,10 @@ function fakeForge(over: Partial<ReleaseForge> = {}): ReleaseForge {
 }
 
 function evalGen(result: ReleaseEvaluation | null) {
-  return vi.fn(async () => result);
+  return vi.fn(
+    async (): Promise<ReleaseEvaluationResult> =>
+      result ? { ok: true, evaluation: result } : { ok: false, reason: "evaluation unavailable" },
+  );
 }
 
 describe("previewRelease", () => {
@@ -152,6 +159,40 @@ describe("publishRelease (auto)", () => {
     expect(final.errorMessage).toBeTruthy();
   });
 
+  it("records the evaluation's real failure reason, not a constant message", async () => {
+    const r = addRepo({ path: "/r", name: "r" }, db);
+    const run = createReleaseRun({ repoId: r.id, mode: "auto", triggerSha: "s" }, db);
+    const final = await publishRelease(run.id, {
+      repo: r,
+      forge: fakeForge(),
+      db,
+      generate: vi.fn(
+        async (): Promise<ReleaseEvaluationResult> => ({
+          ok: false,
+          reason: "evaluation agent exited with code 137 (out of memory)",
+        }),
+      ),
+    });
+    expect(final.status).toBe("error");
+    expect(final.errorMessage).toBe("evaluation agent exited with code 137 (out of memory)");
+    expect(final.errorMessage).not.toBe("release evaluation failed");
+  });
+
+  it("bounds an oversized failure reason to 500 chars", async () => {
+    const r = addRepo({ path: "/r", name: "r" }, db);
+    const run = createReleaseRun({ repoId: r.id, mode: "auto", triggerSha: "s" }, db);
+    const final = await publishRelease(run.id, {
+      repo: r,
+      forge: fakeForge(),
+      db,
+      generate: vi.fn(
+        async (): Promise<ReleaseEvaluationResult> => ({ ok: false, reason: "x".repeat(2000) }),
+      ),
+    });
+    expect(final.status).toBe("error");
+    expect(final.errorMessage?.length).toBe(500);
+  });
+
   it("moves the run to error when publishing throws", async () => {
     const r = addRepo({ path: "/r", name: "r" }, db);
     const run = createReleaseRun({ repoId: r.id, mode: "auto", triggerSha: "s" }, db);
@@ -205,26 +246,64 @@ describe("publishRelease (manual)", () => {
 });
 
 describe("buildReleaseEvaluationGenerator", () => {
-  it("returns null on a non-zero exit", async () => {
+  const fakeProvider = {
+    buildOneShotArgs: () => ["-p", "x"],
+    buildStreamOneShotArgs: () => null,
+  } as never;
+
+  it("reports a failure result and logs the exit code plus output on a non-zero exit", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const generate = buildReleaseEvaluationGenerator({
-      provider: {
-        buildOneShotArgs: () => ["-p", "x"],
-        buildStreamOneShotArgs: () => null,
-      } as never,
+      provider: fakeProvider,
       command: "claude",
       model: "m",
       cwd: "/tmp",
-      runner: async () => ({ stdout: "", stderr: "boom", exitCode: 1 }),
+      runner: async () => ({ stdout: "", stderr: "provider quota exceeded", exitCode: 42 }),
     });
-    expect(await generate({ fromTag: null, prs: [] })).toBeNull();
+    const result = await generate({ fromTag: null, prs: [] });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("42");
+    const logged = errSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    expect(logged).toContain("42");
+    expect(logged).toContain("provider quota exceeded");
+  });
+
+  it("reports a failure result and logs the error when the one-shot throws (e.g. a timeout)", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const generate = buildReleaseEvaluationGenerator({
+      provider: fakeProvider,
+      command: "claude",
+      model: "m",
+      cwd: "/tmp",
+      runner: async () => {
+        throw new Error("release eval timed out after 180000ms");
+      },
+    });
+    const result = await generate({ fromTag: null, prs: [] });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("timed out");
+    const logged = errSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    expect(logged).toContain("release eval timed out after 180000ms");
+  });
+
+  it("reports a failure result and logs when the agent output is unparseable", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const generate = buildReleaseEvaluationGenerator({
+      provider: fakeProvider,
+      command: "claude",
+      model: "m",
+      cwd: "/tmp",
+      runner: async () => ({ stdout: "not json at all", stderr: "", exitCode: 0 }),
+    });
+    const result = await generate({ fromTag: null, prs: [] });
+    expect(result.ok).toBe(false);
+    const logged = errSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    expect(logged.toLowerCase()).toContain("release");
   });
 
   it("parses a valid evaluation from agent stdout", async () => {
     const generate = buildReleaseEvaluationGenerator({
-      provider: {
-        buildOneShotArgs: () => ["-p", "x"],
-        buildStreamOneShotArgs: () => null,
-      } as never,
+      provider: fakeProvider,
       command: "claude",
       model: "m",
       cwd: "/tmp",
@@ -235,10 +314,8 @@ describe("buildReleaseEvaluationGenerator", () => {
       }),
     });
     expect(await generate({ fromTag: null, prs: [] })).toEqual({
-      release: true,
-      bump: "patch",
-      title: "v0.0.1",
-      notes: "x",
+      ok: true,
+      evaluation: { release: true, bump: "patch", title: "v0.0.1", notes: "x" },
     });
   });
 });

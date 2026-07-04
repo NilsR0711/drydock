@@ -6,6 +6,7 @@ import { type DB, getDb } from "@/lib/db/client";
 import type { ReleaseRun, Repo } from "@/lib/db/schema";
 import type { CommandRunner } from "@/lib/exec/runner";
 import type { CreateReleaseInput, ForgeMergedPr, ReleaseSummary } from "@/lib/forge/types";
+import { logError } from "@/lib/log/logger";
 import {
   buildReleaseEvaluationPrompt,
   latestReleaseTag,
@@ -53,10 +54,19 @@ export const RELEASE_EVAL_TIMEOUT_MS = 3 * 60 * 1000;
 /** How many recently merged PRs to scan when gathering a release window. */
 const MERGED_PR_SCAN_LIMIT = 100;
 
+/** Cap on the failure output echoed to the log / recorded on the run. */
+const FAILURE_DETAIL_LIMIT = 500;
+
 /**
  * A {@link ReleaseEvaluationGenerator} backed by a one-shot agent run. The CLI
  * shape comes from the repo's {@link AgentProvider}. Best-effort: a non-zero
- * exit, unparseable output, or a thrown error (e.g. a timeout) all yield `null`.
+ * exit, unparseable output, or a thrown error (e.g. a timeout) yield a
+ * `{ ok: false, reason }` result rather than throwing. Every failure is logged
+ * before it returns — with the exit code and a bounded slice of the agent's
+ * output on a non-zero exit, or the thrown error on a crash — so a persistently
+ * failing auto-release is diagnosable from the logs (issue #424). The reason is
+ * kept for the caller to persist; the raw output is only ever logged (via the
+ * secret-redacting sink), never surfaced on the run record.
  */
 export function buildReleaseEvaluationGenerator(deps: {
   provider: AgentProvider;
@@ -71,7 +81,7 @@ export function buildReleaseEvaluationGenerator(deps: {
   const timeoutMs = deps.timeoutMs ?? RELEASE_EVAL_TIMEOUT_MS;
   return async (input) => {
     try {
-      const { text, exitCode } = await runOneShotAndRecordCost({
+      const { text, exitCode, stderr } = await runOneShotAndRecordCost({
         provider: deps.provider,
         command: deps.command,
         model: deps.model,
@@ -83,10 +93,25 @@ export function buildReleaseEvaluationGenerator(deps: {
         runner: deps.runner,
         db: deps.db,
       });
-      if (exitCode !== 0) return null;
-      return parseReleaseEvaluation(text);
-    } catch {
-      return null;
+      if (exitCode !== 0) {
+        const detail = (stderr || text).trim().slice(0, FAILURE_DETAIL_LIMIT);
+        logError(`[release] evaluation one-shot exited ${exitCode}${detail ? `: ${detail}` : ""}`);
+        return { ok: false, reason: `evaluation agent exited with code ${exitCode}` };
+      }
+      const evaluation = parseReleaseEvaluation(text);
+      if (!evaluation) {
+        logError(
+          `[release] evaluation one-shot returned unparseable output: ${text
+            .trim()
+            .slice(0, FAILURE_DETAIL_LIMIT)}`,
+        );
+        return { ok: false, reason: "evaluation agent returned unparseable output" };
+      }
+      return { ok: true, evaluation };
+    } catch (err) {
+      logError("[release] evaluation one-shot failed", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      return { ok: false, reason: `evaluation agent failed: ${reason}` };
     }
   };
 }
@@ -141,7 +166,10 @@ export interface PreviewReleaseDeps {
  */
 export async function previewRelease(deps: PreviewReleaseDeps): Promise<ReleasePreview> {
   const { fromTag, prs } = await gatherWindow(deps.forge);
-  const evaluation = await deps.generate({ fromTag, prs });
+  const result = await deps.generate({ fromTag, prs });
+  // The preview is best-effort: any evaluation failure degrades to a patch
+  // candidate with `shouldRelease: false` rather than surfacing the reason.
+  const evaluation = result.ok ? result.evaluation : null;
   const bump: SemverBump = evaluation?.bump ?? "patch";
   const candidateTag = nextReleaseTag(fromTag, bump);
   return {
@@ -193,17 +221,22 @@ export async function publishRelease(runId: number, deps: PublishReleaseDeps): P
       return transitionReleaseRun(runId, "skipped", { fromTag }, db);
     }
 
-    const evaluation = await deps.generate({ fromTag, prs });
+    const result = await deps.generate({ fromTag, prs });
 
     // Auto path requires a usable evaluation; manual forces a release regardless.
-    if (mode === "auto" && !evaluation) {
+    // On failure, record the evaluator's real reason (timeout, non-zero exit,
+    // provider error) so a persistently erroring repo is diagnosable from the
+    // release-runs UI instead of always showing a constant message (issue #424).
+    if (mode === "auto" && !result.ok) {
       return transitionReleaseRun(
         runId,
         "error",
-        { errorMessage: "release evaluation failed" },
+        { errorMessage: result.reason.slice(0, 500) },
         db,
       );
     }
+    // Manual publish tolerates a failed evaluation and falls back to defaults.
+    const evaluation = result.ok ? result.evaluation : null;
     if (mode === "auto" && evaluation && !evaluation.release) {
       return transitionReleaseRun(runId, "skipped", { fromTag }, db);
     }
