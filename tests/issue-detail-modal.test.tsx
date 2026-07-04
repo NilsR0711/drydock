@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { IssueSubtask } from "@/lib/db/schema";
 import type { IssueDetail } from "@/lib/github/gh";
 import { accessibleName, required } from "./fixtures/a11y";
 import { fire, type Rendered, render } from "./fixtures/react";
@@ -58,6 +59,25 @@ function makeDetail(overrides: Partial<IssueDetail> = {}): IssueDetail {
     comments: [],
     ...overrides,
   };
+}
+
+function makeSubtask(overrides: Partial<IssueSubtask> = {}): IssueSubtask {
+  return {
+    id: 1,
+    repoId: 3,
+    issueNumber: 42,
+    ordinal: 0,
+    title: "Extract the parser",
+    status: "pending",
+    bodyHash: "deadbeef",
+    createdAt: 0,
+    ...overrides,
+  };
+}
+
+/** Text of every rendered alert (role="alert"), joined for substring assertions. */
+function alertText(c: ParentNode): string {
+  return [...c.querySelectorAll('[role="alert"]')].map((a) => a.textContent).join(" ");
 }
 
 /** A promise whose resolution is controlled by the test, for race simulation. */
@@ -329,5 +349,77 @@ describe("IssueDetailModal stale-response guard (issue #399)", () => {
     const text = mounted.container.textContent ?? "";
     expect(text).toContain("#8");
     expect(text).not.toContain("#5");
+  });
+});
+
+describe("IssueDetailModal subtask fetch errors (issue #425)", () => {
+  let mounted: Rendered | undefined;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    actions.viewIssueAction.mockResolvedValue(makeDetail());
+    actions.editIssueAction.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    mounted?.unmount();
+    mounted = undefined;
+  });
+
+  it("surfaces a subtask read failure instead of the look-alike no-subtasks state", async () => {
+    actions.listSubtasksAction.mockRejectedValue(new Error("subtasks table is locked"));
+
+    mounted = render(<IssueDetailModal {...PROPS} />);
+    await flush();
+
+    // The primary detail still loaded — this is a secondary-section failure that
+    // must not be swallowed into a UI indistinguishable from "never decomposed".
+    expect(mounted.container.textContent).toContain("#42");
+    expect(alertText(mounted.container)).toContain("subtasks table is locked");
+  });
+
+  it("surfaces a subtask read failure on the reload() path", async () => {
+    // Modal open reads cleanly (no subtasks); the reload's read then rejects.
+    actions.listSubtasksAction
+      .mockResolvedValueOnce([])
+      .mockRejectedValue(new Error("subtasks read failed on reload"));
+
+    mounted = render(<IssueDetailModal {...PROPS} />);
+    await flush();
+    expect(mounted.container.querySelector('[role="alert"]')).toBeNull();
+
+    // Saving resolves editIssueAction → reload() re-reads subtasks → it rejects.
+    click(buttonByText(mounted.container, "Save changes"));
+    await flush();
+
+    expect(alertText(mounted.container)).toContain("subtasks read failed on reload");
+  });
+
+  it("renders no subtasks section and no error for an issue with zero subtasks", async () => {
+    actions.listSubtasksAction.mockResolvedValue([]);
+
+    mounted = render(<IssueDetailModal {...PROPS} />);
+    await flush();
+
+    expect(mounted.container.querySelector('[role="alert"]')).toBeNull();
+    // The "Subtasks (n/m)" header only renders when there are subtasks.
+    expect(mounted.container.textContent).not.toContain("Subtasks");
+  });
+
+  it("clears a prior subtask error once a later read succeeds", async () => {
+    actions.listSubtasksAction
+      .mockRejectedValueOnce(new Error("transient subtask read error"))
+      .mockResolvedValue([makeSubtask({ title: "Extract the parser" })]);
+
+    mounted = render(<IssueDetailModal {...PROPS} />);
+    await flush();
+    expect(alertText(mounted.container)).toContain("transient subtask read error");
+
+    // A successful reload must replace the error notice with the real list.
+    click(buttonByText(mounted.container, "Save changes"));
+    await flush();
+
+    expect(mounted.container.querySelector('[role="alert"]')).toBeNull();
+    expect(mounted.container.textContent).toContain("Extract the parser");
   });
 });
