@@ -131,6 +131,72 @@ describe("notifyCredentialEdge (issue #177)", () => {
   });
 });
 
+describe("edge dispatch failure recovery (issue #420)", () => {
+  // A DB read inside dispatch() (getSettings) sits outside its try/catch, so a
+  // transient SQLite error (e.g. SQLITE_BUSY from the concurrent MCP process)
+  // rejects the helper. Simulate that by handing the helper a db whose first
+  // read throws.
+  const throwingDb = {
+    select() {
+      throw new Error("SQLITE_BUSY: database is locked");
+    },
+  } as unknown as DB;
+
+  it("notifyCostLimitEdge rejects and rolls the latch back so the next tick retries", async () => {
+    const state: EdgeState = { active: false };
+    await expect(notifyCostLimitEdge(true, state, throwingDb, transports)).rejects.toThrow(
+      /SQLITE_BUSY/,
+    );
+    // Latch rolled back — not left armed after a failed dispatch.
+    expect(state.active).toBe(false);
+    // A subsequent healthy tick still fires the notification.
+    await notifyCostLimitEdge(true, state, db, transports);
+    expect(postJson).toHaveBeenCalledTimes(1);
+    expect(state.active).toBe(true);
+  });
+
+  it("notifyProviderLimitEdge rejects and rolls the block latch back so the next tick retries", async () => {
+    const state: EdgeState = { active: false };
+    await expect(
+      notifyProviderLimitEdge("claude", true, state, throwingDb, transports),
+    ).rejects.toThrow(/SQLITE_BUSY/);
+    expect(state.active).toBe(false);
+    await notifyProviderLimitEdge("claude", true, state, db, transports);
+    expect(postJson).toHaveBeenCalledTimes(1);
+    expect(state.active).toBe(true);
+  });
+
+  it("notifyProviderLimitEdge keeps the latch armed when the clear dispatch fails, retrying next tick", async () => {
+    const state: EdgeState = { active: false };
+    await notifyProviderLimitEdge("claude", true, state, db, transports);
+    expect(state.active).toBe(true);
+    postJson.mockClear();
+    // The clear-side dispatch fails: the latch must stay armed so the "resumed"
+    // message is retried rather than silently dropped.
+    await expect(
+      notifyProviderLimitEdge("claude", false, state, throwingDb, transports),
+    ).rejects.toThrow(/SQLITE_BUSY/);
+    expect(state.active).toBe(true);
+    await notifyProviderLimitEdge("claude", false, state, db, transports);
+    expect(postJson).toHaveBeenCalledTimes(1);
+    const body = JSON.stringify(postJson.mock.calls[0]?.[1] ?? {});
+    expect(body).toMatch(/resum/i);
+    expect(state.active).toBe(false);
+  });
+
+  it("notifyCredentialEdge rejects and rolls the block latch back so the next tick retries", async () => {
+    const failures = [{ target: "github", label: "GitHub CLI auth", message: "token invalid" }];
+    const state: EdgeState = { active: false };
+    await expect(notifyCredentialEdge(failures, state, throwingDb, transports)).rejects.toThrow(
+      /SQLITE_BUSY/,
+    );
+    expect(state.active).toBe(false);
+    await notifyCredentialEdge(failures, state, db, transports);
+    expect(postJson).toHaveBeenCalledTimes(1);
+    expect(state.active).toBe(true);
+  });
+});
+
 describe("notifyPauseTransition", () => {
   it("notifies only on the resume→paused edge", async () => {
     await notifyPauseTransition(false, true, db, transports);
