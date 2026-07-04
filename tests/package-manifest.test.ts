@@ -76,4 +76,21 @@ describe("package.json publishability (issue #12)", () => {
     expect(pkg.scripts.dev).toMatch(/scripts\/dev\.mjs/);
     expect(pkg.scripts.dev).not.toMatch(/next dev/);
   });
+
+  it("does not declare the unused UI-state packages zustand or nuqs (issue #427)", () => {
+    // Both were listed as prod dependencies but imported nowhere in src/,
+    // tests/, scripts/, bin/, or any config. They inflated the install size
+    // and audit surface of the published package and — because prod deps are
+    // baked into the standalone bundle — turned every Dependabot bump into a
+    // pointless manual release cycle. Guard against them creeping back in via
+    // any dependency section.
+    const declared = {
+      ...(pkg.dependencies ?? {}),
+      ...(pkg.devDependencies ?? {}),
+      ...(pkg.optionalDependencies ?? {}),
+      ...(pkg.peerDependencies ?? {}),
+    };
+    expect(declared).not.toHaveProperty("zustand");
+    expect(declared).not.toHaveProperty("nuqs");
+  });
 });
