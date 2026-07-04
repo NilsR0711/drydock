@@ -3,6 +3,7 @@ import { z } from "zod";
 import { type DB, getDb } from "@/lib/db/client";
 import { monthCost, todayCost } from "@/lib/db/cost-queries";
 import { repos, settings } from "@/lib/db/schema";
+import { logError } from "@/lib/log/logger";
 import { setServerLogLevel } from "@/lib/log/server-log";
 import { LOG_LEVELS } from "@/lib/log/types";
 import { isKnownModelId } from "@/lib/models";
@@ -202,14 +203,127 @@ export function redactSettingsSecrets<T extends Record<string, unknown>>(setting
 
 const KEY = "global";
 
+/**
+ * Storage key holding the raw, verbatim bytes of a global settings row that
+ * failed to validate (issue #421). Written the moment {@link getSettings} has to
+ * fall back, so a corruption — and the reset it triggers — is recoverable rather
+ * than silently lost. It lives in the same key/value table but is never read by
+ * {@link getSettings}/{@link saveSettings} (which only touch {@link KEY}) nor by
+ * the config-bundle export (which reads through {@link getSettings}), so it never
+ * leaks into normal reads or exports.
+ */
+export const SETTINGS_BACKUP_KEY = "global:corrupt-backup";
+
+interface StoredSettingsRecovery {
+  /** Settings to use — fully valid on the happy path, best-effort on a fallback. */
+  settings: Settings;
+  /**
+   * `null` when the row parsed cleanly. On a fallback it carries a log-ready
+   * `reason` (the JSON parse error or the list of zod issues) and the top-level
+   * keys that failed validation and were reset to their schema default.
+   */
+  fallback: { reason: string; droppedKeys: string[] } | null;
+}
+
+/**
+ * Parse a persisted global settings row, recovering as much as still validates
+ * instead of discarding everything on the first bad field (issue #421). A field
+ * that no longer passes the schema — a `defaultModel` whose id left the catalog,
+ * a renamed `notifyEvents` entry — is stripped so it falls back to its own
+ * default while every other field (secrets, budgets, pause state) survives. A
+ * value that is not even a JSON object is the one true full reset. Never throws:
+ * it always returns a valid {@link Settings} so reads can't be bricked.
+ */
+function recoverStoredSettings(rawValue: string): StoredSettingsRecovery {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawValue);
+  } catch (err) {
+    return {
+      settings: settingsSchema.parse({}),
+      fallback: {
+        reason: `invalid JSON (${err instanceof Error ? err.message : String(err)})`,
+        droppedKeys: [],
+      },
+    };
+  }
+
+  const result = settingsSchema.safeParse(parsed);
+  if (result.success) return { settings: result.data, fallback: null };
+
+  // Strip only the offending top-level keys, then re-parse so the rest of the
+  // row is preserved. Issues on a non-object value carry an empty path and match
+  // no key, which correctly collapses to a full defaults reset below.
+  const droppedKeys = [
+    ...new Set(
+      result.error.issues
+        .map((issue) => issue.path[0])
+        .filter((key): key is string => typeof key === "string"),
+    ),
+  ];
+  const base: Record<string, unknown> =
+    parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? { ...(parsed as Record<string, unknown>) }
+      : {};
+  for (const key of droppedKeys) delete base[key];
+
+  let recovered: Settings;
+  try {
+    recovered = settingsSchema.parse(base);
+  } catch {
+    // Stripping still left something unparsable (e.g. a value the schema can't
+    // default around); fall back to a clean defaults object rather than throw.
+    recovered = settingsSchema.parse({});
+  }
+
+  return {
+    settings: recovered,
+    fallback: {
+      reason: result.error.issues
+        .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+        .join("; "),
+      droppedKeys,
+    },
+  };
+}
+
+/**
+ * Preserve the raw pre-reset value under {@link SETTINGS_BACKUP_KEY}. Idempotent:
+ * a re-read of the same corrupt row is a no-op, and a genuinely new corruption
+ * (after the row was fixed and broke again) updates the stored copy.
+ */
+function backupCorruptSettings(db: DB, rawValue: string): void {
+  const existing = db.select().from(settings).where(eq(settings.key, SETTINGS_BACKUP_KEY)).get();
+  if (existing?.value === rawValue) return;
+  if (existing) {
+    db.update(settings).set({ value: rawValue }).where(eq(settings.key, SETTINGS_BACKUP_KEY)).run();
+  } else {
+    db.insert(settings).values({ key: SETTINGS_BACKUP_KEY, value: rawValue }).run();
+  }
+}
+
 export function getSettings(db: DB = getDb()): Settings {
   const row = db.select().from(settings).where(eq(settings.key, KEY)).get();
   if (!row) return settingsSchema.parse({});
-  try {
-    return settingsSchema.parse(JSON.parse(row.value));
-  } catch {
-    return settingsSchema.parse({});
+
+  const recovery = recoverStoredSettings(row.value);
+  if (recovery.fallback) {
+    // The persisted row no longer validates. Preserve the raw bytes so the
+    // operator's real config is recoverable, then log the reason with the
+    // underlying zod issues so the reset is visible (issue #421) — Drydock
+    // spends money autonomously, so a silent revert of the cost limit or pause
+    // state is exactly what must never happen. Partial recovery keeps every
+    // still-valid field, so one stale value no longer discards the rest.
+    backupCorruptSettings(db, row.value);
+    const resetNote = recovery.fallback.droppedKeys.length
+      ? `reset field(s) to default: ${recovery.fallback.droppedKeys.join(", ")}`
+      : "no fields were recoverable; using defaults";
+    logError(
+      `[settings] persisted global settings row failed to validate — ${resetNote}. ` +
+        `Raw value backed up under "${SETTINGS_BACKUP_KEY}". Cause: ${recovery.fallback.reason}`,
+    );
   }
+  return recovery.settings;
 }
 
 export function saveSettings(patch: Partial<Settings>, db: DB = getDb()): Settings {
