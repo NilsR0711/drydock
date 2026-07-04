@@ -34,7 +34,10 @@ function releaseForge(over: Partial<ForgeClient> = {}): ForgeClient {
 }
 
 const genYes = () =>
-  vi.fn(async () => ({ release: true, bump: "minor" as const, title: "v1.1.0", notes: "n" }));
+  vi.fn(async () => ({
+    ok: true as const,
+    evaluation: { release: true, bump: "minor" as const, title: "v1.1.0", notes: "n" },
+  }));
 
 describe("driveReleaseManagement — gating", () => {
   it("does nothing when the global kill-switch is off", async () => {

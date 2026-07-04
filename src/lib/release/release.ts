@@ -30,10 +30,22 @@ export interface ReleaseEvaluation {
   notes: string;
 }
 
-/** A one-shot agent evaluator; null on a non-zero exit, unparseable output, or error. */
+/**
+ * The outcome of an evaluation attempt: either a parsed decision, or a failure
+ * carrying a human-readable `reason`. The reason is kept (rather than collapsed
+ * to `null`) so the auto-release path can record the real cause — a timeout, a
+ * non-zero exit, a provider error — on the run instead of a constant message
+ * (issue #424). Callers that must degrade gracefully (the dry-run preview and
+ * the manual publish) treat any `{ ok: false }` alike as "agent unavailable".
+ */
+export type ReleaseEvaluationResult =
+  | { ok: true; evaluation: ReleaseEvaluation }
+  | { ok: false; reason: string };
+
+/** A one-shot agent evaluator; a failure result on a non-zero exit, unparseable output, or error. */
 export type ReleaseEvaluationGenerator = (
   input: ReleaseEvaluationInput,
-) => Promise<ReleaseEvaluation | null>;
+) => Promise<ReleaseEvaluationResult>;
 
 export interface ReleaseEvaluationInput {
   /** The most recent release tag, or null when this would be the first release. */
