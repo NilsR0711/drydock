@@ -237,6 +237,20 @@ describe("assembleContext", () => {
     // Falls back to the locally cached issue title.
     expect(ctx.issueTitle).toBe("Add thing");
   });
+
+  it("logs degraded reads under the pr-question label instead of swallowing them (issue #430)", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { job } = setup();
+    const forge = fakeForge({
+      prDiff: vi.fn(async () => {
+        throw new Error("net down");
+      }),
+    });
+    await assembleContext({ job, prNumber: 3, forge, db });
+    const logged = errSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    expect(logged).toContain("pr-question");
+    errSpy.mockRestore();
+  });
 });
 
 describe("runPrQuestion", () => {

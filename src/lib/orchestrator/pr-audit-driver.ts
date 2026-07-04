@@ -31,7 +31,7 @@ import { defaultModelForAgent } from "@/lib/models";
 import { getSettings } from "@/lib/settings/service";
 import { commandForAgent } from "./agent-command";
 import { getJob, recordEvent } from "./jobs";
-import { buildOneShotGenerator, type OneShotGeneratorDeps } from "./one-shot-generator";
+import { buildOneShotGenerator, type OneShotGeneratorDeps, safe } from "./one-shot-generator";
 import { ProviderLimitError } from "./provider-limit";
 
 /**
@@ -153,29 +153,19 @@ async function publishAuditComment(
     if (repo.prAuditPostOnIssue) {
       // The mirror is idempotent on its own target but best-effort: a failed
       // mirror must not lose the canonical PR comment already posted above.
-      await safe(async () => {
-        await upsertAuditComment(forge, issueNumber, marker, body);
-      }, undefined);
+      await safe(
+        async () => {
+          await upsertAuditComment(forge, issueNumber, marker, body);
+        },
+        undefined,
+        "pr-audit",
+      );
     }
     return;
   }
   // Capability gap (a forge with no PR comment seam): keep the issue comment as
   // the fallback surface so the audit still lands somewhere.
   await upsertAuditComment(forge, issueNumber, marker, body);
-}
-
-/**
- * Run an async forge read, returning a fallback on any failure. Best-effort by
- * design, but the failure is logged so a degraded audit context (empty diff,
- * missing issue body) is diagnosable rather than silent.
- */
-async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    logError("[pr-audit] best-effort read failed, using fallback", err);
-    return fallback;
-  }
 }
 
 export interface PrAuditPassDeps {
@@ -217,14 +207,14 @@ export async function runPrAuditPass(deps: PrAuditPassDeps): Promise<PrAuditResu
     }
     recordEvent(job.id, "pr_audit_started", { ...meta, prNumber }, db);
 
-    const diff = await safe(() => forge.prDiff(prNumber), "");
+    const diff = await safe(() => forge.prDiff(prNumber), "", "pr-audit");
     if (!diff.trim()) {
       recordEvent(job.id, "pr_audit_failed", { reason: "empty diff", prNumber }, db);
       return null;
     }
     const [checks, detail] = await Promise.all([
-      safe<PrCheck[]>(() => forge.prChecks(prNumber), []),
-      safe<IssueDetail | null>(() => forge.viewIssue(job.issueNumber), null),
+      safe<PrCheck[]>(() => forge.prChecks(prNumber), [], "pr-audit"),
+      safe<IssueDetail | null>(() => forge.viewIssue(job.issueNumber), null, "pr-audit"),
     ]);
     const subtasks = listSubtasks(repo.id, job.issueNumber, db);
     const input: PrAuditInput = {

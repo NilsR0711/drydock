@@ -19,7 +19,7 @@ import {
 import { listIssues } from "@/lib/issues/service";
 import { redactSecrets } from "@/lib/log/redact";
 import { recordEvent } from "./jobs";
-import { buildOneShotGenerator, type OneShotGeneratorDeps } from "./one-shot-generator";
+import { buildOneShotGenerator, type OneShotGeneratorDeps, safe } from "./one-shot-generator";
 import { markQuestionAnswered, markQuestionError } from "./pr-questions";
 import { ProviderLimitError } from "./provider-limit";
 import { listFeedbackItems } from "./review-feedback";
@@ -68,15 +68,6 @@ export function buildAnswerGenerator(deps: OneShotGeneratorDeps): PrAnswerGenera
   });
 }
 
-/** Run an async forge read, returning a fallback on any failure (best-effort). */
-async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch {
-    return fallback;
-  }
-}
-
 /** The locally cached issue title for a job, or a generic placeholder. */
 function cachedIssueTitle(job: Job, db: DB): string {
   const title = listIssues(job.repoId, db).find((i) => i.number === job.issueNumber)?.title;
@@ -111,9 +102,9 @@ export interface AssembleContextDeps {
 export async function assembleContext(deps: AssembleContextDeps): Promise<PrQuestionContext> {
   const { job, prNumber, forge, db } = deps;
   const [diff, checks, issue] = await Promise.all([
-    safe(() => forge.prDiff(prNumber), ""),
-    safe<PrCheck[]>(() => forge.prChecks(prNumber), []),
-    safe<IssueDetail | null>(() => forge.viewIssue(job.issueNumber), null),
+    safe(() => forge.prDiff(prNumber), "", "pr-question"),
+    safe<PrCheck[]>(() => forge.prChecks(prNumber), [], "pr-question"),
+    safe<IssueDetail | null>(() => forge.viewIssue(job.issueNumber), null, "pr-question"),
   ]);
 
   const checkSummaries: PrCheckSummary[] = checks.map((c) => ({ name: c.name, state: c.state }));
