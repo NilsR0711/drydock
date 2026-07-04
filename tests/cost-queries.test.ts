@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
-import { costByModel, dailyCosts, todayCost, topJobs } from "@/lib/db/cost-queries";
+import {
+  costByModel,
+  dailyCosts,
+  monthCost,
+  projectMonthlySpend,
+  todayCost,
+  topJobs,
+} from "@/lib/db/cost-queries";
 import { jobs, oneShotCosts } from "@/lib/db/schema";
 import { addRepo } from "@/lib/repos/service";
 
@@ -106,5 +113,87 @@ describe("cost queries", () => {
     expect(todayCost(db, repoId)).toBeCloseTo(0.07);
     expect(todayCost(db, b)).toBeCloseTo(0.05);
     expect(todayCost(db)).toBeCloseTo(0.12);
+  });
+});
+
+describe("monthCost (issue #413)", () => {
+  it("sums this month's job + one-shot spend and excludes prior months", () => {
+    // beforeEach seeded two jobs today (0.05 + 0.02 = 0.07) for repoId.
+    const now = Math.floor(Date.now() / 1000);
+    // 40 days ago is always outside the current calendar month (a month spans at
+    // most 31 days), so this job must never count toward month-to-date.
+    const priorMonth = now - 40 * 86400;
+    db.insert(jobs)
+      .values({ repoId, issueNumber: 3, status: "merged", startedAt: priorMonth, costUsd: 5 })
+      .run();
+    db.insert(oneShotCosts)
+      .values({
+        repoId,
+        type: "verify",
+        costUsd: 0.01,
+        inputTokens: 0,
+        outputTokens: 0,
+        createdAt: now,
+      })
+      .run();
+    // today's 0.07 + today's one-shot 0.01 = 0.08; the prior-month $5 is excluded.
+    expect(monthCost(db, repoId)).toBeCloseTo(0.08);
+    expect(monthCost(db)).toBeCloseTo(0.08);
+  });
+
+  it("scopes to a repo when given a repoId", () => {
+    const b = addRepo({ path: "/mb", name: "mb" }, db).id;
+    const now = Math.floor(Date.now() / 1000);
+    db.insert(jobs).values({ repoId: b, issueNumber: 9, startedAt: now, costUsd: 1 }).run();
+    expect(monthCost(db, repoId)).toBeCloseTo(0.07);
+    expect(monthCost(db, b)).toBeCloseTo(1);
+    expect(monthCost(db)).toBeCloseTo(1.07);
+  });
+});
+
+describe("projectMonthlySpend (issue #413)", () => {
+  it("extrapolates the trailing-7 run rate over the remaining days", () => {
+    // $70 over the trailing 7 days → $10/day. Day 10 of 30 → 20 days remain.
+    // $100 month-to-date + $10 × 20 = $300 projected.
+    const p = projectMonthlySpend({
+      monthToDate: 100,
+      trailing7Total: 70,
+      dayOfMonth: 10,
+      daysInMonth: 30,
+    });
+    expect(p.avgDailySpend).toBeCloseTo(10);
+    expect(p.projected).toBeCloseTo(300);
+    expect(p.monthToDate).toBe(100);
+  });
+
+  it("collapses to month-to-date on the last day of the month", () => {
+    const p = projectMonthlySpend({
+      monthToDate: 250,
+      trailing7Total: 70,
+      dayOfMonth: 31,
+      daysInMonth: 31,
+    });
+    expect(p.projected).toBeCloseTo(250);
+  });
+
+  it("clamps remaining days at zero when dayOfMonth exceeds daysInMonth", () => {
+    const p = projectMonthlySpend({
+      monthToDate: 40,
+      trailing7Total: 700,
+      dayOfMonth: 32,
+      daysInMonth: 31,
+    });
+    expect(p.projected).toBeCloseTo(40);
+  });
+
+  it("projects zero from an empty month with no run rate", () => {
+    const p = projectMonthlySpend({
+      monthToDate: 0,
+      trailing7Total: 0,
+      dayOfMonth: 1,
+      daysInMonth: 30,
+    });
+    expect(p.avgDailySpend).toBe(0);
+    expect(p.projected).toBe(0);
   });
 });

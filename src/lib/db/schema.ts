@@ -19,6 +19,12 @@ export const repos = sqliteTable("repos", {
   // autonomous out of the box (issue #254). New rows seed from repoInputSchema;
   // existing rows keep their stored value and are intentionally not backfilled.
   dailyCostLimitUsd: real("daily_cost_limit_usd").notNull().default(0),
+  // Per-repo monthly USD budget (issue #413), the longer-horizon sibling of the
+  // daily cap. 0 is off (unlimited) with the same semantics; month-to-date spend
+  // (jobs + one-shot costs) against it gates new runs via repoJobsAllowed. The
+  // 0048 migration adds the column with a 0 default; existing rows are not
+  // backfilled and new rows seed from repoInputSchema.
+  monthlyCostLimitUsd: real("monthly_cost_limit_usd").notNull().default(0),
   adrGating: integer("adr_gating", { mode: "boolean" }).notNull().default(false),
   sequential: integer("sequential", { mode: "boolean" }).notNull().default(true),
   // Backlog-driving automation is opt-in (issue #285): default OFF so a freshly

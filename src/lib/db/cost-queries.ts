@@ -105,3 +105,61 @@ export function todayCost(db: DB = getDb(), repoId?: number): number {
     `);
   return row?.total ?? 0;
 }
+
+/**
+ * Total cost for the current local month (month-to-date) — the longer-horizon
+ * sibling of {@link todayCost}, used to enforce the monthly limit (issue #413).
+ * Mirrors todayCost exactly (jobs + one-shot costs, optional repo scope) but
+ * compares the `%Y-%m` window instead of `%Y-%m-%d`, so the monthly gate stays
+ * consistent with the daily one.
+ */
+export function monthCost(db: DB = getDb(), repoId?: number): number {
+  const repoWhere = repoId !== undefined ? sql` AND repo_id = ${repoId}` : sql``;
+  const row = db.get<{ total: number }>(sql`
+      SELECT coalesce(sum(c), 0) AS total FROM (
+        SELECT coalesce(sum(cost_usd), 0) AS c
+        FROM jobs
+        WHERE strftime('%Y-%m', started_at, 'unixepoch', 'localtime') = strftime('%Y-%m', 'now', 'localtime')
+          AND started_at IS NOT NULL
+          ${repoWhere}
+        UNION ALL
+        SELECT coalesce(sum(cost_usd), 0) AS c
+        FROM one_shot_costs
+        WHERE strftime('%Y-%m', created_at, 'unixepoch', 'localtime') = strftime('%Y-%m', 'now', 'localtime')
+          ${repoWhere}
+      )
+    `);
+  return row?.total ?? 0;
+}
+
+export interface MonthlyProjection {
+  /** Spend so far this calendar month (USD). */
+  monthToDate: number;
+  /** Trailing 7-day average daily spend (USD/day). */
+  avgDailySpend: number;
+  /** Projected total spend for the whole month (USD): month-to-date + run rate. */
+  projected: number;
+}
+
+/**
+ * Project end-of-month spend from month-to-date plus the trailing-7-day run rate
+ * (issue #413). Kept pure — the caller supplies the clock-derived day-of-month
+ * and days-in-month — so the projection math is unit-testable without mocking
+ * time. The trailing-7 average already covers today's partial spend, so we only
+ * extrapolate over the days strictly *after* today: `monthToDate + avg ×
+ * (daysInMonth − dayOfMonth)`. On the last day of the month there are no
+ * remaining days, so the projection collapses to month-to-date.
+ */
+export function projectMonthlySpend(input: {
+  monthToDate: number;
+  /** Sum of spend over the trailing 7 calendar days (USD), including today. */
+  trailing7Total: number;
+  /** 1-based day of the current month. */
+  dayOfMonth: number;
+  daysInMonth: number;
+}): MonthlyProjection {
+  const avgDailySpend = input.trailing7Total / 7;
+  const remainingDays = Math.max(input.daysInMonth - input.dayOfMonth, 0);
+  const projected = input.monthToDate + avgDailySpend * remainingDays;
+  return { monthToDate: input.monthToDate, avgDailySpend, projected };
+}
