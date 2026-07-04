@@ -144,6 +144,63 @@ function asObject(raw: unknown, label: string): Record<string, unknown> {
 }
 
 /**
+ * Validate and sanitize the repo-field portion of a bundle. Drops identity/
+ * secret fields and unknown fields with a warning, then validates the remaining
+ * values (`.partial()` narrows to only the provided keys, so an omitted field
+ * stays untouched on import — mirrors updateRepo's partial-patch contract).
+ * Shared with the instance-wide config bundle (issue #412).
+ */
+export function sanitizeRepoFields(raw: unknown): {
+  repo: Partial<RepoInput>;
+  warnings: string[];
+} {
+  const rawRepo = raw === undefined ? {} : asObject(raw, "repo");
+  const warnings: string[] = [];
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rawRepo)) {
+    if (EXCLUDED.has(key)) {
+      warnings.push(`Ignored identity/secret field "${key}" (never imported)`);
+      continue;
+    }
+    if (!(key in repoInputSchema.shape)) {
+      warnings.push(`Dropped unknown field "${key}"`);
+      continue;
+    }
+    cleaned[key] = value;
+  }
+  repoInputSchema.partial().parse(cleaned);
+  return { repo: cleaned as Partial<RepoInput>, warnings };
+}
+
+/**
+ * Validate and sanitize the prompt-template portion of a bundle. Unknown stage
+ * names and non-string bodies are dropped with a warning. Shared with the
+ * instance-wide config bundle (issue #412).
+ */
+export function sanitizePromptTemplates(raw: unknown): {
+  promptTemplates: Partial<Record<TemplateName, string>>;
+  warnings: string[];
+} {
+  const promptTemplates: Partial<Record<TemplateName, string>> = {};
+  const warnings: string[] = [];
+  if (raw !== undefined) {
+    const rawTemplates = asObject(raw, "promptTemplates");
+    for (const [name, content] of Object.entries(rawTemplates)) {
+      if (!TEMPLATE_NAME_SET.has(name)) {
+        warnings.push(`Dropped unknown prompt template stage "${name}"`);
+        continue;
+      }
+      if (typeof content !== "string") {
+        warnings.push(`Dropped prompt template "${name}" (content is not a string)`);
+        continue;
+      }
+      promptTemplates[name as TemplateName] = content;
+    }
+  }
+  return { promptTemplates, warnings };
+}
+
+/**
  * Validate and sanitize a raw (parsed-JSON) bundle without applying it. Throws
  * on a fundamentally malformed bundle (wrong shape, missing/unsupported
  * version, or an invalid field value); drops unknown/excluded fields and
@@ -163,44 +220,12 @@ export function parseSettingsBundle(raw: unknown): ParsedBundle {
     );
   }
 
-  const warnings: string[] = [];
+  const { repo, warnings: repoWarnings } = sanitizeRepoFields(obj.repo);
+  const { promptTemplates, warnings: templateWarnings } = sanitizePromptTemplates(
+    obj.promptTemplates,
+  );
 
-  const rawRepo = obj.repo === undefined ? {} : asObject(obj.repo, "repo");
-  const cleaned: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(rawRepo)) {
-    if (EXCLUDED.has(key)) {
-      warnings.push(`Ignored identity/secret field "${key}" (never imported)`);
-      continue;
-    }
-    if (!(key in repoInputSchema.shape)) {
-      warnings.push(`Dropped unknown field "${key}"`);
-      continue;
-    }
-    cleaned[key] = value;
-  }
-  // Validate the provided field values; `.partial()` fills defaults for omitted
-  // keys, so re-narrow to the keys actually provided — an omitted field must
-  // stay untouched on import (mirrors updateRepo's partial-patch contract).
-  repoInputSchema.partial().parse(cleaned);
-  const repo = cleaned as Partial<RepoInput>;
-
-  const promptTemplates: Partial<Record<TemplateName, string>> = {};
-  if (obj.promptTemplates !== undefined) {
-    const rawTemplates = asObject(obj.promptTemplates, "promptTemplates");
-    for (const [name, content] of Object.entries(rawTemplates)) {
-      if (!TEMPLATE_NAME_SET.has(name)) {
-        warnings.push(`Dropped unknown prompt template stage "${name}"`);
-        continue;
-      }
-      if (typeof content !== "string") {
-        warnings.push(`Dropped prompt template "${name}" (content is not a string)`);
-        continue;
-      }
-      promptTemplates[name as TemplateName] = content;
-    }
-  }
-
-  return { version, repo, promptTemplates, warnings };
+  return { version, repo, promptTemplates, warnings: [...repoWarnings, ...templateWarnings] };
 }
 
 /**

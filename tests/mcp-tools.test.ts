@@ -295,10 +295,23 @@ describe("MCP tool registry", () => {
   });
 
   it("get_settings returns settings with secrets redacted", async () => {
-    saveSettings({ telegramBotToken: "secret-token", slackWebhookUrl: "https://hooks/secret" }, db);
+    saveSettings(
+      {
+        telegramBotToken: "secret-token",
+        slackWebhookUrl: "https://hooks/secret",
+        smtpPass: "hunter2",
+        openrouterApiKey: "sk-or-v1-secret",
+      },
+      db,
+    );
     const result = (await run("get_settings", {}, db)) as Record<string, unknown>;
     expect(result.telegramBotToken).toBe("***");
     expect(result.slackWebhookUrl).toBe("***");
+    expect(result.smtpPass).toBe("***");
+    // openrouterApiKey is a credential too (ADR 039) and must never be returned
+    // verbatim — regression guard for issue #412.
+    expect(result.openrouterApiKey).toBe("***");
+    expect(JSON.stringify(result)).not.toContain("sk-or-v1-secret");
     expect(result.paused).toBe(false);
   });
 

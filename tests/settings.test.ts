@@ -5,7 +5,16 @@ import { getServerLogger } from "@/lib/log/server-log";
 import { MODELS } from "@/lib/models";
 import { saveCredentialStatus } from "@/lib/orchestrator/credential-status";
 import { addRepo } from "@/lib/repos/service";
-import { getSettings, jobsAllowed, repoJobsAllowed, saveSettings } from "@/lib/settings/service";
+import {
+  getSettings,
+  jobsAllowed,
+  redactSettingsSecrets,
+  repoJobsAllowed,
+  SECRET_SETTING_KEYS,
+  SETTINGS_REDACTION_PLACEHOLDER,
+  saveSettings,
+  settingsSchema,
+} from "@/lib/settings/service";
 
 let db: DB;
 let repoId: number;
@@ -181,6 +190,53 @@ describe("openrouter key bridge (issue #349, ADR 039)", () => {
   it("keeps defaultAgent restricted to the static-catalog CLI agents", () => {
     expect(() => saveSettings({ defaultAgent: "openrouter" as unknown as "claude" }, db)).toThrow();
     expect(() => saveSettings({ defaultAgent: "opencode" as unknown as "claude" }, db)).toThrow();
+  });
+});
+
+describe("redactSettingsSecrets", () => {
+  it("masks every non-empty credential field, including the OpenRouter key", () => {
+    const redacted = redactSettingsSecrets({
+      telegramBotToken: "123456:AAtoken",
+      slackWebhookUrl: "https://hooks.slack.com/services/T/B/secret",
+      smtpPass: "hunter2",
+      openrouterApiKey: "sk-or-v1-secret",
+    });
+    for (const key of SECRET_SETTING_KEYS) {
+      expect(redacted[key]).toBe(SETTINGS_REDACTION_PLACEHOLDER);
+    }
+  });
+
+  it("leaves empty credential fields empty rather than masking them", () => {
+    const redacted = redactSettingsSecrets({ telegramBotToken: "", smtpPass: "" });
+    expect(redacted.telegramBotToken).toBe("");
+    expect(redacted.smtpPass).toBe("");
+  });
+
+  it("leaves non-secret configuration fields untouched", () => {
+    const redacted = redactSettingsSecrets({
+      telegramChatId: "chat-1",
+      smtpUser: "mailer",
+      emailFrom: "bot@example.com",
+      maxParallelJobs: 3,
+    });
+    expect(redacted.telegramChatId).toBe("chat-1");
+    expect(redacted.smtpUser).toBe("mailer");
+    expect(redacted.emailFrom).toBe("bot@example.com");
+    expect(redacted.maxParallelJobs).toBe(3);
+  });
+
+  it("returns a copy without mutating the input", () => {
+    const input = { smtpPass: "hunter2" };
+    const redacted = redactSettingsSecrets(input);
+    expect(input.smtpPass).toBe("hunter2");
+    expect(redacted).not.toBe(input);
+  });
+
+  it("only lists secret keys that actually exist in the settings schema", () => {
+    const shape = settingsSchema.shape as Record<string, unknown>;
+    for (const key of SECRET_SETTING_KEYS) {
+      expect(shape).toHaveProperty(key);
+    }
   });
 });
 
