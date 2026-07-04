@@ -345,7 +345,13 @@ export const adrs = sqliteTable("adrs", {
 
 export const followupIssues = sqliteTable("followup_issues", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  jobId: integer("job_id").references(() => jobs.id, { onDelete: "set null" }),
+  // Cascade, not set-null (issue #418): a follow-up row is meaningless without
+  // its job — ghIssueNumber is repo-relative and can't be resolved once the job
+  // (and thus the repo) is gone. The former set-null policy left orphaned rows
+  // that the sole read path (WHERE job_id = ?) could never select again and the
+  // prune sweep never touched, so they accumulated as permanent dead data. With
+  // cascade the row dies with its job, matching every other job-scoped table.
+  jobId: integer("job_id").references(() => jobs.id, { onDelete: "cascade" }),
   ghIssueNumber: integer("gh_issue_number").notNull(),
   title: text("title").notNull(),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
