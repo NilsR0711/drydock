@@ -58,6 +58,42 @@ describe("GET /api/sse/dashboard", () => {
     expect(snaps[0]?.repos.map((r) => r.name)).toEqual(["alpha"]);
   });
 
+  it("fans one shared snapshot out to every connected client on a single change (issue #415)", async () => {
+    const ac1 = new AbortController();
+    const ac2 = new AbortController();
+    const res1 = await get(ac1.signal);
+    const res2 = await get(ac2.signal);
+    const reader1 = res1.body?.getReader();
+    const reader2 = res2.body?.getReader();
+    if (!reader1 || !reader2) throw new Error("response has no body");
+
+    // Drain both connect frames (empty repo list).
+    await readBlocks(reader1, 1);
+    await readBlocks(reader2, 1);
+
+    // A single change emit must reach BOTH streams from one shared broadcast.
+    addRepo({ path: "/tmp/shared", name: "shared" }, getDb());
+    emitDashboardChange();
+
+    const text1 = await readBlocks(reader1, 1);
+    const text2 = await readBlocks(reader2, 1);
+    reader1.releaseLock();
+    reader2.releaseLock();
+    ac1.abort();
+    ac2.abort();
+
+    expect(
+      snapshotsFrom(text1)
+        .at(-1)
+        ?.repos.map((r) => r.name),
+    ).toContain("shared");
+    expect(
+      snapshotsFrom(text2)
+        .at(-1)
+        ?.repos.map((r) => r.name),
+    ).toContain("shared");
+  });
+
   it("pushes a fresh snapshot including a repo added after connect (issue #232)", async () => {
     const ac = new AbortController();
     const res = await get(ac.signal);
