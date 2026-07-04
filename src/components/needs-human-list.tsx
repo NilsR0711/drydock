@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { PageHeader } from "@/components/page-header";
 import { ResumeWithInstructions } from "@/components/resume-with-instructions";
 import { Badge } from "@/components/ui/badge";
@@ -46,7 +46,10 @@ function plural(n: number, word: string): string {
 
 export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
   const router = useRouter();
-  const [pending, start] = useTransition();
+  // Row actions and bulk actions run on independent transitions so a single-row
+  // requeue never disables the bulk toolbar, and a bulk batch disables the rows.
+  const [, start] = useTransition();
+  const [bulkPending, startBulk] = useTransition();
   // Disable only the acted-on row, not every row, while its action is in flight.
   const [busyId, setBusyId] = useState<number | null>(null);
   const [confirmAbort, setConfirmAbort] = useState<NeedsHumanRow | null>(null);
@@ -54,6 +57,17 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [confirmBulkAbort, setConfirmBulkAbort] = useState(false);
   const { success, error } = useToast();
+
+  // Drop ids that no longer map to a visible row (a refresh removed the job, or
+  // it was requeued from its own row): otherwise the counter drifts from the
+  // checkboxes and a later bulk action would still send the vanished id.
+  useEffect(() => {
+    setSelected((prev) => {
+      const live = new Set(jobs.map((j) => j.id));
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [jobs]);
 
   const allSelected = jobs.length > 0 && selected.size === jobs.length;
 
@@ -108,7 +122,7 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
   ) {
     const ids = [...selected];
     if (ids.length === 0) return;
-    start(async () => {
+    startBulk(async () => {
       try {
         const res = await action(ids);
         reportBulk(verbPast, verb, res);
@@ -187,7 +201,7 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={pending}
+                  disabled={bulkPending}
                   onClick={() =>
                     runBulk((ids) => bulkRequeueJobsAction(ids), "Requeued", "requeue")
                   }
@@ -197,12 +211,12 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
                 <Button
                   variant="destructive"
                   size="sm"
-                  disabled={pending}
+                  disabled={bulkPending}
                   onClick={() => setConfirmBulkAbort(true)}
                 >
                   <Ban className="h-3.5 w-3.5" /> Abort selected
                 </Button>
-                <Button variant="ghost" size="sm" disabled={pending} onClick={clearSelection}>
+                <Button variant="ghost" size="sm" disabled={bulkPending} onClick={clearSelection}>
                   Clear
                 </Button>
               </div>
@@ -255,7 +269,7 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={busyId === job.id}
+                      disabled={busyId === job.id || bulkPending}
                       onClick={() => requeue(job)}
                     >
                       <RotateCcw className="h-3.5 w-3.5" /> Requeue
@@ -263,7 +277,7 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
                     <Button
                       variant="destructive"
                       size="sm"
-                      disabled={busyId === job.id}
+                      disabled={busyId === job.id || bulkPending}
                       onClick={() => setConfirmAbort(job)}
                     >
                       <Ban className="h-3.5 w-3.5" /> Abort
@@ -309,7 +323,7 @@ export function NeedsHumanList({ jobs }: { jobs: NeedsHumanRow[] }) {
         confirmLabel="Abort"
         variant="destructive"
         icon={Ban}
-        pending={pending}
+        pending={bulkPending}
       />
     </div>
   );

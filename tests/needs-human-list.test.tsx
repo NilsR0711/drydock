@@ -73,12 +73,20 @@ function checkbox(c: HTMLElement, label: string): HTMLButtonElement {
   return el as HTMLButtonElement;
 }
 
+/** Every button whose trimmed label matches exactly — lets "Requeue" (per row)
+ *  and "Requeue selected" (bulk toolbar) be told apart. */
+function exactButtons(c: HTMLElement, text: string): HTMLButtonElement[] {
+  return [...c.querySelectorAll("button")].filter(
+    (b) => b.textContent?.trim() === text,
+  ) as HTMLButtonElement[];
+}
+
 /** The bulk-toolbar button whose exact text matches (e.g. "Requeue selected"),
  *  disambiguated from each row's own "Requeue"/"Abort" trigger. */
 function bulkButton(c: HTMLElement, text: string): HTMLButtonElement {
-  const el = [...c.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
+  const el = exactButtons(c, text)[0];
   if (!el) throw new Error(`bulk button "${text}" not found`);
-  return el as HTMLButtonElement;
+  return el;
 }
 
 describe("NeedsHumanList (issue #388)", () => {
@@ -334,5 +342,78 @@ describe("NeedsHumanList bulk selection (issue #410)", () => {
 
     expect(toast.error).toHaveBeenCalledWith("Failed to requeue jobs", "network down");
     expect(router.refresh).not.toHaveBeenCalled();
+  });
+
+  it("prunes stale ids from the selection when a job leaves the list", async () => {
+    mounted = render(<NeedsHumanList jobs={threeJobs()} />);
+    click(checkbox(mounted.container, "Select all jobs"));
+    await flush();
+    expect(mounted.container.textContent).toContain("3 selected");
+
+    // A refresh (e.g. #2 was requeued from its own row) drops it from the list.
+    mounted.rerender(
+      <NeedsHumanList
+        jobs={[
+          makeRow({ id: 101, repoName: "acme", issueNumber: 1 }),
+          makeRow({ id: 303, repoName: "acme", issueNumber: 3 }),
+        ]}
+      />,
+    );
+    await flush();
+    // The vanished id is dropped, so the counter tracks the visible checkboxes.
+    expect(mounted.container.textContent).toContain("2 selected");
+
+    actions.bulkRequeueJobsAction.mockResolvedValue({ succeeded: [101, 303], failed: [] });
+    click(bulkButton(mounted.container, "Requeue selected"));
+    await flush();
+    // The stale id is never sent to the bulk action.
+    expect(actions.bulkRequeueJobsAction).toHaveBeenCalledWith([101, 303]);
+  });
+
+  it("disables every per-row action while a bulk action is in flight", async () => {
+    let release: (r: unknown) => void = () => {};
+    actions.bulkRequeueJobsAction.mockReturnValue(
+      new Promise((r) => {
+        release = r;
+      }),
+    );
+    mounted = render(<NeedsHumanList jobs={threeJobs()} />);
+    click(checkbox(mounted.container, "Select acme #1"));
+    await flush();
+    click(bulkButton(mounted.container, "Requeue selected"));
+    await flush();
+
+    // The batch is still pending: per-row Requeue buttons must be disabled too,
+    // not just the selected rows' — bulk and single-row work must not overlap.
+    const rowRequeues = exactButtons(mounted.container, "Requeue");
+    expect(rowRequeues.length).toBe(3);
+    expect(rowRequeues.every((b) => b.disabled)).toBe(true);
+
+    release({ succeeded: [101], failed: [] });
+    await flush();
+  });
+
+  it("keeps the bulk controls enabled while a single-row action is in flight", async () => {
+    let release: () => void = () => {};
+    actions.requeueJobAction.mockReturnValue(
+      new Promise<void>((r) => {
+        release = r;
+      }),
+    );
+    mounted = render(<NeedsHumanList jobs={threeJobs()} />);
+    click(checkbox(mounted.container, "Select acme #1"));
+    await flush();
+
+    // Kick off a per-row requeue on #2; its transition must not disable the
+    // bulk toolbar (they use independent pending flags).
+    const rowRequeue = exactButtons(mounted.container, "Requeue")[1];
+    if (!rowRequeue) throw new Error("per-row Requeue button not found");
+    click(rowRequeue);
+    await flush();
+
+    expect(bulkButton(mounted.container, "Requeue selected").disabled).toBe(false);
+
+    release();
+    await flush();
   });
 });
