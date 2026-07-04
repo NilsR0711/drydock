@@ -134,6 +134,13 @@ export const settingsSchema = z.object({
   // Finished jobs older than this many days have their verbose job_events
   // pruned (their cost summary rows are kept). See issue #24.
   retentionDays: z.number().int().positive().default(30),
+  // Retention window for the in-process daily DB backup sweep, in days (issue
+  // #411, ADR 042). The sweep writes a WAL-safe snapshot at startup and every
+  // 24h, then prunes snapshots older than this. Defaults to 7 (the historical
+  // `pnpm backup`/`RETENTION_DAYS` value). 0 disables the sweep entirely — no
+  // snapshots are written — mirroring the `0 = off` convention of the cost/turn
+  // ceilings; a manual `drydock backup` still works when it is off.
+  backupRetentionDays: z.number().int().nonnegative().default(7),
   // Minimum severity written to the structured server-log sink (issue #294, ADR
   // 035). The sink also seeds its level from DRYDOCK_LOG_LEVEL before the DB is
   // available (bootstrap), then this saved value takes over at runtime. The

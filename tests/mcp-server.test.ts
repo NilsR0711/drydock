@@ -8,6 +8,7 @@ import { repos } from "@/lib/db/schema";
 import { __setForgeFactory } from "@/lib/forge/registry";
 import { createMcpServer } from "@/lib/mcp/server";
 import { tools } from "@/lib/mcp/tools";
+import { getSettings } from "@/lib/settings/service";
 
 /** Wire a fresh MCP client to a created server over a linked in-memory pair. */
 async function connectClient() {
@@ -60,6 +61,16 @@ describe("MCP server", () => {
       arguments: { defaultModel: "gpt-nonexistent-99" },
     })) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
     expect(result.isError).toBe(true);
+  });
+
+  it("updates the backup retention window via update_settings (issue #411)", async () => {
+    active = await connectClient();
+    const result = (await active.client.callTool({
+      name: "update_settings",
+      arguments: { backupRetentionDays: 3 },
+    })) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
+    expect(result.isError).toBeFalsy();
+    expect(getSettings(getDb()).backupRetentionDays).toBe(3);
   });
 
   it("rejects an unknown defaultModel via add_repo (issue #93)", async () => {

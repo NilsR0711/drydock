@@ -62,6 +62,17 @@ describe("settings", () => {
     expect(getSettings(db).retentionDays).toBe(14);
   });
 
+  it("defaults the backup retention to 7 days and treats 0 as disabling the sweep (issue #411)", () => {
+    // Matches the historical RETENTION_DAYS; 0 turns the in-process backup sweep
+    // off entirely, and a negative window is rejected.
+    expect(getSettings(db).backupRetentionDays).toBe(7);
+    saveSettings({ backupRetentionDays: 14 }, db);
+    expect(getSettings(db).backupRetentionDays).toBe(14);
+    saveSettings({ backupRetentionDays: 0 }, db);
+    expect(getSettings(db).backupRetentionDays).toBe(0);
+    expect(() => saveSettings({ backupRetentionDays: -1 }, db)).toThrow();
+  });
+
   it("defaults the CI wait budget and persists an override", () => {
     expect(getSettings(db).maxCiWaitMinutes).toBe(60);
     saveSettings({ maxCiWaitMinutes: 15 }, db);

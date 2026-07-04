@@ -578,6 +578,17 @@ export function SettingsForm({ initial }: { initial: Settings }) {
               onChange={(e) => set("retentionDays", Number(e.target.value))}
             />
           </Field>
+          <Field
+            label="Backup retention (days)"
+            hint="Daily DB backups older than this are pruned. 0 disables the automatic backup."
+          >
+            <Input
+              type="number"
+              min={0}
+              value={s.backupRetentionDays}
+              onChange={(e) => set("backupRetentionDays", Number(e.target.value))}
+            />
+          </Field>
         </div>
       </Card>
 
