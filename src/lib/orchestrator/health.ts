@@ -2,6 +2,7 @@ import { count } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { todayCost } from "@/lib/db/cost-queries";
 import { jobs } from "@/lib/db/schema";
+import { type RateLimitGovernor, sharedGovernor } from "@/lib/github/rate-limit";
 import { getSettings } from "@/lib/settings/service";
 import { getCurrentVersion } from "@/lib/version/current";
 import { type DriverLoopStatus, driverLoopStatus } from "./driver-loop";
@@ -12,6 +13,16 @@ import { JOB_STATES, type JobStatus } from "./state-machine";
 export const STALL_INTERVALS = 3;
 
 export type HealthReason = "loop_not_running" | "loop_stalled" | "db_unreachable";
+
+/** One GitHub resource's rate-limit budget as exposed by /api/health (#408). */
+export interface HealthRateBudget {
+  remaining: number;
+  limit: number;
+  /** ISO-8601 timestamp when the window resets. */
+  reset: string;
+  /** True when background (low-priority) GitHub work is currently deferred. */
+  gated: boolean;
+}
 
 export interface HealthBody {
   status: "ok" | "degraded";
@@ -35,6 +46,16 @@ export interface HealthBody {
   queue: Record<JobStatus, number> | null;
   /** Today's spend vs the global daily limit; null when the DB is unreachable. */
   budget: { todayUsd: number; dailyLimitUsd: number } | null;
+  /**
+   * GitHub API rate-limit budget per resource, read from the shared governor's
+   * last-observed snapshots (issue #408). DB-independent — populated even when
+   * the DB is unreachable — and forge-call-free (snapshot reads only). A
+   * resource is `null` when nothing has been observed for it yet.
+   */
+  github: {
+    core: HealthRateBudget | null;
+    graphql: HealthRateBudget | null;
+  };
 }
 
 export interface HealthResult {
@@ -50,6 +71,31 @@ export interface HealthDeps {
   uptimeSeconds?: () => number;
   version?: () => string;
   memDraining?: () => boolean;
+  /** GitHub rate-limit governor to read budgets from; defaults to the shared one. */
+  governor?: () => Pick<RateLimitGovernor, "budget">;
+}
+
+/**
+ * Snapshot the GitHub rate-limit budget for one resource as an ISO-reset,
+ * gated-flag payload — or null when unobserved. Read-only (no forge call);
+ * any read/format failure folds to null so the endpoint always answers.
+ */
+function readGithubBudget(
+  governor: Pick<RateLimitGovernor, "budget">,
+  resource: "core" | "graphql",
+): HealthRateBudget | null {
+  try {
+    const b = governor.budget(resource);
+    if (!b) return null;
+    return {
+      remaining: b.remaining,
+      limit: b.limit,
+      reset: new Date(b.reset * 1000).toISOString(),
+      gated: b.gated,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -104,6 +150,14 @@ export function getHealth(deps: HealthDeps = {}): HealthResult {
     }
   }
 
+  // GitHub API budget is process-memory only (the governor), so it is read
+  // outside the DB try/catch above and survives a `db_unreachable` degrade.
+  const governor = deps.governor?.() ?? sharedGovernor;
+  const github = {
+    core: readGithubBudget(governor, "core"),
+    graphql: readGithubBudget(governor, "graphql"),
+  };
+
   const status = reasons.length === 0 ? "ok" : "degraded";
   return {
     httpStatus: status === "ok" ? 200 : 503,
@@ -120,6 +174,7 @@ export function getHealth(deps: HealthDeps = {}): HealthResult {
       },
       queue,
       budget,
+      github,
     },
   };
 }
