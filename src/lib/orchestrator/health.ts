@@ -1,5 +1,7 @@
 import { count } from "drizzle-orm";
-import { type DB, getDb } from "@/lib/db/client";
+import { latestBackup } from "@/lib/backup/backup";
+import { backupDirFor } from "@/lib/backup/sweep";
+import { type DB, getDb, resolveDbPath } from "@/lib/db/client";
 import { todayCost } from "@/lib/db/cost-queries";
 import { jobs } from "@/lib/db/schema";
 import { getSettings } from "@/lib/settings/service";
@@ -35,6 +37,12 @@ export interface HealthBody {
   queue: Record<JobStatus, number> | null;
   /** Today's spend vs the global daily limit; null when the DB is unreachable. */
   budget: { todayUsd: number; dailyLimitUsd: number } | null;
+  /**
+   * ISO-8601 timestamp of the most recent DB backup snapshot, or null when none
+   * exists yet. Monitoring can alert on a stale value to catch a scheduled
+   * backup sweep that stopped writing (issue #411).
+   */
+  lastBackupAt: string | null;
 }
 
 export interface HealthResult {
@@ -50,6 +58,24 @@ export interface HealthDeps {
   uptimeSeconds?: () => number;
   version?: () => string;
   memDraining?: () => boolean;
+  /** Epoch-ms of the newest backup snapshot, or null when none exists. */
+  lastBackup?: () => number | null;
+}
+
+/**
+ * Epoch-ms of the newest backup snapshot in `<data dir>/backups`, or null when
+ * there is none (or the path can't be inspected). Reads the filesystem so it
+ * reflects whatever process wrote the snapshot, not just this instance.
+ */
+function defaultLastBackupMs(): number | null {
+  try {
+    const dbPath = resolveDbPath();
+    // An in-memory DB (tests) has no on-disk data dir to hold backups.
+    if (dbPath === ":memory:") return null;
+    return latestBackup(backupDirFor(dbPath))?.mtimeMs ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -62,6 +88,7 @@ export function getHealth(deps: HealthDeps = {}): HealthResult {
   const now = deps.now?.() ?? Date.now();
   const loop = deps.loop?.() ?? driverLoopStatus();
   const lock = deps.lock?.() ?? readInstanceLock();
+  const lastBackupMs = deps.lastBackup?.() ?? defaultLastBackupMs();
   const reasons: HealthReason[] = [];
 
   let paused = false;
@@ -120,6 +147,7 @@ export function getHealth(deps: HealthDeps = {}): HealthResult {
       },
       queue,
       budget,
+      lastBackupAt: lastBackupMs === null ? null : new Date(lastBackupMs).toISOString(),
     },
   };
 }
