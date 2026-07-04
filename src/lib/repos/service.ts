@@ -48,6 +48,10 @@ export const repoInputSchema = z.object({
   // 0 = off / unlimited daily budget for this repo (issue #234). Defaults to 0
   // so a freshly added repo is fully autonomous out of the box (issue #254).
   dailyCostLimitUsd: z.number().nonnegative().default(0),
+  // 0 = off / unlimited monthly budget for this repo (issue #413), the
+  // longer-horizon sibling of the daily cap. Kept in sync with the schema
+  // column default (0) and auto-included in the settings bundle via the shape.
+  monthlyCostLimitUsd: z.number().nonnegative().default(0),
   adrGating: z.boolean().default(false),
   sequential: z.boolean().default(true),
   // Backlog-driving automation is opt-in (issue #285): a freshly added repo

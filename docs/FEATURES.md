@@ -395,12 +395,16 @@ reproduces the same effective config.
 ### 💸 Cost tracking
 
 Per-job and aggregate spend from the agent's reported `total_cost_usd` (or estimated from tokens), with a
-**daily cost limit** that gates the driver loop (global + per-repo, both **`0` = off / unlimited**) and an
-optional **per-job cost ceiling** that aborts a single runaway session mid-stream (global default +
-per-repo override; off when unset). Every cost ceiling can be turned off with `0`, leaving only the per-job
-cap, provider usage-limit auto-wait, and pause/drain as stops. Spend is **exportable** to CSV or JSON from
-the cost dashboard — line items (jobs plus one-shot agent calls) or aggregates by repo/model, scoped to a
-date range and repo, with totals that reconcile with the dashboard.
+**daily cost limit** and a **monthly cost limit** that gate the driver loop (global + per-repo, all
+**`0` = off / unlimited**) and an optional **per-job cost ceiling** that aborts a single runaway session
+mid-stream (global default + per-repo override; off when unset). The monthly gate measures month-to-date
+spend (jobs + one-shot costs) the same way the daily one measures today. Every cost ceiling can be turned
+off with `0`, leaving only the per-job cap, provider usage-limit auto-wait, and pause/drain as stops. The
+**Costs** page complements the retrospective view with a **month-end projection** from the trailing 7-day
+run rate (flagged when it would exceed the monthly budget) and a **daily pacing** readout (how much of
+today's budget is spent, and by what time), so overspend is visible before a gate trips. Spend is
+**exportable** to CSV or JSON from the cost dashboard — line items (jobs plus one-shot agent calls) or
+aggregates by repo/model, scoped to a date range and repo, with totals that reconcile with the dashboard.
 
 ### 📊 Proactive OAuth usage gauges
 

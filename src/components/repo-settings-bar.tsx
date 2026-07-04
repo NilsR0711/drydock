@@ -29,6 +29,7 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
   const [agent, setAgent] = useState(repo.agent as AgentId);
   const [model, setModel] = useState(repo.defaultModel);
   const [limit, setLimit] = useState(repo.dailyCostLimitUsd.toString());
+  const [monthlyLimit, setMonthlyLimit] = useState(repo.monthlyCostLimitUsd.toString());
   const [maxJobMinutes, setMaxJobMinutes] = useState(repo.maxJobMinutes?.toString() ?? "");
   const [maxCiWaitMinutes, setMaxCiWaitMinutes] = useState(repo.maxCiWaitMinutes?.toString() ?? "");
   const [mergeGateMinutes, setMergeGateMinutes] = useState(repo.mergeGateMinutes.toString());
@@ -82,6 +83,16 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
     const limitUsd = Number(value);
     if (value.trim() === "" || !Number.isFinite(limitUsd) || limitUsd < 0) return;
     persist({ dailyCostLimitUsd: limitUsd });
+  }
+
+  // Same empty-field guard as changeLimit (issue #234/#413): a blank input while
+  // retyping must not persist Number("") = 0 and silently flip the repo to an
+  // unlimited monthly budget. A typed 0 persists and means "off / unlimited".
+  function changeMonthlyLimit(value: string) {
+    setMonthlyLimit(value);
+    const limitUsd = Number(value);
+    if (value.trim() === "" || !Number.isFinite(limitUsd) || limitUsd < 0) return;
+    persist({ monthlyCostLimitUsd: limitUsd });
   }
 
   // Empty input clears the per-repo override (null = use the global default).
@@ -181,6 +192,24 @@ export function RepoSettingsBar({ repo }: { repo: Repo }) {
               step={1}
               value={limit}
               onChange={(e) => changeLimit(e.target.value)}
+            />
+          </Field>
+          <Field
+            label={
+              <LabelWithHelp
+                text="Monthly limit ($)"
+                help="Hard cap on agent spend per calendar month for this repo, measured against month-to-date spend. New jobs wait once the cap is hit. 0 = off (unlimited)."
+              />
+            }
+            htmlFor="repo-monthly-limit"
+          >
+            <Input
+              id="repo-monthly-limit"
+              type="number"
+              min={0}
+              step={1}
+              value={monthlyLimit}
+              onChange={(e) => changeMonthlyLimit(e.target.value)}
             />
           </Field>
           <Field

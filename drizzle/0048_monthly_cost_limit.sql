@@ -1,0 +1,1 @@
+ALTER TABLE `repos` ADD COLUMN `monthly_cost_limit_usd` real DEFAULT 0 NOT NULL;
