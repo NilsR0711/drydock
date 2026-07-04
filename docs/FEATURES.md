@@ -616,9 +616,11 @@ it. (For an ad-hoc background run without a login service, use `drydock start`.)
 ### Retention & pruning
 
 Finished jobs' verbose log events are pruned past the **log retention** window (default 30 days;
-cost summary rows are kept). A daily in-process sweep runs automatically; for a manual run use
-`pnpm db:prune [--days <n>] [--no-vacuum]`, which deletes expired events and runs `VACUUM` to
-reclaim disk. See [ADR 023](adr/023-log-retention-and-pruning.md). DB backups have their own
+cost summary rows are kept). A daily in-process sweep runs automatically and only runs `VACUUM`
+when it actually deleted rows, so a no-op sweep never stalls the shared DB connection with a
+full-database rewrite. For a manual run use `pnpm db:prune [--days <n>] [--no-vacuum]`, which
+deletes expired events and — unless `--no-vacuum` — always runs `VACUUM` to reclaim disk. See
+[ADR 023](adr/023-log-retention-and-pruning.md). DB backups have their own
 **backup retention** window (default 7 days; `0` disables the sweep), pruned by the same daily
 backup sweep — see [Backups & restore](#backups--restore) and [ADR
 042](adr/042-scheduled-in-process-backup-sweep.md).
