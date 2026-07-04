@@ -440,6 +440,16 @@ complement to the reactive `waiting_limit` latch.
 
 The agent's NDJSON output is parsed incrementally, persisted, and streamed to the browser in real time.
 
+### 🔎 Full-text log search
+
+Every persisted event is searchable, so forensic questions across unattended runs — *which job hit
+`ENOSPC`? which run touched `schema.ts`? which ended in `error_max_turns`?* — get answered in the product
+instead of by grepping raw SQLite. The job-history search has an **in-logs** scope that lists every job with
+a matching event, newest-first, each with a short highlighted snippet; the job log viewer adds a
+**find-in-log** box that filters and highlights matching lines alongside the event-type chips. Matching uses
+a SQLite **FTS5** index over the event payload (with an escaped-`LIKE` fallback), and user terms are treated
+as literal text, so `100%` or an FTS operator never behaves as a wildcard or query syntax.
+
 ### 🔔 External notifications
 
 Get pinged on Telegram, Slack (incoming webhook) and email (SMTP) for the lifecycle events you care about

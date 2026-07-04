@@ -23,6 +23,11 @@ const STATUS_FILTERS = [
   ...JOB_STATES.map((s) => ({ value: s, label: s.replace(/_/g, " ") })),
 ];
 
+const SCOPE_FILTERS = [
+  { value: "", label: "Title / #" },
+  { value: "logs", label: "Logs" },
+];
+
 /**
  * Build the next query string for a filter change. Pure so the debounce can
  * apply it against the LIVE location at fire time — using the render-time
@@ -50,6 +55,7 @@ export function JobsHistoryFilters({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const scope = searchParams.get("scope") === "logs" ? "logs" : "";
   const [, startTransition] = useTransition();
   // Debounce timer for the search input. Kept in a ref (not a window global)
   // and cleared on unmount so a pending push can never navigate the user away
@@ -74,12 +80,19 @@ export function JobsHistoryFilters({
       />
 
       <div className="flex flex-wrap items-center gap-2">
+        <SegmentedControl
+          label="Search scope"
+          value={scope}
+          onChange={(v) => update("scope", v)}
+          options={SCOPE_FILTERS}
+        />
+
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-muted-foreground" />
           <Input
             aria-label="Search jobs"
             className="h-9 w-56 pl-8"
-            placeholder="Search issue title or #"
+            placeholder={scope === "logs" ? "Search in job logs" : "Search issue title or #"}
             defaultValue={searchParams.get("q") ?? ""}
             onChange={(e) => {
               const v = e.target.value;

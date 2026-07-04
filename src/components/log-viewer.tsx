@@ -11,14 +11,17 @@ import {
   type LucideIcon,
   OctagonAlert,
   ScrollText,
+  Search,
   Sparkles,
   Wrench,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
+import { splitByQuery } from "@/lib/db/log-search";
 import { isStreamEndState } from "@/lib/orchestrator/state-machine";
 import { useHydrated } from "@/lib/ui/use-hydrated";
 import { cn } from "@/lib/utils";
@@ -285,14 +288,67 @@ export function summarizeNewActivity(newLines: LogLine[]): string {
   return `${n} new log ${n === 1 ? "event" : "events"}`;
 }
 
+/**
+ * The searchable text of a log line for the in-viewer find (issue #409): its
+ * type plus the whole payload (string payloads verbatim, object payloads
+ * serialized). Serializing the entire payload — rather than cherry-picking
+ * rendered fields — keeps find consistent with the cross-job FTS search, which
+ * indexes the raw event JSON, so a term visible in one is findable in the other.
+ */
+export function lineText(line: LogLine): string {
+  const body = typeof line.payload === "string" ? line.payload : JSON.stringify(line.payload ?? {});
+  return `${line.type} ${body}`;
+}
+
+/**
+ * Whether a line stays visible under the viewer's find filter. An empty or
+ * whitespace-only query is inactive and matches every line.
+ */
+export function lineMatchesQuery(line: LogLine, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (q === "") return true;
+  return lineText(line).toLowerCase().includes(q);
+}
+
+/**
+ * Render `text` with case-insensitive occurrences of the active find `query`
+ * wrapped in `<mark>`. Falls back to the plain text when no query is active.
+ * Segment keys use the running character offset so they stay stable and unique.
+ */
+function Highlight({ text, query }: { text: string; query: string }) {
+  const q = query.trim();
+  if (q === "" || text === "") return <>{text}</>;
+  let offset = 0;
+  return (
+    <>
+      {splitByQuery(text, q).map((seg) => {
+        const key = `${offset}:${seg.match ? "m" : "p"}`;
+        offset += seg.text.length;
+        return seg.match ? (
+          <mark key={key} className="rounded-[3px] bg-warning-muted px-0.5 text-warning-foreground">
+            {seg.text}
+          </mark>
+        ) : (
+          <span key={key}>{seg.text}</span>
+        );
+      })}
+    </>
+  );
+}
+
 /** Pretty-print a single event payload, shaped per event type. */
-function PayloadView({ type, payload }: { type: string; payload: unknown }) {
+function PayloadView({ type, payload, query }: { type: string; payload: unknown; query: string }) {
   if (type === "text") {
     return (
       <p className="leading-relaxed text-foreground/90">
-        {typeof payload === "string"
-          ? payload
-          : (field(payload, "text") ?? JSON.stringify(payload))}
+        <Highlight
+          text={
+            typeof payload === "string"
+              ? payload
+              : (field(payload, "text") ?? JSON.stringify(payload))
+          }
+          query={query}
+        />
       </p>
     );
   }
@@ -306,25 +362,43 @@ function PayloadView({ type, payload }: { type: string; payload: unknown }) {
     if (from || to) {
       return (
         <span className="text-muted-foreground">
-          {from ?? "?"} <span className="text-muted-foreground/60">→</span>{" "}
-          <span className="text-foreground">{to ?? "?"}</span>
-          {reason && <> · {reason}</>}
+          <Highlight text={from ?? "?"} query={query} />{" "}
+          <span className="text-muted-foreground/60">→</span>{" "}
+          <span className="text-foreground">
+            <Highlight text={to ?? "?"} query={query} />
+          </span>
+          {reason && (
+            <>
+              {" · "}
+              <Highlight text={reason} query={query} />
+            </>
+          )}
         </span>
       );
     }
     return (
       <span className="text-muted-foreground">
-        {field(payload, "message") ??
-          reason ??
-          (typeof payload === "string" ? payload : JSON.stringify(payload))}
+        <Highlight
+          text={
+            field(payload, "message") ??
+            reason ??
+            (typeof payload === "string" ? payload : JSON.stringify(payload))
+          }
+          query={query}
+        />
       </span>
     );
   }
   if (type === "error") {
     return (
       <span className="text-destructive">
-        {field(payload, "message") ??
-          (typeof payload === "string" ? payload : JSON.stringify(payload))}
+        <Highlight
+          text={
+            field(payload, "message") ??
+            (typeof payload === "string" ? payload : JSON.stringify(payload))
+          }
+          query={query}
+        />
       </span>
     );
   }
@@ -335,7 +409,12 @@ function PayloadView({ type, payload }: { type: string; payload: unknown }) {
     return (
       <span className="text-muted-foreground">
         exited code <span className="text-foreground">{code ?? "?"}</span>
-        {reason && <> · {reason}</>}
+        {reason && (
+          <>
+            {" · "}
+            <Highlight text={reason} query={query} />
+          </>
+        )}
       </span>
     );
   }
@@ -350,12 +429,19 @@ function PayloadView({ type, payload }: { type: string; payload: unknown }) {
       inp.file_path ?? inp.command ?? inp.pattern ?? inp.summary ?? Object.values(inp)[0] ?? "";
     return (
       <span>
-        <span className="font-semibold text-primary">{name}</span>
+        <span className="font-semibold text-primary">
+          <Highlight text={name} query={query} />
+        </span>
         <span className="text-muted-foreground">(</span>
-        <span className="text-foreground/80">{String(arg)}</span>
+        <span className="text-foreground/80">
+          <Highlight text={String(arg)} query={query} />
+        </span>
         <span className="text-muted-foreground">)</span>
         {Boolean(inp.summary) && Boolean(inp.file_path) && (
-          <span className="text-muted-foreground"> — {String(inp.summary)}</span>
+          <span className="text-muted-foreground">
+            {" — "}
+            <Highlight text={String(inp.summary)} query={query} />
+          </span>
         )}
       </span>
     );
@@ -369,7 +455,9 @@ function PayloadView({ type, payload }: { type: string; payload: unknown }) {
         className={cn("inline-flex items-center gap-1.5", ok ? "text-success" : "text-destructive")}
       >
         <Icon className="h-3 w-3 shrink-0" />
-        <span className="text-foreground/80">{summary}</span>
+        <span className="text-foreground/80">
+          <Highlight text={summary} query={query} />
+        </span>
       </span>
     );
   }
@@ -401,13 +489,16 @@ function PayloadView({ type, payload }: { type: string; payload: unknown }) {
   }
   return (
     <span className="text-muted-foreground">
-      {typeof payload === "string" ? payload : JSON.stringify(payload)}
+      <Highlight
+        text={typeof payload === "string" ? payload : JSON.stringify(payload)}
+        query={query}
+      />
     </span>
   );
 }
 
 /** Render one log line: mono timestamp (if present), icon chip, label, payload. */
-function LogRow({ line, showClock }: { line: LogLine; showClock: boolean }) {
+function LogRow({ line, showClock, query }: { line: LogLine; showClock: boolean; query: string }) {
   const cfg = cfgFor(line.type);
   const Icon = cfg.icon;
   // The clock is local-timezone-dependent, so it only renders after hydration:
@@ -433,7 +524,7 @@ function LogRow({ line, showClock }: { line: LogLine; showClock: boolean }) {
         {cfg.label}
       </span>
       <div className="min-w-0 flex-1 whitespace-pre-wrap break-words pt-0.5">
-        <PayloadView type={line.type} payload={line.payload} />
+        <PayloadView type={line.type} payload={line.payload} query={query} />
       </div>
     </div>
   );
@@ -483,6 +574,10 @@ export function LogViewer({
   const [autoscroll, setAutoscroll] = useState(true);
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const [showFilter, setShowFilter] = useState(false);
+  // Find-in-log text filter (issue #409): narrows the rendered rows to those
+  // whose content contains the term and highlights the hits, composing with the
+  // event-type chips below.
+  const [query, setQuery] = useState("");
   // Dedup is keyed by job_events row id, the unit of an SSE frame — a single
   // event may expand into several rows that share that id.
   const seen = useRef(new Set<number>(initial.map((l) => l.id)));
@@ -535,9 +630,13 @@ export function LogViewer({
     return () => es.close();
   }, [jobId, active, complete]);
 
-  const visible = useMemo(() => lines.filter((l) => !hidden.has(l.type)), [lines, hidden]);
+  const visible = useMemo(
+    () => lines.filter((l) => !hidden.has(l.type) && lineMatchesQuery(l, query)),
+    [lines, hidden, query],
+  );
   const displayed = useMemo(() => toDisplayOrder(visible), [visible]);
   const running = !complete;
+  const searching = query.trim().length > 0;
   const hiddenCount = hidden.size;
 
   // With newest-on-top, "follow" means staying pinned to the top: scroll there
@@ -612,6 +711,27 @@ export function LogViewer({
           <Badge tone="neutral">complete · {lines.length} events</Badge>
         )}
         <div className="ml-auto flex items-center gap-1">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              aria-label="Find in log"
+              placeholder="Find in log"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="h-7 w-36 rounded-md border border-border bg-background pl-7 pr-6 text-xs focus-ring sm:w-44"
+            />
+            {searching && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="Clear find"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-sm text-muted-foreground hover:text-foreground focus-ring"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => setShowFilter((v) => !v)}
@@ -688,24 +808,30 @@ export function LogViewer({
         aria-label="Job log stream"
         className="h-[460px] bg-background/40 px-1 py-1 font-mono text-xs"
       >
-        <Virtuoso
-          ref={virtuoso}
-          data={displayed}
-          initialTopMostItemIndex={0}
-          itemContent={(_i, line) => <LogRow line={line} showClock={hydrated} />}
-          components={{
-            // Newest events appear at the top, so the streaming indicator lives
-            // in the header — right where the next event will land.
-            Header: () =>
-              running ? (
-                <div className="flex items-center gap-2.5 px-2.5 py-1.5 text-muted-foreground">
-                  <span className="w-[42px]" />
-                  <Spinner size={13} />
-                  <span className="text-[11px]">streaming…</span>
-                </div>
-              ) : null,
-          }}
-        />
+        {searching && visible.length === 0 ? (
+          <div className="flex h-full items-center justify-center px-4 text-center text-xs text-muted-foreground">
+            No log lines match “{query.trim()}”.
+          </div>
+        ) : (
+          <Virtuoso
+            ref={virtuoso}
+            data={displayed}
+            initialTopMostItemIndex={0}
+            itemContent={(_i, line) => <LogRow line={line} showClock={hydrated} query={query} />}
+            components={{
+              // Newest events appear at the top, so the streaming indicator lives
+              // in the header — right where the next event will land.
+              Header: () =>
+                running ? (
+                  <div className="flex items-center gap-2.5 px-2.5 py-1.5 text-muted-foreground">
+                    <span className="w-[42px]" />
+                    <Spinner size={13} />
+                    <span className="text-[11px]">streaming…</span>
+                  </div>
+                ) : null,
+            }}
+          />
+        )}
       </div>
     </div>
   );

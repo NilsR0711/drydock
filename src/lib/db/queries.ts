@@ -7,7 +7,14 @@ import { providerLimitBlocked } from "@/lib/orchestrator/provider-limit";
 import { getCodexUsage, getProviderUsage } from "@/lib/orchestrator/provider-usage";
 import { type DB, getDb } from "./client";
 import { todayCost, todaySpendByRepo } from "./cost-queries";
-import { type Issue, issues, type Job, jobs, type Repo, repos } from "./schema";
+import {
+  buildLikeSnippet,
+  escapeFtsMatch,
+  escapeLikePattern,
+  MATCH_END,
+  MATCH_START,
+} from "./log-search";
+import { type Issue, issues, type Job, jobEvents, jobs, type Repo, repos } from "./schema";
 
 export interface RepoWithStats extends Repo {
   activeJobs: number;
@@ -354,8 +361,14 @@ export interface JobHistoryFilters {
   repoId?: number;
   status?: string;
   model?: string;
-  /** Free-text search: matches issue number (exact) or issue title (substring). */
+  /**
+   * Free-text search. In the default "meta" scope it matches issue number
+   * (exact) or issue title (substring); in "logs" scope it matches the text of
+   * a job's persisted events (`job_events` payload) — see {@link searchJobsByLog}.
+   */
   search?: string;
+  /** Which corpus `search` targets. Defaults to "meta". */
+  searchScope?: "meta" | "logs";
   /** 1-based page number. */
   page?: number;
   pageSize?: number;
@@ -364,6 +377,12 @@ export interface JobHistoryFilters {
 export interface JobHistoryRow extends Job {
   repoName: string;
   issueTitle: string | null;
+  /**
+   * For a "logs"-scope search: a short excerpt of the first matching event with
+   * hits wrapped in the highlight sentinels (see `log-search.ts`). Absent for
+   * meta-scope results.
+   */
+  logSnippet?: string;
 }
 
 export interface JobHistoryPage {
@@ -385,14 +404,23 @@ const DEFAULT_PAGE_SIZE = 25;
  */
 export function listJobsPage(filters: JobHistoryFilters, db: DB = getDb()): JobHistoryPage {
   const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE;
+  const term = filters.search?.trim();
 
+  if (filters.searchScope === "logs" && term) {
+    return searchJobsByLog(term, filters, pageSize, db);
+  }
+
+  return paginateJobs(metaSearchConditions(filters, term), filters.page ?? 1, pageSize, db);
+}
+
+/** WHERE conditions for the default "meta" scope: filters + issue number/title. */
+function metaSearchConditions(filters: JobHistoryFilters, term: string | undefined): SQL[] {
   const conditions: SQL[] = [];
   if (filters.repoId !== undefined) conditions.push(eq(jobs.repoId, filters.repoId));
   if (filters.status) conditions.push(eq(jobs.status, filters.status));
   if (filters.model) conditions.push(eq(jobs.model, filters.model));
 
-  if (filters.search?.trim()) {
-    const term = filters.search.trim();
+  if (term) {
     const asNumber = Number(term);
     if (!Number.isNaN(asNumber) && Number.isInteger(asNumber) && String(asNumber) === term) {
       conditions.push(eq(jobs.issueNumber, asNumber));
@@ -400,7 +428,7 @@ export function listJobsPage(filters: JobHistoryFilters, db: DB = getDb()): JobH
       // Escape LIKE wildcards so a literal search for "100%" or "re_name"
       // matches only those characters. The term stays a bound parameter;
       // drizzle's like() has no escape support, hence the sql fragments.
-      const pattern = `%${term.replace(/[\\%_]/g, "\\$&")}%`;
+      const pattern = escapeLikePattern(term);
       conditions.push(
         or(
           sql`${issues.title} LIKE ${pattern} ESCAPE '\\'`,
@@ -409,7 +437,21 @@ export function listJobsPage(filters: JobHistoryFilters, db: DB = getDb()): JobH
       );
     }
   }
+  return conditions;
+}
 
+/**
+ * Fetch one page of job history for the given WHERE conditions, ordered
+ * newest-first by createdAt with id (insertion order) as a deterministic
+ * tiebreaker for jobs enqueued within the same second. Shared by the meta and
+ * logs search scopes; the requested page is clamped to the valid range.
+ */
+function paginateJobs(
+  conditions: SQL[],
+  requestedPage: number,
+  pageSize: number,
+  db: DB,
+): JobHistoryPage {
   const where = conditions.length ? and(...conditions) : undefined;
 
   const totalResult = db
@@ -424,7 +466,6 @@ export function listJobsPage(filters: JobHistoryFilters, db: DB = getDb()): JobH
   const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
 
   // Clamp requested page to valid range.
-  const requestedPage = filters.page ?? 1;
   const page = total === 0 ? 1 : Math.min(Math.max(1, requestedPage), Math.max(1, totalPages));
   const offset = (page - 1) * pageSize;
 
@@ -454,4 +495,136 @@ export function listJobsPage(filters: JobHistoryFilters, db: DB = getDb()): JobH
   }));
 
   return { rows, total, page, pageSize, totalPages };
+}
+
+/** One job that has at least one event matching a log search, plus the id of
+ *  its first (oldest) matching event — the one shown in the row snippet. */
+interface JobLogMatch {
+  jobId: number;
+  eventId: number;
+}
+
+/** How many tokens of context SQLite's `snippet()` returns around a hit. */
+const SNIPPET_TOKENS = 12;
+
+/**
+ * Search a job's persisted events (`job_events` payload) rather than its issue
+ * metadata (issue #409). Returns the jobs with at least one matching event,
+ * newest-first and paginated like the meta scope, each carrying a short
+ * highlighted `logSnippet` of its first match.
+ *
+ * Matching prefers the FTS5 index (`job_events_fts`); if that index is absent —
+ * or the FTS query errors on an unusual build — it falls back to an escaped
+ * `LIKE` over the raw payload, so search degrades to "correct but slower" rather
+ * than failing (per the issue's guidance).
+ */
+function searchJobsByLog(
+  term: string,
+  filters: JobHistoryFilters,
+  pageSize: number,
+  db: DB,
+): JobHistoryPage {
+  let useFts = hasFtsIndex(db);
+  let matches: JobLogMatch[];
+  try {
+    matches = useFts ? ftsMatchJobs(db, term) : likeMatchJobs(db, term);
+  } catch {
+    useFts = false;
+    matches = likeMatchJobs(db, term);
+  }
+
+  const firstEventByJob = new Map<number, number>();
+  for (const m of matches) {
+    if (!firstEventByJob.has(m.jobId)) firstEventByJob.set(m.jobId, m.eventId);
+  }
+  const matchedJobIds = [...firstEventByJob.keys()];
+  if (matchedJobIds.length === 0) {
+    return { rows: [], total: 0, page: 1, pageSize, totalPages: 0 };
+  }
+
+  // Restrict the standard job-history query to the matching jobs, so the other
+  // filters (repo/status/model), ordering and pagination all compose. The
+  // matched set is bounded by the number of jobs, keeping the IN() list well
+  // under SQLite's bound-parameter limit for any realistic history.
+  const conditions: SQL[] = [inArray(jobs.id, matchedJobIds)];
+  if (filters.repoId !== undefined) conditions.push(eq(jobs.repoId, filters.repoId));
+  if (filters.status) conditions.push(eq(jobs.status, filters.status));
+  if (filters.model) conditions.push(eq(jobs.model, filters.model));
+
+  const pageResult = paginateJobs(conditions, filters.page ?? 1, pageSize, db);
+
+  // Only compute snippets for the page's rows (not every match).
+  const pageEventIds = pageResult.rows
+    .map((r) => firstEventByJob.get(r.id))
+    .filter((id): id is number => id !== undefined);
+  const snippetByEvent =
+    pageEventIds.length === 0
+      ? new Map<number, string>()
+      : useFts
+        ? ftsSnippets(db, term, pageEventIds)
+        : likeSnippets(db, term, pageEventIds);
+
+  const rows = pageResult.rows.map((r) => {
+    const eventId = firstEventByJob.get(r.id);
+    return { ...r, logSnippet: eventId === undefined ? "" : (snippetByEvent.get(eventId) ?? "") };
+  });
+
+  return { ...pageResult, rows };
+}
+
+/** Whether the FTS5 log-search index exists (created by migration 0050). */
+function hasFtsIndex(db: DB): boolean {
+  const row = db.get<{ n: number }>(
+    sql`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'job_events_fts'`,
+  );
+  return (row?.n ?? 0) > 0;
+}
+
+/** FTS5 match: jobs with a matching event, plus each job's first matching id. */
+function ftsMatchJobs(db: DB, term: string): JobLogMatch[] {
+  const q = escapeFtsMatch(term);
+  return db.all<JobLogMatch>(sql`
+    SELECT je.job_id AS "jobId", MIN(je.id) AS "eventId"
+    FROM job_events_fts
+    JOIN job_events je ON je.id = job_events_fts.rowid
+    WHERE job_events_fts MATCH ${q}
+    GROUP BY je.job_id
+  `);
+}
+
+/** LIKE fallback for {@link ftsMatchJobs} when the FTS index is unavailable. */
+function likeMatchJobs(db: DB, term: string): JobLogMatch[] {
+  const pattern = escapeLikePattern(term);
+  return db.all<JobLogMatch>(sql`
+    SELECT ${jobEvents.jobId} AS "jobId", MIN(${jobEvents.id}) AS "eventId"
+    FROM ${jobEvents}
+    WHERE ${jobEvents.payload} LIKE ${pattern} ESCAPE '\\'
+    GROUP BY ${jobEvents.jobId}
+  `);
+}
+
+/** Highlighted excerpts for the given events via SQLite's `snippet()`. */
+function ftsSnippets(db: DB, term: string, eventIds: number[]): Map<number, string> {
+  const q = escapeFtsMatch(term);
+  const idList = sql.join(
+    eventIds.map((id) => sql`${id}`),
+    sql`, `,
+  );
+  const rows = db.all<{ eventId: number; snippet: string }>(sql`
+    SELECT rowid AS "eventId",
+           snippet(job_events_fts, 0, ${MATCH_START}, ${MATCH_END}, '…', ${SNIPPET_TOKENS}) AS "snippet"
+    FROM job_events_fts
+    WHERE job_events_fts MATCH ${q} AND rowid IN (${idList})
+  `);
+  return new Map(rows.map((r) => [r.eventId, r.snippet]));
+}
+
+/** LIKE fallback for {@link ftsSnippets}: excerpt built in JS from the payload. */
+function likeSnippets(db: DB, term: string, eventIds: number[]): Map<number, string> {
+  const rows = db.all<{ eventId: number; payload: string }>(sql`
+    SELECT ${jobEvents.id} AS "eventId", ${jobEvents.payload} AS "payload"
+    FROM ${jobEvents}
+    WHERE ${inArray(jobEvents.id, eventIds)}
+  `);
+  return new Map(rows.map((r) => [r.eventId, buildLikeSnippet(r.payload, term)]));
 }
