@@ -1,3 +1,4 @@
+import { globalSingleton } from "@/lib/util/global-singleton";
 import type { RequestPriority } from "./priority";
 
 /**
@@ -33,6 +34,19 @@ export interface RateSnapshot {
   remaining: number;
   limit: number;
   reset: number;
+}
+
+/**
+ * A budget reading for surfacing to operators (health endpoint, dashboard): the
+ * last observed snapshot plus whether background work is currently deferred
+ * (issue #408). `reset` is epoch seconds.
+ */
+export interface RateBudget {
+  remaining: number;
+  limit: number;
+  reset: number;
+  /** True when a `low`-priority (background) request would be gated right now. */
+  gated: boolean;
 }
 
 /** Why a request was gated, and how long until it could succeed. */
@@ -118,6 +132,26 @@ export class RateLimitGovernor {
     return this.resources.get(resource)?.snapshot;
   }
 
+  /**
+   * Point-in-time budget for surfacing to operators (issue #408): the last
+   * observed snapshot plus whether background (`low`-priority) work is currently
+   * being deferred — i.e. sweeps are gated. The gate reuses {@link decide} so it
+   * reflects every deferral cause (reserve fraction, hard floor, active 429
+   * backoff), and reads `false` once a stale reset window has elapsed. Returns
+   * null when nothing has been observed for the resource yet. Read-only: no
+   * forge call, no mutation.
+   */
+  budget(resource: RateResource): RateBudget | null {
+    const snap = this.snapshot(resource);
+    if (!snap) return null;
+    return {
+      remaining: snap.remaining,
+      limit: snap.limit,
+      reset: snap.reset,
+      gated: !this.decide(resource, "low").allowed,
+    };
+  }
+
   private state(resource: RateResource): ResourceState {
     let s = this.resources.get(resource);
     if (!s) {
@@ -128,8 +162,18 @@ export class RateLimitGovernor {
   }
 }
 
-/** Process-wide governor shared by every GitHub client (see GhClient). */
-export const sharedGovernor = new RateLimitGovernor();
+/**
+ * Process-wide governor shared by every GitHub client (see GhClient). Kept on
+ * `globalThis` (not a module-local `const`) so every Next.js bundle layer — the
+ * driver loop and gh client that *observe* budgets, and the `/api/health` route
+ * and dashboard queries that *read* them — share one instance. A module-local
+ * singleton would give each layer its own empty governor, so surfaced budgets
+ * would always read null in production (issues #232, #408).
+ */
+export const sharedGovernor = globalSingleton(
+  Symbol.for("drydock.github.rate-limit.governor"),
+  () => new RateLimitGovernor(),
+);
 
 /**
  * Thrown when the governor gates a request before it is sent: a `low`-priority
