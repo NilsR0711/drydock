@@ -17,6 +17,7 @@ import { ToastProvider } from "@/components/ui/toast";
 import { deriveClaudeUsageView } from "@/lib/agents/claude-usage";
 import { buildCodexUsageView } from "@/lib/agents/codex-usage";
 import type { DashboardSnapshot } from "@/lib/db/queries";
+import { deriveGithubBudgetView } from "@/lib/github/budget-view";
 
 /** EventSource stand-in — jsdom ships none. */
 class MockEventSource {
@@ -37,6 +38,7 @@ function snapshot(): DashboardSnapshot {
     needsHumanJobs: [],
     claudeUsage: deriveClaudeUsageView({ now }),
     codexUsage: buildCodexUsageView({ now }),
+    githubBudget: deriveGithubBudgetView({ core: null, graphql: null }),
   };
 }
 

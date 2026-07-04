@@ -5,7 +5,13 @@ import { Providers } from "@/components/providers";
 import { pendingCount } from "@/lib/adr/service";
 import { type ClaudeUsageView, deriveClaudeUsageView } from "@/lib/agents/claude-usage";
 import { buildCodexUsageView, type CodexUsageView } from "@/lib/agents/codex-usage";
-import { getClaudeUsageView, getCodexUsageView, needsHumanJobs } from "@/lib/db/queries";
+import {
+  getClaudeUsageView,
+  getCodexUsageView,
+  getGithubBudgetView,
+  needsHumanJobs,
+} from "@/lib/db/queries";
+import { deriveGithubBudgetView, type GithubBudgetView } from "@/lib/github/budget-view";
 import {
   type CredentialFailure,
   getCredentialFailures,
@@ -36,6 +42,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   let credentialFailures: CredentialFailure[] = [];
   let claudeUsage: ClaudeUsageView = deriveClaudeUsageView({ now: Math.floor(Date.now() / 1000) });
   let codexUsage: CodexUsageView = buildCodexUsageView({ now: Math.floor(Date.now() / 1000) });
+  // GitHub API budget is read from the process-memory governor, not the DB, so
+  // it is computed independently and stays visible even on first boot (#408).
+  let githubBudget: GithubBudgetView = deriveGithubBudgetView({ core: null, graphql: null });
+  try {
+    githubBudget = getGithubBudgetView();
+  } catch {
+    // Governor read is process-only; fall back to the unknown view.
+  }
   // First-run onboarding greets the user until they finish/dismiss it (issue
   // #356). Default to showing it so a brand-new install (no DB yet) is welcomed.
   let showOnboarding = true;
@@ -73,6 +87,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             credentialFailures={credentialFailures}
             claudeUsage={claudeUsage}
             codexUsage={codexUsage}
+            githubBudget={githubBudget}
           >
             {children}
           </AppShell>
