@@ -23,6 +23,7 @@ import { jobHeading } from "@/lib/orchestrator/job-display";
 import { getJob } from "@/lib/orchestrator/jobs";
 import { listPrQuestions } from "@/lib/orchestrator/pr-questions";
 import { isInFlight, isStreamEndState, type JobStatus } from "@/lib/orchestrator/state-machine";
+import { parseEventPayload } from "@/lib/stream/event-payload";
 
 export const dynamic = "force-dynamic";
 
@@ -177,7 +178,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         initial={events.map((e) => ({
           id: e.id,
           type: e.type,
-          payload: JSON.parse(e.payload),
+          payload: parseEventPayload(e.payload),
           ts: e.ts,
         }))}
       />
