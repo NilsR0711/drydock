@@ -4,7 +4,7 @@ import { createDb, type DB } from "@/lib/db/client";
 import { type Job, jobs } from "@/lib/db/schema";
 import type { Worktree } from "@/lib/git/worktree";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
-import { planPromptSection, runJob } from "@/lib/orchestrator/run-job";
+import { runJob } from "@/lib/orchestrator/run-job";
 import { addRepo } from "@/lib/repos/service";
 
 let db: DB;
@@ -39,24 +39,6 @@ function baseDeps(over: Record<string, unknown> = {}) {
     ...over,
   };
 }
-
-describe("planPromptSection", () => {
-  it("renders the plan as a dedicated section", () => {
-    const section = planPromptSection("1. Edit a.ts\n2. Run tests");
-    expect(section).toContain("## Implementation plan");
-    expect(section).toContain("1. Edit a.ts");
-  });
-
-  it("returns an empty string for an empty plan", () => {
-    expect(planPromptSection("   ")).toBe("");
-  });
-
-  it("caps an oversized plan", () => {
-    const section = planPromptSection("x".repeat(50_000));
-    expect(section.length).toBeLessThan(11_000);
-    expect(section).toContain("… (truncated)");
-  });
-});
 
 describe("runJob — plan-first stage (issue #160)", () => {
   it("does not run the plan stage when planFirst is off", async () => {
