@@ -279,6 +279,30 @@ describe("runPrQuestion", () => {
     expect(updated?.answer).toBeNull();
   });
 
+  it("marks the question with a clear provider-limit reason, not a generic failure (issue #430)", async () => {
+    const { job } = setup();
+    const q = createPrQuestion({ jobId: job.id, prNumber: 55, question: "q" }, db);
+    await runPrQuestion(
+      passDeps(
+        fakeForge(),
+        async () => {
+          throw new ProviderLimitError({
+            agent: "claude",
+            kind: "usage_limit",
+            rawSnippet: "limit",
+          });
+        },
+        job,
+        q.id,
+      ),
+    );
+    const updated = getPrQuestion(q.id, db);
+    expect(updated?.status).toBe("error");
+    // The asker is told to retry once the quota resets, not shown a raw failure.
+    expect(updated?.errorMessage).toContain("quota");
+    expect(updated?.errorMessage).not.toContain("Answering failed");
+  });
+
   it("never throws when context assembly fails, marking the question error", async () => {
     const { job } = setup();
     const q = createPrQuestion({ jobId: job.id, prNumber: 55, question: "q" }, db);

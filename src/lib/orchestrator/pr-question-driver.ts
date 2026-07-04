@@ -21,6 +21,7 @@ import { redactSecrets } from "@/lib/log/redact";
 import { recordEvent } from "./jobs";
 import { buildOneShotGenerator, type OneShotGeneratorDeps } from "./one-shot-generator";
 import { markQuestionAnswered, markQuestionError } from "./pr-questions";
+import { ProviderLimitError } from "./provider-limit";
 import { listFeedbackItems } from "./review-feedback";
 
 /**
@@ -185,6 +186,19 @@ export async function runPrQuestion(deps: PrQuestionPassDeps): Promise<void> {
     markQuestionAnswered(questionId, redactSecrets(answer), db);
     recordEvent(job.id, "pr_question", { ok: true, questionId }, db);
   } catch (err) {
+    if (err instanceof ProviderLimitError) {
+      // The agent's quota is exhausted and now latched for other flows to defer
+      // on (issue #430). The question must still reach a terminal state
+      // (answering → error), but with a reason that tells the asker to retry
+      // once the limit resets rather than a raw internal failure.
+      markQuestionError(
+        questionId,
+        `The ${err.info.agent} quota is exhausted; ask again once the limit resets.`,
+        db,
+      );
+      recordEvent(job.id, "pr_question", { ok: false, questionId, reason: "provider limit" }, db);
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     markQuestionError(questionId, `Answering failed: ${message}`.slice(0, 500), db);
     recordEvent(job.id, "pr_question", { ok: false, questionId }, db);

@@ -84,6 +84,17 @@ describe("previewRelease", () => {
     expect(preview.shouldRelease).toBe(false);
     expect(preview.candidateTag).toBe("v1.2.1");
   });
+
+  it("degrades to a non-releasing preview on a provider limit rather than throwing (issue #430)", async () => {
+    const preview = await previewRelease({
+      forge: fakeForge(),
+      generate: vi.fn(async () => {
+        throw new ProviderLimitError({ agent: "codex", kind: "usage_limit", rawSnippet: "limit" });
+      }),
+    });
+    expect(preview.shouldRelease).toBe(false);
+    expect(preview.bump).toBe("patch");
+  });
 });
 
 describe("publishRelease (auto)", () => {
@@ -163,6 +174,21 @@ describe("publishRelease (auto)", () => {
     });
     expect(final.status).toBe("error");
     expect(final.errorMessage).toBeTruthy();
+  });
+
+  it("parks the run as a retryable error on a provider limit, never throwing out (issue #430)", async () => {
+    const r = addRepo({ path: "/r", name: "r" }, db);
+    const run = createReleaseRun({ repoId: r.id, mode: "auto", triggerSha: "s" }, db);
+    const final = await publishRelease(run.id, {
+      repo: r,
+      forge: fakeForge(),
+      db,
+      generate: vi.fn(async () => {
+        throw new ProviderLimitError({ agent: "codex", kind: "usage_limit", rawSnippet: "limit" });
+      }),
+    });
+    expect(final.status).toBe("error");
+    expect(final.errorMessage).toContain("usage_limit");
   });
 
   it("records the evaluation's real failure reason, not a constant message", async () => {

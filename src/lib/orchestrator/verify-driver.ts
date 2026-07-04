@@ -20,6 +20,7 @@ import { logError } from "@/lib/log/logger";
 import { redactSecrets } from "@/lib/log/redact";
 import { recordEvent } from "./jobs";
 import { buildOneShotGenerator, type OneShotGeneratorDeps } from "./one-shot-generator";
+import { ProviderLimitError } from "./provider-limit";
 import type { SubtaskStatus } from "./subtask-state";
 
 /**
@@ -266,6 +267,14 @@ export async function runVerificationPass(
     );
     return result;
   } catch (err) {
+    if (err instanceof ProviderLimitError) {
+      // The agent's quota is exhausted and now latched for other flows to defer
+      // on (issue #430). Skip this pass quietly — no comment against a dead
+      // quota, no misleading failure log — leaving all state untouched so it
+      // re-runs on the next verified PR once the window clears.
+      recordEvent(job.id, "verification", { ok: false, reason: "provider limit" }, db);
+      return null;
+    }
     logError(`[verify] verification pass failed for ${repo.name}#${job.issueNumber}`, err);
     return null;
   } finally {

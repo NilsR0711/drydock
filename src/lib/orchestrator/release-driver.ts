@@ -28,6 +28,7 @@ import {
 import type { ReleaseStatus } from "@/lib/release/release-state";
 import type { SemverBump } from "@/lib/version/semver";
 import { buildOneShotGenerator, type OneShotGeneratorDeps } from "./one-shot-generator";
+import { ProviderLimitError } from "./provider-limit";
 
 /**
  * Driver glue for the opt-in release manager (issue #59, ADR 028): the read-only
@@ -152,7 +153,17 @@ export interface PreviewReleaseDeps {
  */
 export async function previewRelease(deps: PreviewReleaseDeps): Promise<ReleasePreview> {
   const { fromTag, prs } = await gatherWindow(deps.forge);
-  const result = await deps.generate({ fromTag, prs });
+  let result: ReleaseEvaluationResult;
+  try {
+    result = await deps.generate({ fromTag, prs });
+  } catch (err) {
+    if (!(err instanceof ProviderLimitError)) throw err;
+    // A waitable provider limit now latches the agent and throws (issue #430).
+    // The synchronous dry-run preview has nowhere to defer to, so it degrades
+    // like any other unavailable evaluation instead of surfacing a raw error to
+    // the panel; the latch still gates the background sweep.
+    result = { ok: false, reason: err.message };
+  }
   // The preview is best-effort: any evaluation failure degrades to a patch
   // candidate with `shouldRelease: false` rather than surfacing the reason.
   const evaluation = result.ok ? result.evaluation : null;

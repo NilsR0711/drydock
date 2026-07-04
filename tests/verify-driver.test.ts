@@ -336,6 +336,34 @@ describe("runVerificationPass", () => {
     expect(forge.commentIssue).not.toHaveBeenCalled();
   });
 
+  it("defers quietly on a provider limit — no comment, no error log (issue #430)", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const forge = fakeForge();
+    const { repo, job } = setup();
+    const out = await runVerificationPass(
+      passDeps(
+        forge,
+        async () => {
+          throw new ProviderLimitError({
+            agent: "claude",
+            kind: "usage_limit",
+            rawSnippet: "limit",
+          });
+        },
+        repo,
+        job,
+      ),
+    );
+    expect(out).toBeNull();
+    // No verdicts merged, no comment posted against the exhausted quota, and no
+    // misleading "failed" error logged — the pass is simply deferred.
+    expect(listSubtasks(repo.id, 1, db).every((s) => s.status === "pending")).toBe(true);
+    expect(forge.commentIssue).not.toHaveBeenCalled();
+    const logged = errSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    expect(logged).not.toContain("verification pass failed");
+    errSpy.mockRestore();
+  });
+
   it("returns null without invoking the agent when the diff is empty", async () => {
     const forge = fakeForge({ prDiff: vi.fn(async () => "   ") });
     const { repo, job } = setup();
