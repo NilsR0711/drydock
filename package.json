@@ -103,6 +103,9 @@
       "esbuild",
       "@biomejs/biome",
       "sharp"
-    ]
+    ],
+    "overrides": {
+      "dompurify": ">=3.4.9"
+    }
   }
 }
