@@ -1,8 +1,11 @@
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
-import { jobs } from "@/lib/db/schema";
+import { jobs, settings } from "@/lib/db/schema";
 import { getServerLogger } from "@/lib/log/server-log";
+import type { LogRecord } from "@/lib/log/types";
 import { MODELS } from "@/lib/models";
+import { NOTIFICATION_EVENTS } from "@/lib/notify/events";
 import { saveCredentialStatus } from "@/lib/orchestrator/credential-status";
 import { addRepo } from "@/lib/repos/service";
 import {
@@ -11,10 +14,40 @@ import {
   redactSettingsSecrets,
   repoJobsAllowed,
   SECRET_SETTING_KEYS,
+  SETTINGS_BACKUP_KEY,
   SETTINGS_REDACTION_PLACEHOLDER,
   saveSettings,
   settingsSchema,
 } from "@/lib/settings/service";
+
+/** Storage key the global settings row lives under (mirrors the service constant). */
+const GLOBAL_KEY = "global";
+
+/** Overwrite the persisted global settings row with a raw (possibly corrupt) value. */
+function writeRawSettings(database: DB, value: string): void {
+  const existing = database.select().from(settings).where(eq(settings.key, GLOBAL_KEY)).get();
+  if (existing) {
+    database.update(settings).set({ value }).where(eq(settings.key, GLOBAL_KEY)).run();
+  } else {
+    database.insert(settings).values({ key: GLOBAL_KEY, value }).run();
+  }
+}
+
+/** Run `fn` while capturing every log record the shared server logger emits. */
+function captureLogs<T>(fn: () => T): { result: T; records: LogRecord[] } {
+  const records: LogRecord[] = [];
+  const unsubscribe = getServerLogger().subscribe((r) => records.push(r));
+  try {
+    return { result: fn(), records };
+  } finally {
+    unsubscribe();
+  }
+}
+
+/** Read the raw backup row written whenever a corrupt settings row is recovered. */
+function readBackup(database: DB): string | undefined {
+  return database.select().from(settings).where(eq(settings.key, SETTINGS_BACKUP_KEY)).get()?.value;
+}
 
 let db: DB;
 let repoId: number;
@@ -185,6 +218,106 @@ describe("settings", () => {
     saveSettings({ monthlyCostLimitUsd: 200 }, db);
     expect(getSettings(db).monthlyCostLimitUsd).toBe(200);
     expect(() => saveSettings({ monthlyCostLimitUsd: -1 }, db)).toThrow();
+  });
+});
+
+describe("corrupt settings row recovery (issue #421)", () => {
+  it("falls back to defaults, logs the parse error, and backs up a non-JSON row", () => {
+    writeRawSettings(db, "{ this is not valid json");
+
+    const { result: s, records } = captureLogs(() => getSettings(db));
+
+    // Nothing is recoverable from non-JSON, so every field returns to its default.
+    expect(s.dailyCostLimitUsd).toBe(0);
+    expect(s.maxParallelJobs).toBe(3);
+    // The reset is visible in the shared logger at error level.
+    expect(records.some((r) => r.level === "error" && /settings/i.test(r.msg))).toBe(true);
+    // The raw pre-reset bytes are preserved so the operator can recover them.
+    expect(readBackup(db)).toBe("{ this is not valid json");
+  });
+
+  it("keeps every still-valid field when a single field is invalid (unknown model id)", () => {
+    const good = settingsSchema.parse({
+      telegramBotToken: "123456:AAsecret",
+      smtpPass: "hunter2",
+      dailyCostLimitUsd: 42,
+      paused: true,
+      maxParallelJobs: 7,
+    });
+    writeRawSettings(db, JSON.stringify({ ...good, defaultModel: "claude-removed-99" }));
+
+    const { result: s, records } = captureLogs(() => getSettings(db));
+
+    // Secrets, budget, pause, and parallelism survive the bad field.
+    expect(s.telegramBotToken).toBe("123456:AAsecret");
+    expect(s.smtpPass).toBe("hunter2");
+    expect(s.dailyCostLimitUsd).toBe(42);
+    expect(s.paused).toBe(true);
+    expect(s.maxParallelJobs).toBe(7);
+    // Only the offending field falls back to its own default.
+    expect(s.defaultModel).toBe("claude-opus-4-8");
+    // The log names the failing field (the underlying zod issue).
+    expect(records.some((r) => r.level === "error" && r.msg.includes("defaultModel"))).toBe(true);
+    // The corrupt row is preserved verbatim for recovery.
+    expect(readBackup(db)).toBe(JSON.stringify({ ...good, defaultModel: "claude-removed-99" }));
+  });
+
+  it("keeps every still-valid field when a notify event was renamed away", () => {
+    const good = settingsSchema.parse({
+      openrouterApiKey: "sk-or-v1-secret",
+      dailyCostLimitUsd: 15,
+      paused: true,
+      maxParallelJobs: 5,
+    });
+    writeRawSettings(
+      db,
+      JSON.stringify({ ...good, notifyEvents: ["needs_human", "renamed_event"] }),
+    );
+
+    const { result: s, records } = captureLogs(() => getSettings(db));
+
+    expect(s.openrouterApiKey).toBe("sk-or-v1-secret");
+    expect(s.dailyCostLimitUsd).toBe(15);
+    expect(s.paused).toBe(true);
+    expect(s.maxParallelJobs).toBe(5);
+    // The invalid array resets to the full default set, not to an empty one.
+    expect(s.notifyEvents).toEqual([...NOTIFICATION_EVENTS]);
+    expect(records.some((r) => r.level === "error" && r.msg.includes("notifyEvents"))).toBe(true);
+  });
+
+  it("does not persist a defaults wipe when saveSettings runs after a corruption", () => {
+    const good = settingsSchema.parse({
+      telegramBotToken: "keep-me",
+      smtpPass: "s3cret",
+      dailyCostLimitUsd: 33,
+      paused: true,
+      maxParallelJobs: 6,
+    });
+    writeRawSettings(db, JSON.stringify({ ...good, defaultModel: "gone-model" }));
+
+    // The operator changes one unrelated field; the recoverable fields must survive.
+    saveSettings({ pollIntervalSec: 45 }, db);
+
+    const s = getSettings(db);
+    expect(s.pollIntervalSec).toBe(45);
+    expect(s.telegramBotToken).toBe("keep-me");
+    expect(s.smtpPass).toBe("s3cret");
+    expect(s.dailyCostLimitUsd).toBe(33);
+    expect(s.paused).toBe(true);
+    expect(s.maxParallelJobs).toBe(6);
+    expect(s.defaultModel).toBe("claude-opus-4-8");
+
+    // The persisted row is valid again, so re-reading it triggers no further fallback.
+    const { records } = captureLogs(() => getSettings(db));
+    expect(records.some((r) => r.level === "error" && /settings/i.test(r.msg))).toBe(false);
+  });
+
+  it("preserves the raw value once and does not clobber the backup on repeated reads", () => {
+    const raw = "not-json-at-all";
+    writeRawSettings(db, raw);
+    getSettings(db);
+    getSettings(db);
+    expect(readBackup(db)).toBe(raw);
   });
 });
 
