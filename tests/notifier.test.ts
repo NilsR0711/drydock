@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import {
   defaultTransports,
@@ -10,8 +10,8 @@ import {
 import { saveSettings } from "@/lib/settings/service";
 
 let db: DB;
-let postJson: ReturnType<typeof vi.fn>;
-let sendMail: ReturnType<typeof vi.fn>;
+let postJson: Mock<NotifyTransports["postJson"]>;
+let sendMail: Mock<NotifyTransports["sendMail"]>;
 let transports: NotifyTransports;
 
 beforeEach(() => {

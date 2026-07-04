@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import type { Job, Repo } from "@/lib/db/schema";
 import type { ForgeClient, ReviewThread } from "@/lib/forge/types";
@@ -156,7 +156,7 @@ describe("runReviewFeedbackSweep — serialization (issue #180)", () => {
 });
 
 describe("triggerReviewFeedbackSweep (issue #180)", () => {
-  let runner: ReturnType<typeof vi.fn>;
+  let runner: Mock<(repoId: number) => Promise<void>>;
   beforeEach(() => {
     vi.useFakeTimers();
     runner = vi.fn(async () => {});

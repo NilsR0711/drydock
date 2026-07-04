@@ -1,7 +1,7 @@
 process.env.DRYDOCK_DB = ":memory:";
 
 import { createHmac } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { POST } from "@/app/api/webhooks/[repoId]/route";
 import { getDb } from "@/lib/db/client";
 import { repos } from "@/lib/db/schema";
@@ -44,8 +44,8 @@ function post(
 }
 
 describe("POST /api/webhooks/[repoId]", () => {
-  let runner: ReturnType<typeof vi.fn>;
-  let sweepRunner: ReturnType<typeof vi.fn>;
+  let runner: Mock<(repoId: number) => Promise<void>>;
+  let sweepRunner: Mock<(repoId: number) => Promise<void>>;
 
   beforeEach(() => {
     vi.useFakeTimers();
