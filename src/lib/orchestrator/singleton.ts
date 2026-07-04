@@ -1,4 +1,5 @@
 import { inArray } from "drizzle-orm";
+import { startBackupSweep } from "@/lib/backup/sweep";
 import { type DB, getDb } from "@/lib/db/client";
 import { pruneOldData } from "@/lib/db/prune";
 import { jobs } from "@/lib/db/schema";
@@ -287,6 +288,10 @@ export function startOrchestrator(): void {
         .finally(() => {
           startDriverLoop();
           startPruneSweep();
+          // Daily WAL-safe DB backup with retention (ADR 042, issue #411). Same
+          // guards as the prune sweep: lock-holder only, skipped under Vitest,
+          // failures logged never fatal. `backupRetentionDays = 0` disables it.
+          startBackupSweep();
         });
     } else {
       console.warn("[orchestrator] another instance holds the lock; driver loop not started");

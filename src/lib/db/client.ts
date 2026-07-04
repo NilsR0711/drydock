@@ -85,6 +85,17 @@ function applyMigrations(sqlite: Database.Database): void {
 }
 
 /**
+ * Resolve the SQLite database path the process runs against: DRYDOCK_DB if set
+ * (the packaged launcher points it at `<data dir>/drydock.db`), otherwise
+ * `data/drydock.db` under the working directory. Exported so callers that need
+ * to derive sibling paths — e.g. the `<data dir>/backups` directory for the
+ * backup sweep and the health probe — agree with getDb() on the location.
+ */
+export function resolveDbPath(): string {
+  return process.env.DRYDOCK_DB ?? resolve(process.cwd(), "data/drydock.db");
+}
+
+/**
  * Open a database and apply migrations. Pass ":memory:" in tests for an
  * isolated, throwaway DB — the same migration artifacts run in both cases
  * (see ADR 003).
@@ -113,7 +124,7 @@ let singletonError: Error | undefined;
 export function getDb(): DB {
   if (singletonError) throw singletonError;
   if (!singleton) {
-    const path = process.env.DRYDOCK_DB ?? resolve(process.cwd(), "data/drydock.db");
+    const path = resolveDbPath();
     try {
       singleton = createDb(path);
     } catch (err) {
