@@ -303,6 +303,10 @@ export const jobs = sqliteTable(
     repoIdx: index("jobs_repo_idx").on(t.repoId),
     statusIdx: index("jobs_status_idx").on(t.status),
     leaseIdx: index("jobs_lease_idx").on(t.leaseExpiresAt),
+    // Supports the sargable `started_at >= <local midnight>` range scan behind
+    // today's-spend lookups (issue #415), so cost queries stay index-served
+    // instead of full-scanning the forever-growing jobs table.
+    startedAtIdx: index("jobs_started_at_idx").on(t.startedAt),
     // A dedupe key may be reused once its prior job reaches a terminal state, so
     // uniqueness is scoped to live (non-terminal) jobs via a partial index.
     dedupeActiveUnique: uniqueIndex("jobs_dedupe_active_unique")
@@ -686,6 +690,9 @@ export const oneShotCosts = sqliteTable(
   },
   (t) => ({
     repoIdx: index("one_shot_costs_repo_idx").on(t.repoId),
+    // Mirrors jobs.started_at: the one-shot half of today's spend filters on
+    // `created_at >= <local midnight>` (issue #415).
+    createdAtIdx: index("one_shot_costs_created_at_idx").on(t.createdAt),
   }),
 );
 

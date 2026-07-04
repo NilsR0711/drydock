@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import { type ClaudeUsageView, deriveClaudeUsageView } from "@/lib/agents/claude-usage";
 import { buildCodexUsageView, type CodexUsageView } from "@/lib/agents/codex-usage";
 import { deriveGithubBudgetView, type GithubBudgetView } from "@/lib/github/budget-view";
@@ -6,7 +6,7 @@ import { sharedGovernor } from "@/lib/github/rate-limit";
 import { providerLimitBlocked } from "@/lib/orchestrator/provider-limit";
 import { getCodexUsage, getProviderUsage } from "@/lib/orchestrator/provider-usage";
 import { type DB, getDb } from "./client";
-import { todayCost } from "./cost-queries";
+import { todayCost, todaySpendByRepo } from "./cost-queries";
 import { type Issue, issues, type Job, jobs, type Repo, repos } from "./schema";
 
 export interface RepoWithStats extends Repo {
@@ -99,18 +99,43 @@ export interface DashboardSummary {
   spendToday: number;
 }
 
-/** Aggregate job counts across all repos for the dashboard stat cards. */
-export function dashboardSummary(db: DB = getDb()): DashboardSummary {
-  const allJobs = db.select().from(jobs).all();
-  const count = (statuses: string[]) => allJobs.filter((j) => statuses.includes(j.status)).length;
+/** Statuses that count as "running" in the summary's running tally. */
+const RUNNING = ["working", "ci_running", "retrying"] as const;
+
+/** Fold a status→count map into the dashboard stat-card summary shape. */
+function summarize(
+  statusCounts: Map<string, number>,
+  repoCount: number,
+  spendToday: number,
+): DashboardSummary {
+  const total = (statuses: readonly string[]) =>
+    statuses.reduce((sum, s) => sum + (statusCounts.get(s) ?? 0), 0);
   return {
-    repos: db.select().from(repos).all().length,
-    queued: count(["queued"]),
-    running: count(["working", "ci_running", "retrying"]),
-    merged: count(["merged"]),
-    needsHuman: count(["needs_human"]),
-    spendToday: todayCost(db),
+    repos: repoCount,
+    queued: total(["queued"]),
+    running: total(RUNNING),
+    merged: total(["merged"]),
+    needsHuman: total(["needs_human"]),
+    spendToday,
   };
+}
+
+/**
+ * Aggregate job counts across all repos for the dashboard stat cards. Counts
+ * come from a single `GROUP BY status` aggregate rather than materializing the
+ * whole (forever-growing) jobs table into JS (issue #415).
+ */
+export function dashboardSummary(db: DB = getDb()): DashboardSummary {
+  const statusCounts = new Map<string, number>();
+  for (const row of db
+    .select({ status: jobs.status, n: count() })
+    .from(jobs)
+    .groupBy(jobs.status)
+    .all()) {
+    statusCounts.set(row.status, row.n);
+  }
+  const repoCount = db.select({ n: count() }).from(repos).get()?.n ?? 0;
+  return summarize(statusCounts, repoCount, todayCost(db));
 }
 
 /** A single in-flight run surfaced on a repo's dashboard row. */
@@ -206,45 +231,91 @@ export function getGithubBudgetView(): GithubBudgetView {
 
 const IN_FLIGHT = ["working", "ci_running", "retrying"];
 
-/** Most recent moment a repo did anything: finish, start, or enqueue. */
-function jobActivity(job: Job): number {
-  return job.finishedAt ?? job.startedAt ?? job.createdAt;
-}
-
 /**
  * Live snapshot of every watched repo for the parallel dashboard (issue #60):
  * per-status counts, in-flight runs, today's spend, and an attention flag.
  * Rows are ordered so repos needing a human surface first, then repos with
  * active work, then by most recent activity.
+ *
+ * All per-repo tallies come from a handful of grouped SQL aggregates over the
+ * jobs table rather than materializing every job row per repo (issue #415):
+ * a single `GROUP BY repo_id, status` feeds both the per-repo counts and the
+ * global summary, `MAX(COALESCE(...))` gives each repo's last activity, a
+ * narrow `status IN (...)` select lists in-flight runs, and today's spend is
+ * one grouped query per cost table — so the snapshot cost no longer scales with
+ * the forever-growing jobs table.
  */
 export function dashboardSnapshot(db: DB = getDb()): DashboardSnapshot {
-  const rows: RepoDashboardRow[] = listRepos(db).map((repo) => {
-    const repoJobs = db
-      .select()
-      .from(jobs)
-      .where(eq(jobs.repoId, repo.id))
-      .orderBy(asc(jobs.createdAt))
-      .all();
-    const count = (statuses: string[]) =>
-      repoJobs.filter((j) => statuses.includes(j.status)).length;
-    const inFlight = repoJobs
-      .filter((j) => IN_FLIGHT.includes(j.status))
-      .map((j) => ({ id: j.id, issueNumber: j.issueNumber, status: j.status }));
-    const lastActivityAt = repoJobs.length ? Math.max(...repoJobs.map(jobActivity)) : null;
-    const needsHuman = count(["needs_human"]);
-    const ciFailed = count(["ci_failed"]);
+  // One grouped scan feeds both the per-repo counts and the global summary.
+  const countsByRepo = new Map<number, Map<string, number>>();
+  const globalCounts = new Map<string, number>();
+  for (const { repoId, status, n } of db
+    .select({ repoId: jobs.repoId, status: jobs.status, n: count() })
+    .from(jobs)
+    .groupBy(jobs.repoId, jobs.status)
+    .all()) {
+    let byStatus = countsByRepo.get(repoId);
+    if (!byStatus) {
+      byStatus = new Map();
+      countsByRepo.set(repoId, byStatus);
+    }
+    byStatus.set(status, n);
+    globalCounts.set(status, (globalCounts.get(status) ?? 0) + n);
+  }
+
+  const activityByRepo = new Map<number, number>();
+  for (const { repoId, lastActivityAt } of db
+    .select({
+      repoId: jobs.repoId,
+      lastActivityAt: sql<
+        number | null
+      >`max(coalesce(${jobs.finishedAt}, ${jobs.startedAt}, ${jobs.createdAt}))`,
+    })
+    .from(jobs)
+    .groupBy(jobs.repoId)
+    .all()) {
+    if (lastActivityAt != null) activityByRepo.set(repoId, lastActivityAt);
+  }
+
+  // Narrow projection ordered oldest-first, matching the previous per-repo scan.
+  const inFlightByRepo = new Map<number, InFlightJob[]>();
+  for (const { id, repoId, issueNumber, status } of db
+    .select({
+      id: jobs.id,
+      repoId: jobs.repoId,
+      issueNumber: jobs.issueNumber,
+      status: jobs.status,
+    })
+    .from(jobs)
+    .where(inArray(jobs.status, IN_FLIGHT))
+    .orderBy(asc(jobs.createdAt), asc(jobs.id))
+    .all()) {
+    const list = inFlightByRepo.get(repoId);
+    if (list) list.push({ id, issueNumber, status });
+    else inFlightByRepo.set(repoId, [{ id, issueNumber, status }]);
+  }
+
+  const spendByRepo = todaySpendByRepo(db);
+
+  const repoList = listRepos(db);
+  const rows: RepoDashboardRow[] = repoList.map((repo) => {
+    const counts = countsByRepo.get(repo.id);
+    const c = (statuses: readonly string[]) =>
+      statuses.reduce((sum, s) => sum + (counts?.get(s) ?? 0), 0);
+    const needsHuman = c(["needs_human"]);
+    const ciFailed = c(["ci_failed"]);
     return {
       id: repo.id,
       name: repo.name,
       path: repo.path,
       platform: repo.platform,
-      queued: count(["queued"]),
-      working: count(["working", "retrying"]),
-      ciRunning: count(["ci_running"]),
+      queued: c(["queued"]),
+      working: c(["working", "retrying"]),
+      ciRunning: c(["ci_running"]),
       needsHuman,
-      inFlight,
-      lastActivityAt,
-      todaySpend: todayCost(db, repo.id),
+      inFlight: inFlightByRepo.get(repo.id) ?? [],
+      lastActivityAt: activityByRepo.get(repo.id) ?? null,
+      todaySpend: spendByRepo.get(repo.id) ?? 0,
       dailyLimitUsd: repo.dailyCostLimitUsd,
       attention: needsHuman > 0 || ciFailed > 0,
     };
@@ -261,8 +332,12 @@ export function dashboardSnapshot(db: DB = getDb()): DashboardSnapshot {
     return a.name.localeCompare(b.name);
   });
 
+  // The per-repo spend already sums to the global total, so reuse it instead of
+  // re-scanning for a separate `todayCost(db)`.
+  const spendToday = [...spendByRepo.values()].reduce((sum, n) => sum + n, 0);
+
   return {
-    summary: dashboardSummary(db),
+    summary: summarize(globalCounts, repoList.length, spendToday),
     repos: rows,
     needsHumanJobs: needsHumanJobs(db).map((j) => ({
       id: j.id,

@@ -164,6 +164,46 @@ describe("dashboardSnapshot", () => {
     expect(row?.attention).toBe(false);
   });
 
+  it("attributes per-status counts to the right repo across repos (issue #415)", () => {
+    const a = addRepo({ path: "/a", name: "a" }, db).id;
+    const b = addRepo({ path: "/b", name: "b" }, db).id;
+    db.insert(jobs)
+      .values([
+        { repoId: a, issueNumber: 1, status: "queued" },
+        { repoId: a, issueNumber: 2, status: "working", startedAt: now() },
+        { repoId: b, issueNumber: 1, status: "queued" },
+        { repoId: b, issueNumber: 2, status: "queued" },
+        { repoId: b, issueNumber: 3, status: "ci_running", startedAt: now() },
+      ])
+      .run();
+    const byName = Object.fromEntries(dashboardSnapshot(db).repos.map((r) => [r.name, r]));
+    expect(byName.a?.queued).toBe(1);
+    expect(byName.a?.working).toBe(1);
+    expect(byName.a?.ciRunning).toBe(0);
+    expect(byName.b?.queued).toBe(2);
+    expect(byName.b?.ciRunning).toBe(1);
+  });
+
+  it("summary counts aggregate across all repos (issue #415)", () => {
+    const a = addRepo({ path: "/a", name: "a" }, db).id;
+    const b = addRepo({ path: "/b", name: "b" }, db).id;
+    db.insert(jobs)
+      .values([
+        { repoId: a, issueNumber: 1, status: "working", startedAt: now() },
+        { repoId: a, issueNumber: 2, status: "queued" },
+        { repoId: b, issueNumber: 1, status: "ci_running", startedAt: now() },
+        { repoId: b, issueNumber: 2, status: "retrying", startedAt: now() },
+        { repoId: b, issueNumber: 3, status: "merged" },
+      ])
+      .run();
+    const summary = dashboardSnapshot(db).summary;
+    expect(summary.repos).toBe(2);
+    expect(summary.queued).toBe(1);
+    // running folds working + ci_running + retrying across both repos.
+    expect(summary.running).toBe(3);
+    expect(summary.merged).toBe(1);
+  });
+
   it("includes a Claude usage view, unknown when nothing is recorded (issue #188)", () => {
     expect(dashboardSnapshot(db).claudeUsage.state).toBe("unknown");
   });

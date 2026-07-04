@@ -6,6 +6,7 @@ import {
   monthCost,
   projectMonthlySpend,
   todayCost,
+  todaySpendByRepo,
   topJobs,
 } from "@/lib/db/cost-queries";
 import { jobs, oneShotCosts } from "@/lib/db/schema";
@@ -113,6 +114,71 @@ describe("cost queries", () => {
     expect(todayCost(db, repoId)).toBeCloseTo(0.07);
     expect(todayCost(db, b)).toBeCloseTo(0.05);
     expect(todayCost(db)).toBeCloseTo(0.12);
+  });
+
+  it("todayCost counts only spend since local midnight, not yesterday (issue #415)", () => {
+    const c = addRepo({ path: "/c", name: "c" }, db).id;
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const midnightSec = Math.floor(midnight.getTime() / 1000);
+    db.insert(jobs)
+      .values([
+        { repoId: c, issueNumber: 1, startedAt: midnightSec - 60, costUsd: 5 }, // 23:59 yesterday
+        { repoId: c, issueNumber: 2, startedAt: midnightSec + 60, costUsd: 3 }, // 00:01 today
+      ])
+      .run();
+    db.insert(oneShotCosts)
+      .values([
+        { repoId: c, type: "release", costUsd: 7, createdAt: midnightSec - 60 }, // yesterday
+        { repoId: c, type: "decompose", costUsd: 1, createdAt: midnightSec + 60 }, // today
+      ])
+      .run();
+    // Only the two post-midnight rows count: 3 (job) + 1 (one-shot).
+    expect(todayCost(db, c)).toBeCloseTo(4);
+  });
+
+  it("todaySpendByRepo returns per-repo spend since local midnight (issue #415)", () => {
+    const b = addRepo({ path: "/tsbr", name: "tsbr" }, db).id;
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const midnightSec = Math.floor(midnight.getTime() / 1000);
+    db.insert(jobs)
+      .values([
+        { repoId: b, issueNumber: 1, startedAt: midnightSec + 10, costUsd: 0.5 }, // today
+        { repoId: b, issueNumber: 2, startedAt: midnightSec - 10, costUsd: 9 }, // yesterday, excluded
+      ])
+      .run();
+    db.insert(oneShotCosts)
+      .values({ repoId: b, type: "decompose", costUsd: 0.25, createdAt: midnightSec + 5 })
+      .run();
+
+    const map = todaySpendByRepo(db);
+    // beforeEach seeded repoId with two jobs started "now" totalling 0.07.
+    expect(map.get(repoId)).toBeCloseTo(0.07);
+    // 0.5 (job) + 0.25 (one-shot); yesterday's 9 is excluded.
+    expect(map.get(b)).toBeCloseTo(0.75);
+  });
+
+  it("todaySpendByRepo omits repos with no spend today (issue #415)", () => {
+    const idle = addRepo({ path: "/idle", name: "idle" }, db).id;
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const midnightSec = Math.floor(midnight.getTime() / 1000);
+    db.insert(jobs)
+      .values({ repoId: idle, issueNumber: 1, startedAt: midnightSec - 10, costUsd: 4 }) // yesterday
+      .run();
+    expect(todaySpendByRepo(db).has(idle)).toBe(false);
+  });
+
+  it("todaySpendByRepo totals agree with the global todayCost (issue #415)", () => {
+    const b = addRepo({ path: "/agg", name: "agg" }, db).id;
+    const now = Math.floor(Date.now() / 1000);
+    db.insert(jobs).values({ repoId: b, issueNumber: 5, startedAt: now, costUsd: 1.5 }).run();
+    db.insert(oneShotCosts)
+      .values({ repoId: b, type: "release", costUsd: 0.3, createdAt: now })
+      .run();
+    const total = [...todaySpendByRepo(db).values()].reduce((sum, n) => sum + n, 0);
+    expect(total).toBeCloseTo(todayCost(db));
   });
 });
 
