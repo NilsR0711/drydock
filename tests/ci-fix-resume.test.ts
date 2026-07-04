@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Job } from "@/lib/db/schema";
 import { EmptyCommitError, type Worktree } from "@/lib/git/worktree";
 import { resumeFailureReason } from "@/lib/orchestrator/ci-babysitter";
-import { buildCiFixResume } from "@/lib/orchestrator/run-job";
+import { buildCiFixResume } from "@/lib/orchestrator/job-prompts";
 
 const job = { id: 9, issueNumber: 3 } as Job;
 const wt: Worktree = { path: "/wts/job-9", branch: "drydock/issue-3-job-9" };

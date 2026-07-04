@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { type Job, jobEvents, jobs } from "@/lib/db/schema";
 import type { Worktree } from "@/lib/git/worktree";
+import { MAX_TURN_RESUMES } from "@/lib/orchestrator/job-prompts";
 import { createJob, getJob } from "@/lib/orchestrator/jobs";
-import { MAX_TURN_RESUMES, runJob } from "@/lib/orchestrator/run-job";
+import { runJob } from "@/lib/orchestrator/run-job";
 import { addRepo } from "@/lib/repos/service";
 import { saveSettings } from "@/lib/settings/service";
 
