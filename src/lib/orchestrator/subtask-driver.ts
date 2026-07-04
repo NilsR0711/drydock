@@ -1,7 +1,5 @@
-import { type AgentProvider, WAITABLE_LIMIT_KINDS } from "@/lib/agents/types";
 import { type DB, getDb } from "@/lib/db/client";
 import type { IssueSubtask, Repo } from "@/lib/db/schema";
-import type { CommandRunner } from "@/lib/exec/runner";
 import type { IssueDetail } from "@/lib/github/gh";
 import {
   type DecomposeInput,
@@ -11,8 +9,8 @@ import {
 } from "@/lib/issues/decompose";
 import { ensureSubtasks, listSubtasks, transitionSubtask } from "@/lib/issues/subtasks";
 import { logError } from "@/lib/log/logger";
-import { runOneShotAndRecordCost } from "./one-shot-runner";
-import { latchProviderLimit, limitAutoWaitEnabled, ProviderLimitError } from "./provider-limit";
+import { buildOneShotGenerator, type OneShotGeneratorDeps } from "./one-shot-generator";
+import { ProviderLimitError } from "./provider-limit";
 import type { SubtaskStatus } from "./subtask-state";
 
 /**
@@ -89,36 +87,24 @@ function subtaskPrompt(input: DecomposeInput): string {
  * the agent and throws {@link ProviderLimitError} so the caller defers instead
  * of stamping the issue as non-decomposable.
  */
-export function buildSubtaskGenerator(deps: {
-  provider: AgentProvider;
-  command: string;
-  model: string;
-  cwd: string;
-  repoId?: number;
-  db?: DB;
-  runner?: CommandRunner;
-}): SubtaskGenerator {
-  return async (input) => {
-    const { text, exitCode, stderr } = await runOneShotAndRecordCost({
-      provider: deps.provider,
-      command: deps.command,
-      model: deps.model,
-      cwd: deps.cwd,
-      prompt: subtaskPrompt(input),
-      repoId: deps.repoId,
-      type: "decompose",
-      runner: deps.runner,
-      db: deps.db,
-    });
-    if (exitCode !== 0) {
-      const limit = deps.provider.classifyFailure?.({ exitCode, stderr, resultText: text });
-      if (limit && WAITABLE_LIMIT_KINDS.includes(limit.kind)) {
-        const db = deps.db ?? getDb();
-        if (limitAutoWaitEnabled(deps.provider.id, db)) {
-          latchProviderLimit(limit, db);
-          throw new ProviderLimitError(limit);
-        }
+export function buildSubtaskGenerator(deps: OneShotGeneratorDeps): SubtaskGenerator {
+  return buildOneShotGenerator<DecomposeInput, string[]>(deps, {
+    type: "decompose",
+    buildPrompt: subtaskPrompt,
+    onResult: (text, input) => {
+      const { titles, parsed } = parseSubtaskResult(text);
+      if (!parsed) {
+        // A zero exit with no parseable JSON array is a garbled reply, not the
+        // agent's legitimate empty-array "do not split" answer — log it so the
+        // stamped-non-decomposable state is explainable (issue #422).
+        logError(
+          `[subtasks] decompose one-shot returned an unparseable subtask list for issue #${input.number}`,
+          text.trim().slice(0, 500),
+        );
       }
+      return titles;
+    },
+    onExit: ({ exitCode, stderr }, input) => {
       // Not a waitable limit we're deferring on: the issue will be stamped and
       // worked whole, so leave a trace of why decomposition never ran (issue
       // #422) instead of silently returning [].
@@ -127,19 +113,14 @@ export function buildSubtaskGenerator(deps: {
         stderr.trim().slice(0, 500),
       );
       return [];
-    }
-    const { titles, parsed } = parseSubtaskResult(text);
-    if (!parsed) {
-      // A zero exit with no parseable JSON array is a garbled reply, not the
-      // agent's legitimate empty-array "do not split" answer — log it so the
-      // stamped-non-decomposable state is explainable (issue #422).
-      logError(
-        `[subtasks] decompose one-shot returned an unparseable subtask list for issue #${input.number}`,
-        text.trim().slice(0, 500),
-      );
-    }
-    return titles;
-  };
+    },
+    onError: (err) => {
+      // Decomposition lets an unexpected one-shot failure (a timeout or spawn
+      // error) propagate so the per-issue sweep isolates it; a latched
+      // ProviderLimitError aborts the whole sweep and never reaches here.
+      throw err;
+    },
+  });
 }
 
 /** The forge operations the decomposition sweep needs; a subset of ForgeClient. */

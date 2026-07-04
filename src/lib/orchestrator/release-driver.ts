@@ -14,6 +14,8 @@ import {
   parseReleaseEvaluation,
   type ReleaseEvaluation,
   type ReleaseEvaluationGenerator,
+  type ReleaseEvaluationInput,
+  type ReleaseEvaluationResult,
   type ReleasePr,
   renderDefaultReleaseNotes,
   selectUnreleasedPrs,
@@ -25,7 +27,8 @@ import {
 } from "@/lib/release/release-service";
 import type { ReleaseStatus } from "@/lib/release/release-state";
 import type { SemverBump } from "@/lib/version/semver";
-import { runOneShotAndRecordCost } from "./one-shot-runner";
+import { buildOneShotGenerator, type OneShotGeneratorDeps } from "./one-shot-generator";
+import { ProviderLimitError } from "./provider-limit";
 
 /**
  * Driver glue for the opt-in release manager (issue #59, ADR 028): the read-only
@@ -68,36 +71,14 @@ const FAILURE_DETAIL_LIMIT = 500;
  * kept for the caller to persist; the raw output is only ever logged (via the
  * secret-redacting sink), never surfaced on the run record.
  */
-export function buildReleaseEvaluationGenerator(deps: {
-  provider: AgentProvider;
-  command: string;
-  model: string;
-  cwd: string;
-  repoId?: number;
-  db?: DB;
-  runner?: CommandRunner;
-  timeoutMs?: number;
-}): ReleaseEvaluationGenerator {
-  const timeoutMs = deps.timeoutMs ?? RELEASE_EVAL_TIMEOUT_MS;
-  return async (input) => {
-    try {
-      const { text, exitCode, stderr } = await runOneShotAndRecordCost({
-        provider: deps.provider,
-        command: deps.command,
-        model: deps.model,
-        cwd: deps.cwd,
-        prompt: buildReleaseEvaluationPrompt(input),
-        repoId: deps.repoId,
-        type: "release",
-        timeoutMs,
-        runner: deps.runner,
-        db: deps.db,
-      });
-      if (exitCode !== 0) {
-        const detail = (stderr || text).trim().slice(0, FAILURE_DETAIL_LIMIT);
-        logError(`[release] evaluation one-shot exited ${exitCode}${detail ? `: ${detail}` : ""}`);
-        return { ok: false, reason: `evaluation agent exited with code ${exitCode}` };
-      }
+export function buildReleaseEvaluationGenerator(
+  deps: OneShotGeneratorDeps,
+): ReleaseEvaluationGenerator {
+  return buildOneShotGenerator<ReleaseEvaluationInput, ReleaseEvaluationResult>(deps, {
+    type: "release",
+    defaultTimeoutMs: RELEASE_EVAL_TIMEOUT_MS,
+    buildPrompt: buildReleaseEvaluationPrompt,
+    onResult: (text) => {
       const evaluation = parseReleaseEvaluation(text);
       if (!evaluation) {
         logError(
@@ -108,12 +89,18 @@ export function buildReleaseEvaluationGenerator(deps: {
         return { ok: false, reason: "evaluation agent returned unparseable output" };
       }
       return { ok: true, evaluation };
-    } catch (err) {
+    },
+    onExit: ({ exitCode, stderr, text }) => {
+      const detail = (stderr || text).trim().slice(0, FAILURE_DETAIL_LIMIT);
+      logError(`[release] evaluation one-shot exited ${exitCode}${detail ? `: ${detail}` : ""}`);
+      return { ok: false, reason: `evaluation agent exited with code ${exitCode}` };
+    },
+    onError: (err) => {
       logError("[release] evaluation one-shot failed", err);
       const reason = err instanceof Error ? err.message : String(err);
       return { ok: false, reason: `evaluation agent failed: ${reason}` };
-    }
-  };
+    },
+  });
 }
 
 /** The unreleased window: the last release tag/date and the PRs merged since. */
@@ -166,7 +153,17 @@ export interface PreviewReleaseDeps {
  */
 export async function previewRelease(deps: PreviewReleaseDeps): Promise<ReleasePreview> {
   const { fromTag, prs } = await gatherWindow(deps.forge);
-  const result = await deps.generate({ fromTag, prs });
+  let result: ReleaseEvaluationResult;
+  try {
+    result = await deps.generate({ fromTag, prs });
+  } catch (err) {
+    if (!(err instanceof ProviderLimitError)) throw err;
+    // A waitable provider limit now latches the agent and throws (issue #430).
+    // The synchronous dry-run preview has nowhere to defer to, so it degrades
+    // like any other unavailable evaluation instead of surfacing a raw error to
+    // the panel; the latch still gates the background sweep.
+    result = { ok: false, reason: err.message };
+  }
   // The preview is best-effort: any evaluation failure degrades to a patch
   // candidate with `shouldRelease: false` rather than surfacing the reason.
   const evaluation = result.ok ? result.evaluation : null;

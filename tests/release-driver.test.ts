@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { codexProvider } from "@/lib/agents/codex";
 import { createDb, type DB } from "@/lib/db/client";
 import type { CreateReleaseInput, ForgeMergedPr, ReleaseSummary } from "@/lib/forge/types";
+import { ProviderLimitError, providerLimitBlocked } from "@/lib/orchestrator/provider-limit";
 import {
   buildReleaseEvaluationGenerator,
   previewRelease,
@@ -10,6 +12,10 @@ import {
 import type { ReleaseEvaluation, ReleaseEvaluationResult } from "@/lib/release/release";
 import { createReleaseRun, transitionReleaseRun } from "@/lib/release/release-service";
 import { addRepo } from "@/lib/repos/service";
+import { saveSettings } from "@/lib/settings/service";
+
+/** A Codex usage-limit stderr shape the classifier recognizes (issue #167). */
+const USAGE_LIMIT_STDERR = "ERROR: You've hit your usage limit. Try again at 9:01 PM.";
 
 let db: DB;
 beforeEach(() => {
@@ -77,6 +83,17 @@ describe("previewRelease", () => {
     expect(preview.bump).toBe("patch");
     expect(preview.shouldRelease).toBe(false);
     expect(preview.candidateTag).toBe("v1.2.1");
+  });
+
+  it("degrades to a non-releasing preview on a provider limit rather than throwing (issue #430)", async () => {
+    const preview = await previewRelease({
+      forge: fakeForge(),
+      generate: vi.fn(async () => {
+        throw new ProviderLimitError({ agent: "codex", kind: "usage_limit", rawSnippet: "limit" });
+      }),
+    });
+    expect(preview.shouldRelease).toBe(false);
+    expect(preview.bump).toBe("patch");
   });
 });
 
@@ -157,6 +174,21 @@ describe("publishRelease (auto)", () => {
     });
     expect(final.status).toBe("error");
     expect(final.errorMessage).toBeTruthy();
+  });
+
+  it("parks the run as a retryable error on a provider limit, never throwing out (issue #430)", async () => {
+    const r = addRepo({ path: "/r", name: "r" }, db);
+    const run = createReleaseRun({ repoId: r.id, mode: "auto", triggerSha: "s" }, db);
+    const final = await publishRelease(run.id, {
+      repo: r,
+      forge: fakeForge(),
+      db,
+      generate: vi.fn(async () => {
+        throw new ProviderLimitError({ agent: "codex", kind: "usage_limit", rawSnippet: "limit" });
+      }),
+    });
+    expect(final.status).toBe("error");
+    expect(final.errorMessage).toContain("usage_limit");
   });
 
   it("records the evaluation's real failure reason, not a constant message", async () => {
@@ -317,5 +349,33 @@ describe("buildReleaseEvaluationGenerator", () => {
       ok: true,
       evaluation: { release: true, bump: "patch", title: "v0.0.1", notes: "x" },
     });
+  });
+
+  it("latches the provider and throws on a waitable limit (issues #167/#430)", async () => {
+    const generate = buildReleaseEvaluationGenerator({
+      provider: codexProvider,
+      command: "codex",
+      model: "gpt-5-codex",
+      cwd: "/tmp",
+      db,
+      runner: async () => ({ stdout: "", stderr: USAGE_LIMIT_STDERR, exitCode: 1 }),
+    });
+    await expect(generate({ fromTag: null, prs: [] })).rejects.toBeInstanceOf(ProviderLimitError);
+    expect(providerLimitBlocked("codex", db)?.kind).toBe("usage_limit");
+  });
+
+  it("reports a plain failure result when auto-wait is off, without latching", async () => {
+    saveSettings({ codexLimitAutoWait: false }, db);
+    const generate = buildReleaseEvaluationGenerator({
+      provider: codexProvider,
+      command: "codex",
+      model: "gpt-5-codex",
+      cwd: "/tmp",
+      db,
+      runner: async () => ({ stdout: "", stderr: USAGE_LIMIT_STDERR, exitCode: 1 }),
+    });
+    const result = await generate({ fromTag: null, prs: [] });
+    expect(result.ok).toBe(false);
+    expect(providerLimitBlocked("codex", db)).toBeUndefined();
   });
 });

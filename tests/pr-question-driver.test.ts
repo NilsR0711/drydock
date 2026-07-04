@@ -37,8 +37,13 @@ import {
   runPrQuestion,
 } from "@/lib/orchestrator/pr-question-driver";
 import { createPrQuestion, getPrQuestion } from "@/lib/orchestrator/pr-questions";
+import { ProviderLimitError, providerLimitBlocked } from "@/lib/orchestrator/provider-limit";
 import { openFeedbackItem } from "@/lib/orchestrator/review-feedback";
 import { addRepo } from "@/lib/repos/service";
+import { saveSettings } from "@/lib/settings/service";
+
+/** A Claude usage-limit stderr shape the classifier recognizes (issue #166). */
+const USAGE_LIMIT_STDERR = "Claude AI usage limit reached|9999999999";
 
 let db: DB;
 beforeEach(() => {
@@ -159,6 +164,33 @@ describe("buildAnswerGenerator", () => {
     const opts = (runner as ReturnType<typeof vi.fn>).mock.calls[0]?.[3];
     expect(opts).toMatchObject({ timeoutMs: 4321 });
   });
+
+  it("latches the provider and throws on a waitable limit (issues #167/#430)", async () => {
+    const gen = buildAnswerGenerator({
+      provider,
+      command: "claude",
+      model: "m",
+      cwd: "/t",
+      db,
+      runner: fakeRunner({ exitCode: 1, stderr: USAGE_LIMIT_STDERR }),
+    });
+    await expect(gen(input)).rejects.toBeInstanceOf(ProviderLimitError);
+    expect(providerLimitBlocked("claude", db)?.kind).toBe("usage_limit");
+  });
+
+  it("treats a limited exit as a plain null failure when auto-wait is off", async () => {
+    saveSettings({ claudeLimitAutoWait: false }, db);
+    const gen = buildAnswerGenerator({
+      provider,
+      command: "claude",
+      model: "m",
+      cwd: "/t",
+      db,
+      runner: fakeRunner({ exitCode: 1, stderr: USAGE_LIMIT_STDERR }),
+    });
+    expect(await gen(input)).toBeNull();
+    expect(providerLimitBlocked("claude", db)).toBeUndefined();
+  });
 });
 
 describe("assembleContext", () => {
@@ -205,6 +237,20 @@ describe("assembleContext", () => {
     // Falls back to the locally cached issue title.
     expect(ctx.issueTitle).toBe("Add thing");
   });
+
+  it("logs degraded reads under the pr-question label instead of swallowing them (issue #430)", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { job } = setup();
+    const forge = fakeForge({
+      prDiff: vi.fn(async () => {
+        throw new Error("net down");
+      }),
+    });
+    await assembleContext({ job, prNumber: 3, forge, db });
+    const logged = errSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    expect(logged).toContain("pr-question");
+    errSpy.mockRestore();
+  });
 });
 
 describe("runPrQuestion", () => {
@@ -245,6 +291,30 @@ describe("runPrQuestion", () => {
     expect(updated?.status).toBe("error");
     expect(updated?.errorMessage).toBeTruthy();
     expect(updated?.answer).toBeNull();
+  });
+
+  it("marks the question with a clear provider-limit reason, not a generic failure (issue #430)", async () => {
+    const { job } = setup();
+    const q = createPrQuestion({ jobId: job.id, prNumber: 55, question: "q" }, db);
+    await runPrQuestion(
+      passDeps(
+        fakeForge(),
+        async () => {
+          throw new ProviderLimitError({
+            agent: "claude",
+            kind: "usage_limit",
+            rawSnippet: "limit",
+          });
+        },
+        job,
+        q.id,
+      ),
+    );
+    const updated = getPrQuestion(q.id, db);
+    expect(updated?.status).toBe("error");
+    // The asker is told to retry once the quota resets, not shown a raw failure.
+    expect(updated?.errorMessage).toContain("quota");
+    expect(updated?.errorMessage).not.toContain("Answering failed");
   });
 
   it("never throws when context assembly fails, marking the question error", async () => {

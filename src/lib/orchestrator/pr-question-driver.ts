@@ -13,13 +13,15 @@ import {
   type PrAnswerGenerator,
   type PrCheckSummary,
   type PrQuestionContext,
+  type PrQuestionInput,
   parseAnswer,
 } from "@/lib/issues/pr-question";
 import { listIssues } from "@/lib/issues/service";
 import { redactSecrets } from "@/lib/log/redact";
 import { recordEvent } from "./jobs";
-import { runOneShotAndRecordCost } from "./one-shot-runner";
+import { buildOneShotGenerator, type OneShotGeneratorDeps, safe } from "./one-shot-generator";
 import { markQuestionAnswered, markQuestionError } from "./pr-questions";
+import { ProviderLimitError } from "./provider-limit";
 import { listFeedbackItems } from "./review-feedback";
 
 /**
@@ -50,48 +52,20 @@ export interface QuestionForge {
  * A {@link PrAnswerGenerator} backed by a one-shot agent run. The CLI shape
  * comes from the repo's {@link AgentProvider}, and a tight timeout is enforced
  * by the runner. Best-effort: a non-zero exit, an empty answer, or a thrown
- * error (e.g. a timeout) all yield `null`.
+ * error (e.g. a timeout) all yield `null` — except a waitable provider limit
+ * (issues #167/#430), which latches the agent and throws
+ * {@link ProviderLimitError} so the caller defers instead of marking the
+ * question errored against an exhausted quota.
  */
-export function buildAnswerGenerator(deps: {
-  provider: AgentProvider;
-  command: string;
-  model: string;
-  cwd: string;
-  repoId?: number;
-  db?: DB;
-  runner?: CommandRunner;
-  timeoutMs?: number;
-}): PrAnswerGenerator {
-  const timeoutMs = deps.timeoutMs ?? PR_QUESTION_TIMEOUT_MS;
-  return async (input) => {
-    try {
-      const { text, exitCode } = await runOneShotAndRecordCost({
-        provider: deps.provider,
-        command: deps.command,
-        model: deps.model,
-        cwd: deps.cwd,
-        prompt: buildQuestionPrompt(input),
-        repoId: deps.repoId,
-        type: "pr-question",
-        timeoutMs,
-        runner: deps.runner,
-        db: deps.db,
-      });
-      if (exitCode !== 0) return null;
-      return parseAnswer(text);
-    } catch {
-      return null;
-    }
-  };
-}
-
-/** Run an async forge read, returning a fallback on any failure (best-effort). */
-async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch {
-    return fallback;
-  }
+export function buildAnswerGenerator(deps: OneShotGeneratorDeps): PrAnswerGenerator {
+  return buildOneShotGenerator<PrQuestionInput, string | null>(deps, {
+    type: "pr-question",
+    defaultTimeoutMs: PR_QUESTION_TIMEOUT_MS,
+    buildPrompt: buildQuestionPrompt,
+    onResult: (text) => parseAnswer(text),
+    onExit: () => null,
+    onError: () => null,
+  });
 }
 
 /** The locally cached issue title for a job, or a generic placeholder. */
@@ -128,9 +102,9 @@ export interface AssembleContextDeps {
 export async function assembleContext(deps: AssembleContextDeps): Promise<PrQuestionContext> {
   const { job, prNumber, forge, db } = deps;
   const [diff, checks, issue] = await Promise.all([
-    safe(() => forge.prDiff(prNumber), ""),
-    safe<PrCheck[]>(() => forge.prChecks(prNumber), []),
-    safe<IssueDetail | null>(() => forge.viewIssue(job.issueNumber), null),
+    safe(() => forge.prDiff(prNumber), "", "pr-question"),
+    safe<PrCheck[]>(() => forge.prChecks(prNumber), [], "pr-question"),
+    safe<IssueDetail | null>(() => forge.viewIssue(job.issueNumber), null, "pr-question"),
   ]);
 
   const checkSummaries: PrCheckSummary[] = checks.map((c) => ({ name: c.name, state: c.state }));
@@ -203,6 +177,19 @@ export async function runPrQuestion(deps: PrQuestionPassDeps): Promise<void> {
     markQuestionAnswered(questionId, redactSecrets(answer), db);
     recordEvent(job.id, "pr_question", { ok: true, questionId }, db);
   } catch (err) {
+    if (err instanceof ProviderLimitError) {
+      // The agent's quota is exhausted and now latched for other flows to defer
+      // on (issue #430). The question must still reach a terminal state
+      // (answering → error), but with a reason that tells the asker to retry
+      // once the limit resets rather than a raw internal failure.
+      markQuestionError(
+        questionId,
+        `The ${err.info.agent} quota is exhausted; ask again once the limit resets.`,
+        db,
+      );
+      recordEvent(job.id, "pr_question", { ok: false, questionId, reason: "provider limit" }, db);
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     markQuestionError(questionId, `Answering failed: ${message}`.slice(0, 500), db);
     recordEvent(job.id, "pr_question", { ok: false, questionId }, db);
