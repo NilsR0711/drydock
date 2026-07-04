@@ -377,6 +377,9 @@ once the budget drops below a reserve fraction, while interactive actions stay *
 anything from draining the budget to zero, a 429 backs off until reset, and unchanged single-page issue
 lists are fetched with conditional ETag requests so they cost nothing (multi-page lists are always
 refetched — GitHub's ETag only validates the first page). See [ADR 018](adr/018-rate-limit-governor.md).
+That back-pressure is now **visible**: a navbar pill and dashboard card show the per-resource (REST/GraphQL)
+remaining budget, its reset countdown, and a distinct **"sweeps deferred"** state below the reserve
+fraction, and `GET /api/health` exposes the same per-resource snapshots for monitoring probes (issue #408).
 
 ### 📦 Export/import repo settings
 
@@ -519,9 +522,12 @@ on any failed probe, so it drops straight into cron/CI scripts.
 `GET /api/health` returns a machine-readable liveness snapshot for Uptime-Kuma/Prometheus probes:
 `status` (`ok`/`degraded`) with `reasons`, `version`, `uptimeSeconds`, `driver` (whether this
 instance holds the driver lock, paused/draining flags, last tick timestamp), `queue` (job counts
-per state), and `budget` (today's spend vs the daily limit). HTTP 200 while the driver loop ticks;
-503 when the loop is stalled (no tick within 3 poll intervals), not running, or the DB is
-unreachable. Read-only and secret-free.
+per state), `budget` (today's spend vs the daily limit), and `github` (per-resource GitHub API
+rate-limit budget for `core`/`graphql` — `remaining`, `limit`, ISO-8601 `reset`, and a `gated` flag
+when background sweeps are being deferred; `null` per resource until one is observed, issue #408).
+HTTP 200 while the driver loop ticks; 503 when the loop is stalled (no tick within 3 poll intervals),
+not running, or the DB is unreachable. Read-only and secret-free — the `github` section is read from
+the in-process governor with no forge call, so it survives even a `db_unreachable` degrade.
 
 ### Tick watchdog
 
