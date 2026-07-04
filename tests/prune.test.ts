@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import { parsePruneArgs, pruneOldData } from "@/lib/db/prune";
 import { jobEvents, jobs } from "@/lib/db/schema";
@@ -123,14 +123,58 @@ describe("pruneOldData", () => {
     expect(db.select().from(jobEvents).all()).toHaveLength(0);
   });
 
-  it("runs VACUUM by default and reports it", () => {
-    const result = pruneOldData(db);
-    expect(result.vacuumed).toBe(true);
+  // In pruneOldData, `db.run` is invoked only for VACUUM (the delete uses the
+  // query builder's own `.run()`, not the top-level `db.run`), so a spy on it
+  // observes exactly whether the full-DB rewrite actually happened. Passing an
+  // explicit `days` avoids the getSettings() read path entirely.
+  it("skips VACUUM by default when nothing was deleted (issue #416)", () => {
+    const now = new Date();
+    const run = vi.spyOn(db, "run");
+
+    const result = pruneOldData(db, { days: 30, now });
+
+    expect(result.jobEventsDeleted).toBe(0);
+    expect(result.vacuumed).toBe(false);
+    expect(run).not.toHaveBeenCalled();
   });
 
-  it("skips VACUUM when disabled", () => {
-    const result = pruneOldData(db, { vacuum: false });
+  it("runs VACUUM by default when rows were deleted", () => {
+    const now = new Date();
+    const nowSec = Math.floor(now.getTime() / 1000);
+    const old = makeJob(nowSec - 40 * DAY);
+    addEvent(old, nowSec - 40 * DAY);
+    const run = vi.spyOn(db, "run");
+
+    const result = pruneOldData(db, { days: 30, now });
+
+    expect(result.jobEventsDeleted).toBe(1);
+    expect(result.vacuumed).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("forces VACUUM when vacuum is explicitly true even with zero deletes", () => {
+    const now = new Date();
+    const run = vi.spyOn(db, "run");
+
+    const result = pruneOldData(db, { days: 30, vacuum: true, now });
+
+    expect(result.jobEventsDeleted).toBe(0);
+    expect(result.vacuumed).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("never runs VACUUM when vacuum is false even after deletions", () => {
+    const now = new Date();
+    const nowSec = Math.floor(now.getTime() / 1000);
+    const old = makeJob(nowSec - 40 * DAY);
+    addEvent(old, nowSec - 40 * DAY);
+    const run = vi.spyOn(db, "run");
+
+    const result = pruneOldData(db, { days: 30, vacuum: false, now });
+
+    expect(result.jobEventsDeleted).toBe(1);
     expect(result.vacuumed).toBe(false);
+    expect(run).not.toHaveBeenCalled();
   });
 });
 

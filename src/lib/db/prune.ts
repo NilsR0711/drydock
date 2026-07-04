@@ -8,7 +8,11 @@ const SECONDS_PER_DAY = 86_400;
 export interface PruneOptions {
   /** Retention window in days; defaults to the `retentionDays` setting. */
   days?: number;
-  /** Run SQLite VACUUM after deleting to reclaim space (default true). */
+  /**
+   * Whether to run SQLite VACUUM after deleting. `true` always vacuums, `false`
+   * never does. When omitted, VACUUM runs only if rows were actually deleted, so
+   * the scheduled sweep skips the full-DB rewrite on no-op runs (issue #416).
+   */
   vacuum?: boolean;
   /** Injectable clock for deterministic tests. */
   now?: Date;
@@ -28,11 +32,11 @@ export interface PruneResult {
  * verbose `job_events` of jobs that finished before the retention window, while
  * keeping the jobs' own summary rows (status, cost, tokens) so cost reporting
  * stays intact. Events of unfinished jobs are never touched. A SQLite VACUUM
- * then returns freed pages to the OS unless explicitly disabled.
+ * then returns freed pages to the OS — see {@link PruneOptions.vacuum} for when
+ * it runs.
  */
 export function pruneOldData(db: DB = getDb(), opts: PruneOptions = {}): PruneResult {
   const days = opts.days ?? getSettings(db).retentionDays;
-  const vacuum = opts.vacuum ?? true;
   const nowSec = Math.floor((opts.now?.getTime() ?? Date.now()) / 1000);
   const cutoff = nowSec - days * SECONDS_PER_DAY;
 
@@ -49,7 +53,15 @@ export function pruneOldData(db: DB = getDb(), opts: PruneOptions = {}): PruneRe
   const res = db.delete(jobEvents).where(inArray(jobEvents.jobId, expiredJobs)).run();
   const jobEventsDeleted = res.changes;
 
-  // VACUUM cannot run inside a transaction; better-sqlite3 executes it directly.
+  // VACUUM rewrites the whole database and runs synchronously on better-sqlite3's
+  // process-wide connection (web server, SSE streams, driver loop), so it stalls
+  // the event loop for the DB's full size. When `vacuum` is left unset — the
+  // scheduled sweep's path — only pay that cost if we actually freed pages;
+  // rewriting after a no-op prune buys nothing. An explicit flag overrides: the
+  // CLI passes `true` to always reclaim, `--no-vacuum` passes `false` to skip
+  // (issue #416). VACUUM cannot run inside a transaction; better-sqlite3 runs it
+  // directly.
+  const vacuum = opts.vacuum ?? jobEventsDeleted > 0;
   if (vacuum) db.run(sql`VACUUM`);
 
   return { jobEventsDeleted, vacuumed: vacuum, cutoff };
