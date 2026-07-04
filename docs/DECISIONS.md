@@ -12,7 +12,7 @@
 - [009](adr/009-ci-retry-strategy.md) — CI babysitter & retry strategy (Phase 5)
 - [010](adr/010-prompt-template-versioning.md) — Prompt template versioning & substitution (Phase 6)
 - [011](adr/011-adr-watcher-and-review.md) — ADR detection via chokidar + review queue (Phase 7)
-- [012](adr/012-graceful-shutdown-and-backup.md) — Graceful shutdown, abort registry & DB backup (Phase 8)
+- [012](adr/012-graceful-shutdown-and-backup.md) — Graceful shutdown, abort registry & DB backup (Phase 8) — **scheduling superseded by [042](adr/042-scheduled-in-process-backup-sweep.md)**
 - [013](adr/013-server-side-directory-picker.md) — Server-side directory picker (post-MVP)
 - [014](adr/014-agent-provider-abstraction.md) — Pluggable agent providers (claude + codex)
 - [015](adr/015-gitlab-forge-support.md) — Pluggable forge platforms (github + gitlab)
@@ -42,3 +42,4 @@
 - [039](adr/039-retire-openrouter-for-opencode.md) — Retire the custom OpenRouter HTTP backend for opencode + `openrouter/<model>` (supersedes 032: deletes the subsystem & catalog table, bridges the API key onto opencode, migration 0046; drops free-models-only & OpenRouter auto-wait)
 - [040](adr/040-opencode-autonomous-permissions.md) — opencode autonomous permission mapping (supersedes 038 §4: bypass → `--dangerously-skip-permissions`; non-bypass → injected `OPENCODE_PERMISSION` config honoring `allowedCommands` with deny-not-ask so headless jobs never hang)
 - [041](adr/041-dns-rebinding-guard.md) — DNS-rebinding guard on the API surface (`src/proxy.ts` Host/Origin allowlist covering every `/api/*` GET/HEAD by construction, honoring `DRYDOCK_ALLOW_REMOTE`'s configured host)
+- [042](adr/042-scheduled-in-process-backup-sweep.md) — Opt-out daily in-process DB backup sweep (supersedes 012's scheduling: reuses `runBackup` on the log-sweep cadence, `backupRetentionDays` setting with `0 = off`, `lastBackupAt` in `/api/health` + a `drydock doctor` probe)

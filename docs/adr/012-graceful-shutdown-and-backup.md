@@ -1,6 +1,6 @@
 # ADR 012: Graceful shutdown, abort registry & DB backup
 
-- **Status:** accepted
+- **Status:** accepted — scheduling **superseded by [ADR 042](042-scheduled-in-process-backup-sweep.md)**
 - **Date:** 2026-05-27
 
 ## Context
@@ -24,3 +24,6 @@ than 7 days; exposed as `pnpm backup` for a daily cron/launchd job.
 - Clean restarts: interrupted jobs are visible and restartable (with recovery).
 - No orphaned `claude` processes on shutdown.
 - Backup/retention is a pure, unit-tested function; scheduling is left to the OS.
+  (Superseded: [ADR 042](042-scheduled-in-process-backup-sweep.md) now schedules
+  this same `runBackup` as an opt-out daily in-process sweep. The function and its
+  WAL-safe/retention semantics are unchanged; only "who schedules it" is.)

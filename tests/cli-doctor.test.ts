@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -49,6 +49,17 @@ function captureIo() {
 
 const PLENTY_OF_DISK = () => ({ bavail: 1_000_000, bsize: 4096 }); // ~3.8 GiB
 
+/** Write a `drydock-*.db` snapshot into `<dataDir>/backups`, aged `ageMs` old. */
+function writeBackup(dataDir: string, ageMs = 0): string {
+  const backupDir = join(dataDir, "backups");
+  mkdirSync(backupDir, { recursive: true });
+  const file = join(backupDir, `drydock-${ageMs}.db`);
+  writeFileSync(file, "snapshot");
+  const when = (Date.now() - ageMs) / 1000;
+  utimesSync(file, when, when);
+  return file;
+}
+
 let dir: string;
 
 beforeEach(() => {
@@ -66,6 +77,9 @@ function healthyDeps(
 ) {
   const dbPath = join(dir, "drydock.db");
   createReposDb(dbPath, repoRows);
+  // A fresh, recent backup so the "last backup" probe reports ok by default;
+  // individual tests age or remove it to exercise the warn/skip branches.
+  writeBackup(dir);
   return {
     dbPath,
     dataDir: dir,
@@ -85,11 +99,57 @@ describe("runDoctorCommand", () => {
     const code = await runDoctorCommand(healthyDeps(io));
 
     expect(code).toBe(0);
-    // gh auth, claude, codex, gitlab, disk, db integrity, lock = 7 probes.
-    expect(io.out).toHaveLength(7);
+    // gh auth, claude, codex, gitlab, disk, db integrity, last backup, lock = 8 probes.
+    expect(io.out).toHaveLength(8);
     expect(io.out.join("\n")).toMatch(/^ok\s+github auth/m);
     expect(io.out.join("\n")).toMatch(/^ok\s+claude cli/m);
     expect(io.out.join("\n")).not.toMatch(/^fail/m);
+  });
+
+  it("reports the most recent backup with its age and path", async () => {
+    const io = captureIo();
+    const deps = healthyDeps(io);
+    // healthyDeps writes a fresh backup, so the probe is ok and names the file.
+    const code = await runDoctorCommand(deps);
+
+    expect(code).toBe(0);
+    expect(io.out.join("\n")).toMatch(/^ok\s+last backup/m);
+    expect(io.out.join("\n")).toMatch(/backups[/\\]drydock-/);
+  });
+
+  it("warns when the most recent backup is older than the daily window", async () => {
+    const io = captureIo();
+    const deps = healthyDeps(io);
+    rmSync(join(dir, "backups"), { recursive: true, force: true });
+    writeBackup(dir, 3 * 86400_000); // 3 days old
+
+    const code = await runDoctorCommand(deps);
+
+    expect(code).toBe(0);
+    expect(io.out.join("\n")).toMatch(/^warn\s+last backup/m);
+  });
+
+  it("warns when a database exists but no backups have been written", async () => {
+    const io = captureIo();
+    const deps = healthyDeps(io);
+    rmSync(join(dir, "backups"), { recursive: true, force: true });
+
+    const code = await runDoctorCommand(deps);
+
+    expect(code).toBe(0);
+    expect(io.out.join("\n")).toMatch(/^warn\s+last backup\s+.*no backups/m);
+  });
+
+  it("skips the backup probe on a fresh install with no database or backups", async () => {
+    const io = captureIo();
+    const deps = healthyDeps(io);
+    deps.dbPath = join(dir, "missing.db");
+    rmSync(join(dir, "backups"), { recursive: true, force: true });
+
+    const code = await runDoctorCommand(deps);
+
+    expect(code).toBe(0);
+    expect(io.out.join("\n")).toMatch(/^skip\s+last backup/m);
   });
 
   it("fails when `gh auth status` exits non-zero", async () => {

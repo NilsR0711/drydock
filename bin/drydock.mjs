@@ -204,11 +204,13 @@ Usage:
   drydock restart        Stop the daemon if running, then start a fresh one
   drydock mcp            Start the local stdio MCP server for an MCP host
   drydock update         Update to the latest published version
-  drydock backup [path]  Snapshot the database (WAL-safe, works while running);
-                         default target: <data dir>/backups/drydock-<timestamp>.db
+  drydock backup [path]  Snapshot the database on demand (WAL-safe, works while
+                         running; the server also backs up daily). Default target:
+                         <data dir>/backups/drydock-<timestamp>.db
   drydock restore <path> Replace the database with a backup (server must be stopped)
   drydock doctor         Health checks: gh/claude/codex auth, GitLab tokens, disk
-                         space, DB integrity, instance lock; exits non-zero on failure
+                         space, DB integrity, last backup, instance lock; exits
+                         non-zero on failure
   drydock service install|uninstall
                          Run the dock at login via launchd (macOS) / systemd (Linux)
 

@@ -153,6 +153,8 @@ const updateSettingsShape = {
     .optional(),
   defaultAgent: z.enum(["claude", "codex"]).optional(),
   retentionDays: z.number().int().positive().optional(),
+  // 0 disables the in-process daily DB backup sweep (issue #411).
+  backupRetentionDays: z.number().int().nonnegative().optional(),
 } satisfies ZodRawShape;
 
 export const tools: ToolDef[] = [

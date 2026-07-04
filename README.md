@@ -252,7 +252,7 @@ drydock start           # run as a background daemon, detached from the terminal
 drydock status          # is the daemon running? (pid, url, uptime) — exit 3 when stopped
 drydock stop            # gracefully stop the daemon (drains in-flight jobs)
 drydock update          # update a global install (current → latest)
-drydock backup          # WAL-safe DB snapshot, works while the server runs
+drydock backup          # on-demand WAL-safe DB snapshot (the server also backs up daily)
 drydock restore <path>  # replace the DB with a backup (server must be stopped)
 drydock doctor          # scriptable health checks, non-zero exit on failure
 drydock service install # run the dock at login (launchd / systemd user unit)

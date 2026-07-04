@@ -94,6 +94,16 @@ describe("getHealth", () => {
     expect(body.budget).toEqual({ todayUsd: 2.5, dailyLimitUsd: 25 });
   });
 
+  it("exposes the most recent backup timestamp when one exists (issue #411)", () => {
+    const { body } = getHealth({ ...baseDeps, lastBackup: () => NOW - 5000 });
+    expect(body.lastBackupAt).toBe(new Date(NOW - 5000).toISOString());
+  });
+
+  it("reports a null last-backup timestamp when no snapshot exists yet (issue #411)", () => {
+    const { body } = getHealth({ ...baseDeps, lastBackup: () => null });
+    expect(body.lastBackupAt).toBeNull();
+  });
+
   it("reflects paused and DB draining flags without degrading", () => {
     saveSettings({ paused: true, draining: true });
     const { httpStatus, body } = getHealth(baseDeps);
