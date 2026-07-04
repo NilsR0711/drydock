@@ -112,6 +112,9 @@ function runBulkJobAction(jobIds: number[], op: (jobId: number) => Job): BulkJob
   if (result.succeeded.length > 0) {
     revalidatePath("/needs-human");
     revalidatePath("/");
+    // Match the single-job actions: refresh each acted-on job's detail page too,
+    // so an open /jobs/:id reflects the new state after a bulk operation.
+    for (const jobId of result.succeeded) revalidatePath(`/jobs/${jobId}`);
     for (const repoId of repoIds) revalidatePath(`/repos/${repoId}`);
   }
   return result;
