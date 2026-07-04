@@ -83,23 +83,37 @@ export function topJobs(limit = 10, db: DB = getDb(), repoId?: number): Job[] {
     .all();
 }
 
+/**
+ * Unix-second timestamp of the most recent local midnight — the inclusive lower
+ * bound for "today". Computed in JS (via the runtime's local timezone, matching
+ * SQLite's `localtime`) so the SQL predicate stays a plain `started_at >= ?`
+ * range an index can serve, instead of a per-row `strftime(...)` that can never
+ * use an index and forces a full scan of the forever-growing jobs table (#415).
+ */
+export function localDayStart(now: Date = new Date()): number {
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.floor(midnight.getTime() / 1000);
+}
+
 /** Total cost for the current local day — used to enforce the daily limit. */
 export function todayCost(db: DB = getDb(), repoId?: number): number {
+  const since = localDayStart();
   const repoWhere = repoId !== undefined ? sql` AND repo_id = ${repoId}` : sql``;
 
   // Union job costs + one-shot costs for today. Raw SQL is cleaner than two
   // separate Drizzle queries because Drizzle doesn't expose UNION ALL natively.
+  // The `>= since` bound is index-friendly (jobs_started_at_idx /
+  // one_shot_costs_created_at_idx) and implicitly drops NULL started_at rows.
   const row = db.get<{ total: number }>(sql`
       SELECT coalesce(sum(c), 0) AS total FROM (
         SELECT coalesce(sum(cost_usd), 0) AS c
         FROM jobs
-        WHERE strftime('%Y-%m-%d', started_at, 'unixepoch', 'localtime') = strftime('%Y-%m-%d', 'now', 'localtime')
-          AND started_at IS NOT NULL
+        WHERE started_at >= ${since}
           ${repoWhere}
         UNION ALL
         SELECT coalesce(sum(cost_usd), 0) AS c
         FROM one_shot_costs
-        WHERE strftime('%Y-%m-%d', created_at, 'unixepoch', 'localtime') = strftime('%Y-%m-%d', 'now', 'localtime')
+        WHERE created_at >= ${since}
           ${repoWhere}
       )
     `);
@@ -162,4 +176,38 @@ export function projectMonthlySpend(input: {
   const remainingDays = Math.max(input.daysInMonth - input.dayOfMonth, 0);
   const projected = input.monthToDate + avgDailySpend * remainingDays;
   return { monthToDate: input.monthToDate, avgDailySpend, projected };
+}
+
+/**
+ * Today's spend (jobs + one-shot costs, local day) grouped by repo, in two
+ * grouped queries instead of the N+1 per-repo `todayCost` calls the dashboard
+ * snapshot used to make (issue #415). Repos with no spend today are simply
+ * absent from the map; callers default to 0.
+ */
+export function todaySpendByRepo(db: DB = getDb()): Map<number, number> {
+  const since = localDayStart();
+  const jobRows = db
+    .select({
+      repoId: jobs.repoId,
+      cost: sql<number>`coalesce(sum(${jobs.costUsd}), 0)`,
+    })
+    .from(jobs)
+    .where(sql`${jobs.startedAt} >= ${since}`)
+    .groupBy(jobs.repoId)
+    .all();
+  const oneShotRows = db
+    .select({
+      repoId: oneShotCosts.repoId,
+      cost: sql<number>`coalesce(sum(${oneShotCosts.costUsd}), 0)`,
+    })
+    .from(oneShotCosts)
+    .where(sql`${oneShotCosts.createdAt} >= ${since}`)
+    .groupBy(oneShotCosts.repoId)
+    .all();
+
+  const byRepo = new Map<number, number>();
+  for (const r of [...jobRows, ...oneShotRows]) {
+    byRepo.set(r.repoId, (byRepo.get(r.repoId) ?? 0) + r.cost);
+  }
+  return byRepo;
 }
