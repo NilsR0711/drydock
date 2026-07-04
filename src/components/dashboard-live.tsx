@@ -7,6 +7,7 @@ import { AddRepoForm } from "@/components/add-repo-form";
 import { ClaudeUsageCard } from "@/components/claude-usage";
 import { CodexUsageCard } from "@/components/codex-usage";
 import { DashboardStats } from "@/components/dashboard-stats";
+import { GithubBudgetCard } from "@/components/github-budget";
 import { PageHeader } from "@/components/page-header";
 import { RepoStatusCard } from "@/components/repo-status-card";
 import { Alert } from "@/components/ui/alert";
@@ -236,6 +237,8 @@ export function DashboardLive({
           <ClaudeUsageCard view={snapshot.claudeUsage} />
 
           <CodexUsageCard view={snapshot.codexUsage} />
+
+          <GithubBudgetCard view={snapshot.githubBudget} />
 
           {summary.needsHuman > 0 ? (
             <Alert
