@@ -452,11 +452,15 @@ as literal text, so `100%` or an FTS operator never behaves as a wildcard or que
 
 ### 🔔 External notifications
 
-Get pinged on Telegram, Slack (incoming webhook) and email (SMTP) for the lifecycle events you care about
-(job needs human, job failed, PR opened, PR merged, release published, daily cost limit reached,
-credentials expired/restored, automation paused/draining). Each channel is configured independently, every
-event has a per-event opt-in, and a one-click test button verifies setup. Delivery is best-effort and never
-blocks the loop; secrets are redacted from logs. See [ADR 024](adr/024-external-notifications.md).
+Get pinged on Telegram, Slack (incoming webhook), email (SMTP), or a **generic webhook** for the lifecycle
+events you care about (job needs human, job failed, PR opened, PR merged, release published, daily cost limit
+reached, credentials expired/restored, automation paused/draining). Each channel is configured independently,
+every event has a per-event opt-in, and a one-click test button verifies setup. The generic webhook POSTs a
+documented `{ event, text }` JSON payload to any URL — so integrations Drydock does not ship natively (Discord,
+ntfy, Gotify, Pushover, Home Assistant, self-hosted relays) work from one payload — with an optional shared
+secret sent as the `X-Drydock-Secret` header (see the [README](../README.md#webhook-notifications) for the
+payload shape). Delivery is best-effort and never blocks the loop; secrets are redacted from logs. See
+[ADR 024](adr/024-external-notifications.md).
 
 ### 🙋 Needs-human visibility on the issue
 

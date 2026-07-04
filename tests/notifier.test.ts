@@ -138,6 +138,86 @@ describe("dispatch", () => {
   });
 });
 
+describe("webhook channel (issue #414)", () => {
+  const WEBHOOK_URL = "https://ntfy.example.com/drydock";
+
+  /** Read a recorded postJson call as its (url, body, headers?) tuple. */
+  type PostJsonCall = [string, Record<string, unknown>, Record<string, string>?];
+  const firstCall = (): PostJsonCall => {
+    const call = postJson.mock.calls[0];
+    if (!call) throw new Error("postJson was not called");
+    return call as PostJsonCall;
+  };
+
+  it("does not treat the webhook as configured without a URL", async () => {
+    saveSettings({ webhookSecret: "s3cret" }, db);
+    await dispatch("needs_human", "help", db, transports);
+    expect(postJson).not.toHaveBeenCalled();
+  });
+
+  it("POSTs a structured payload carrying the event id and message text", async () => {
+    saveSettings({ webhookUrl: WEBHOOK_URL }, db);
+    await dispatch("needs_human", "job 7 needs you", db, transports);
+    expect(postJson).toHaveBeenCalledTimes(1);
+    const [url, body] = firstCall();
+    expect(url).toBe(WEBHOOK_URL);
+    expect(body).toEqual({ event: "needs_human", text: "job 7 needs you" });
+  });
+
+  it("sends the optional secret as the X-Drydock-Secret request header", async () => {
+    saveSettings({ webhookUrl: WEBHOOK_URL, webhookSecret: "s3cret" }, db);
+    await dispatch("needs_human", "help", db, transports);
+    expect(firstCall()[2]).toMatchObject({ "X-Drydock-Secret": "s3cret" });
+  });
+
+  it("omits the secret header when no secret is configured", async () => {
+    saveSettings({ webhookUrl: WEBHOOK_URL }, db);
+    await dispatch("needs_human", "help", db, transports);
+    expect(firstCall()[2]?.["X-Drydock-Secret"]).toBeUndefined();
+  });
+
+  it("respects the per-event opt-in like every other channel", async () => {
+    saveSettings({ webhookUrl: WEBHOOK_URL, notifyEvents: ["needs_human"] }, db);
+    await dispatch("pr_merged", "merged", db, transports);
+    expect(postJson).not.toHaveBeenCalled();
+  });
+
+  it("still delivers to the webhook when an earlier channel fails", async () => {
+    saveSettings({ telegramBotToken: "TOK", telegramChatId: "42", webhookUrl: WEBHOOK_URL }, db);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    postJson.mockImplementation(async (url: string) => {
+      if (url.includes("telegram")) throw new Error("telegram down");
+    });
+    await expect(dispatch("needs_human", "help", db, transports)).resolves.toBeUndefined();
+    const calledUrls = postJson.mock.calls.map((c) => c[0]);
+    expect(calledUrls).toContain(WEBHOOK_URL);
+    vi.restoreAllMocks();
+  });
+
+  it("isolates its own failure and never leaks the secret into the log", async () => {
+    saveSettings({ webhookUrl: WEBHOOK_URL, webhookSecret: "top-secret-value" }, db);
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    postJson.mockImplementationOnce(async () => {
+      throw new Error("HTTP 500");
+    });
+    await expect(dispatch("needs_human", "help", db, transports)).resolves.toBeUndefined();
+    const logged = spy.mock.calls.flat().join(" ");
+    expect(logged).toContain("webhook");
+    expect(logged).not.toContain("top-secret-value");
+    spy.mockRestore();
+  });
+
+  it("is included in sendTest with a test-event payload", async () => {
+    saveSettings({ webhookUrl: WEBHOOK_URL }, db);
+    const results = await sendTest(db, transports);
+    expect(results).toContainEqual({ channel: "webhook", ok: true });
+    const [url, body] = firstCall();
+    expect(url).toBe(WEBHOOK_URL);
+    expect(body).toMatchObject({ event: "test" });
+    expect(typeof (body as { text: unknown }).text).toBe("string");
+  });
+});
+
 describe("sendTest", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -219,6 +299,23 @@ describe("defaultTransports network I/O timeouts (issue #90)", () => {
     vi.stubGlobal("fetch", fetchMock);
     await defaultTransports.postJson("https://example.com/hook", { hello: "world" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges optional headers into the HTTP POST alongside the JSON content type", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL, _init?: RequestInit) => {
+      return new Response(null, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await defaultTransports.postJson(
+      "https://example.com/hook",
+      { hello: "world" },
+      { "X-Drydock-Secret": "abc" },
+    );
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.headers).toMatchObject({
+      "content-type": "application/json",
+      "X-Drydock-Secret": "abc",
+    });
   });
 
   it("sets connection/greeting/socket timeouts on the SMTP transport", async () => {

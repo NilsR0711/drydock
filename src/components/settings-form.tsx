@@ -459,6 +459,34 @@ export function SettingsForm({ initial }: { initial: Settings }) {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Webhook URL"
+              hint="POST a structured { event, text } JSON payload to any URL — Discord, ntfy, Gotify, Home Assistant, a relay. Leave empty to disable."
+            >
+              <Input
+                value={s.webhookUrl}
+                onChange={(e) => set("webhookUrl", e.target.value)}
+                placeholder="https://ntfy.example.com/drydock"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </Field>
+            <Field
+              label="Webhook secret"
+              hint="Optional. Sent as the X-Drydock-Secret header so the receiver can verify the call. Never logged."
+            >
+              <Input
+                type="password"
+                value={s.webhookSecret}
+                onChange={(e) => set("webhookSecret", e.target.value)}
+                placeholder="X-Drydock-Secret header (optional)"
+                autoComplete="new-password"
+                spellCheck={false}
+              />
+            </Field>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field label="SMTP host" hint="Leave empty to disable email.">
               <Input value={s.smtpHost} onChange={(e) => set("smtpHost", e.target.value)} />
             </Field>

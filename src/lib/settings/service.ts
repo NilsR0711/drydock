@@ -111,6 +111,17 @@ export const settingsSchema = z.object({
   // External notification channels (issue #22). Each is optional and
   // configured independently; an empty value disables that channel.
   slackWebhookUrl: z.string().default(""),
+  // Generic webhook channel (issue #414). POSTs a documented structured JSON
+  // payload (`{ event, text }`) to an arbitrary URL, so integrations Drydock
+  // does not ship natively — Discord, ntfy, Gotify, Pushover, Home Assistant,
+  // any self-hosted relay — can be driven from one payload instead of a bespoke
+  // channel each. An empty URL disables it. The optional `webhookSecret` is sent
+  // as the `X-Drydock-Secret` request header so a receiver can verify the call
+  // came from Drydock. Both are treated as credentials (see SECRET_SETTING_KEYS):
+  // the URL can itself embed a token (e.g. a Discord webhook path), like
+  // `slackWebhookUrl`.
+  webhookUrl: z.string().default(""),
+  webhookSecret: z.string().default(""),
   smtpHost: z.string().default(""),
   smtpPort: z.number().int().positive().default(587),
   smtpUser: z.string().default(""),
@@ -176,6 +187,8 @@ export type Settings = z.infer<typeof settingsSchema>;
 export const SECRET_SETTING_KEYS = [
   "telegramBotToken",
   "slackWebhookUrl",
+  "webhookUrl",
+  "webhookSecret",
   "smtpPass",
   "openrouterApiKey",
 ] as const satisfies readonly (keyof Settings)[];
