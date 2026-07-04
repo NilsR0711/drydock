@@ -1,4 +1,5 @@
 import type { Repo } from "@/lib/db/schema";
+import { platformSupportsCapability } from "@/lib/forge/types";
 
 /** A repo's automation knobs with the JSON label/author lists already parsed. */
 export interface RepoAutomation {
@@ -54,7 +55,12 @@ export function repoAutomation(repo: Repo): RepoAutomation {
     autoTriageEnabled: repo.autoTriageEnabled,
     autoProcessEnabled: repo.autoProcessEnabled,
     autoHealCi: repo.autoHealCi,
-    autoReviewFeedback: repo.autoReviewFeedback,
+    // Review-feedback and release management run only on a forge that
+    // implements the optional review-thread / release methods (GitHub today).
+    // Clamp both to the platform's real capability so a GitLab repo can't
+    // report them active while the drivers silently skip it (issue #407).
+    autoReviewFeedback:
+      repo.autoReviewFeedback && platformSupportsCapability(repo.platform, "reviewFeedback"),
     mergeWithoutChecks: repo.mergeWithoutChecks,
     autoResolveMergeConflicts: repo.autoResolveMergeConflicts,
     resolveConflictsWithAgent: repo.resolveConflictsWithAgent,
@@ -63,7 +69,8 @@ export function repoAutomation(repo: Repo): RepoAutomation {
     planFirst: repo.planFirst,
     verifyPr: repo.verifyPr,
     autoHealDeployments: repo.autoHealDeployments,
-    releaseEnabled: repo.releaseEnabled,
+    releaseEnabled:
+      repo.releaseEnabled && platformSupportsCapability(repo.platform, "releaseManagement"),
     deploymentPlatform: repo.deploymentPlatform,
     readyLabels: parseStringArray(repo.readyLabels),
     blockingLabels: parseStringArray(repo.blockingLabels),

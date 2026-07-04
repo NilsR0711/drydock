@@ -41,6 +41,7 @@ import { recentHealingSessions } from "@/lib/orchestrator/ci-healing";
 import { recentDeploymentHealingSessions } from "@/lib/orchestrator/deployment-healing";
 import { openJobsByIssue } from "@/lib/orchestrator/jobs";
 import { recentReleaseRuns } from "@/lib/release/release-service";
+import { repoAutomation } from "@/lib/repos/automation";
 import { getSettings } from "@/lib/settings/service";
 import { listTrackedPrs } from "@/lib/tracked-prs/service";
 
@@ -60,7 +61,11 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
   const deploymentSessions = ws.repo.autoHealDeployments
     ? recentDeploymentHealingSessions(ws.repo.id, db)
     : [];
-  const releaseRuns = ws.repo.releaseEnabled ? recentReleaseRuns(ws.repo.id, db) : [];
+  // Effective release opt-in: `releaseEnabled` is clamped to the platform's
+  // capability, so a GitLab repo carrying a stale flag never renders the panel
+  // for a driver that would silently skip it (issue #407).
+  const releaseEnabled = repoAutomation(ws.repo).releaseEnabled;
+  const releaseRuns = releaseEnabled ? recentReleaseRuns(ws.repo.id, db) : [];
   const trackedPrs = listTrackedPrs(ws.repo.id, db);
 
   const initialLog = ws.activeJob
@@ -241,9 +246,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
           defaultOpen={false}
         >
           <div className="grid gap-6 lg:grid-cols-2">
-            {ws.repo.releaseEnabled && (
-              <RepoReleasePanel repoId={ws.repo.id} initialRuns={releaseRuns} />
-            )}
+            {releaseEnabled && <RepoReleasePanel repoId={ws.repo.id} initialRuns={releaseRuns} />}
             {ws.repo.autoHealCi && <RepoHealingPanel sessions={healingSessions} />}
             {ws.repo.autoHealDeployments && (
               <RepoDeploymentHealingPanel sessions={deploymentSessions} />
