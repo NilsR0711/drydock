@@ -60,6 +60,7 @@ export function IssueDetailModal({
 }) {
   const [detail, setDetail] = useState<IssueDetail | null>(null);
   const [subtasks, setSubtasks] = useState<IssueSubtask[]>([]);
+  const [subtasksError, setSubtasksError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [comment, setComment] = useState("");
@@ -110,10 +111,15 @@ export function IssueDetailModal({
         .then((s) => {
           if (!isCurrent()) return;
           setSubtasks(s);
+          setSubtasksError(null);
         })
-        .catch(() => {
+        .catch((e) => {
+          // Don't swallow the failure into a look-alike "no subtasks" state
+          // (issue #425): surface it in a dedicated inline notice so a read
+          // error is never mistaken for a genuinely un-decomposed issue.
           if (!isCurrent()) return;
           setSubtasks([]);
+          setSubtasksError(e.message);
         });
     },
     [repoId],
@@ -125,6 +131,7 @@ export function IssueDetailModal({
     setError(null);
     setDetail(null);
     setSubtasks([]);
+    setSubtasksError(null);
     loadIssue(issueNumber, (d) => {
       setTitle(d.title);
       setBody(d.body);
@@ -340,6 +347,16 @@ export function IssueDetailModal({
               </Button>
             </div>
           </div>
+
+          {subtasksError && (
+            <div>
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                <ListChecks className="h-3.5 w-3.5 text-muted-foreground" />
+                Subtasks
+              </h3>
+              <Alert tone="destructive">Couldn't load subtasks: {subtasksError}</Alert>
+            </div>
+          )}
 
           {subtasks.length > 0 && (
             <div>
