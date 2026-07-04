@@ -26,20 +26,41 @@ import type { SubtaskStatus } from "./subtask-state";
 const SUBTASK_COMMENT_HEADER =
   "Drydock decomposed this issue into subtasks and will work them in order:";
 
+interface ParsedSubtasks {
+  /** Trimmed, non-empty string titles found in the agent's JSON array. */
+  titles: string[];
+  /**
+   * Whether a JSON array was actually found and parsed. `true` even for a
+   * well-formed empty array (`[]`) — the agent's legitimate "do not split"
+   * answer — and `false` when the output contained no parseable array at all
+   * (a crashed or garbled reply). Lets callers distinguish an intentional empty
+   * result from a silent parse failure worth logging (issue #422).
+   */
+  parsed: boolean;
+}
+
+/** Parse an agent's free-form output into subtask titles, tracking parseability. */
+function parseSubtaskResult(stdout: string): ParsedSubtasks {
+  const match = stdout.match(/\[[\s\S]*\]/);
+  if (!match) return { titles: [], parsed: false };
+  try {
+    const value: unknown = JSON.parse(match[0]);
+    if (!Array.isArray(value)) return { titles: [], parsed: false };
+    return {
+      titles: value
+        .filter((x): x is string => typeof x === "string")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      parsed: true,
+    };
+  } catch {
+    return { titles: [], parsed: false };
+  }
+}
+
 /** Parse a JSON array of subtask titles out of an agent's free-form output. */
 export function parseSubtaskList(stdout: string): string[] {
-  const match = stdout.match(/\[[\s\S]*\]/);
-  if (!match) return [];
-  try {
-    const parsed: unknown = JSON.parse(match[0]);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((x): x is string => typeof x === "string")
-      .map((s) => s.trim())
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
+  return parseSubtaskResult(stdout).titles;
 }
 
 /** The one-shot prompt asking the agent to split a prose issue into subtasks. */
@@ -98,9 +119,26 @@ export function buildSubtaskGenerator(deps: {
           throw new ProviderLimitError(limit);
         }
       }
+      // Not a waitable limit we're deferring on: the issue will be stamped and
+      // worked whole, so leave a trace of why decomposition never ran (issue
+      // #422) instead of silently returning [].
+      logError(
+        `[subtasks] decompose one-shot exited ${exitCode} for issue #${input.number}`,
+        stderr.trim().slice(0, 500),
+      );
       return [];
     }
-    return parseSubtaskList(text);
+    const { titles, parsed } = parseSubtaskResult(text);
+    if (!parsed) {
+      // A zero exit with no parseable JSON array is a garbled reply, not the
+      // agent's legitimate empty-array "do not split" answer — log it so the
+      // stamped-non-decomposable state is explainable (issue #422).
+      logError(
+        `[subtasks] decompose one-shot returned an unparseable subtask list for issue #${input.number}`,
+        text.trim().slice(0, 500),
+      );
+    }
+    return titles;
   };
 }
 

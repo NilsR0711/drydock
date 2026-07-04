@@ -142,6 +142,63 @@ describe("buildSubtaskGenerator", () => {
     expect(await generate({ number: 1, title: "T", body: "x" })).toEqual([]);
   });
 
+  it("logs the issue number and exit code when the one-shot exits non-zero (issue #422)", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runner = vi.fn(async () => ({ stdout: "", stderr: "boom", exitCode: 3 }));
+    const generate = buildSubtaskGenerator({
+      provider: claudeProvider,
+      command: "claude",
+      model: "m",
+      cwd: "/r",
+      runner,
+    });
+    expect(await generate({ number: 42, title: "T", body: "x" })).toEqual([]);
+    const logged = errSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    expect(logged).toContain("#42");
+    expect(logged).toContain("exited 3");
+    expect(logged).toContain("boom");
+    errSpy.mockRestore();
+  });
+
+  it("logs when the agent reply contains no parseable subtask array (issue #422)", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runner = vi.fn(async () => ({
+      stdout: oneShotNdjson("Sorry, I could not complete this request."),
+      stderr: "",
+      exitCode: 0,
+    }));
+    const generate = buildSubtaskGenerator({
+      provider: claudeProvider,
+      command: "claude",
+      model: "m",
+      cwd: "/r",
+      runner,
+    });
+    expect(await generate({ number: 7, title: "T", body: "x" })).toEqual([]);
+    const logged = errSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    expect(logged).toContain("#7");
+    errSpy.mockRestore();
+  });
+
+  it("stays silent when the agent legitimately answers with an empty array (issue #422)", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runner = vi.fn(async () => ({
+      stdout: oneShotNdjson("The issue is one coherent task: []"),
+      stderr: "",
+      exitCode: 0,
+    }));
+    const generate = buildSubtaskGenerator({
+      provider: claudeProvider,
+      command: "claude",
+      model: "m",
+      cwd: "/r",
+      runner,
+    });
+    expect(await generate({ number: 7, title: "T", body: "x" })).toEqual([]);
+    expect(errSpy).not.toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
+
   it("latches the provider and throws when the one-shot hits a usage limit (issue #167)", async () => {
     const runner = vi.fn(async () => ({
       stdout: "",
@@ -160,6 +217,29 @@ describe("buildSubtaskGenerator", () => {
       ProviderLimitError,
     );
     expect(providerLimitBlocked("codex", db)?.kind).toBe("usage_limit");
+  });
+
+  it("adds no decompose log noise when a waitable limit throws (issue #422)", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runner = vi.fn(async () => ({
+      stdout: "",
+      stderr: "ERROR: You've hit your usage limit. Try again at 9:01 PM.",
+      exitCode: 1,
+    }));
+    const generate = buildSubtaskGenerator({
+      provider: codexProvider,
+      command: "codex",
+      model: "gpt-5-codex",
+      cwd: "/r",
+      db,
+      runner,
+    });
+    await expect(generate({ number: 1, title: "T", body: "x" })).rejects.toBeInstanceOf(
+      ProviderLimitError,
+    );
+    const logged = errSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    expect(logged).not.toContain("decompose one-shot");
+    errSpy.mockRestore();
   });
 
   it("treats a limited one-shot as a plain failure when auto-wait is disabled", async () => {
