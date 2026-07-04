@@ -2,7 +2,7 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { settingsSchema } from "@/lib/settings/service";
-import { fire, type Rendered, render } from "./fixtures/react";
+import { fire, type Rendered, render, setInputValue } from "./fixtures/react";
 
 const actions = vi.hoisted(() => ({
   saveSettingsAction: vi.fn(),
@@ -69,6 +69,30 @@ describe("SettingsForm (issue #388)", () => {
 
     expect(actions.saveSettingsAction).toHaveBeenCalledWith(initial);
     expect(toast.success).toHaveBeenCalledWith("Settings saved");
+  });
+
+  it("edits and persists the generic webhook URL and secret (issue #414)", async () => {
+    mounted = render(<SettingsForm initial={baseSettings()} />);
+
+    const url = mounted.container.querySelector<HTMLInputElement>(
+      'input[placeholder="https://ntfy.example.com/drydock"]',
+    );
+    const secret = mounted.container.querySelector<HTMLInputElement>(
+      'input[placeholder="X-Drydock-Secret header (optional)"]',
+    );
+    if (!url || !secret) throw new Error("webhook fields not found");
+
+    setInputValue(url, "https://relay.example.com/hook");
+    setInputValue(secret, "shared-secret");
+    click(buttonByText(mounted.container, "Save changes"));
+    await flush();
+
+    expect(actions.saveSettingsAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        webhookUrl: "https://relay.example.com/hook",
+        webhookSecret: "shared-secret",
+      }),
+    );
   });
 
   it("flips the kill-switch immediately through the dedicated action", async () => {

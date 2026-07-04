@@ -1,6 +1,6 @@
 import { type DB, getDb } from "@/lib/db/client";
 import { redactSecrets } from "@/lib/log/redact";
-import { getSettings, type Settings } from "@/lib/settings/service";
+import { getSettings, SECRET_SETTING_KEYS, type Settings } from "@/lib/settings/service";
 import type { NotificationEvent } from "./events";
 
 /** SMTP connection details, derived from settings, handed to the mail transport. */
@@ -25,45 +25,83 @@ export interface MailMessage {
  * nodemailer; tests pass fakes.
  */
 export interface NotifyTransports {
-  postJson: (url: string, body: Record<string, unknown>) => Promise<void>;
+  postJson: (
+    url: string,
+    body: Record<string, unknown>,
+    headers?: Record<string, string>,
+  ) => Promise<void>;
   sendMail: (msg: MailMessage, smtp: SmtpConfig) => Promise<void>;
 }
 
-export type ChannelId = "telegram" | "slack" | "email";
+export type ChannelId = "telegram" | "slack" | "email" | "webhook";
+
+/**
+ * A notification handed to the channels: the machine-readable event id plus the
+ * rendered human text. Most channels only render `text`; the generic webhook
+ * channel also forwards `event` so receivers can route on it. The sentinel
+ * `"test"` event carries the {@link sendTest} probe, which has no real lifecycle
+ * event but still needs a valid payload.
+ */
+interface NotifyMessage {
+  event: NotificationEvent | "test";
+  text: string;
+}
+
+/** Request header carrying the operator's optional shared secret to the webhook receiver. */
+export const WEBHOOK_SECRET_HEADER = "X-Drydock-Secret";
 
 interface Channel {
   id: ChannelId;
   isConfigured(s: Settings): boolean;
-  send(text: string, s: Settings, t: NotifyTransports): Promise<void>;
+  send(msg: NotifyMessage, s: Settings, t: NotifyTransports): Promise<void>;
 }
 
 const telegram: Channel = {
   id: "telegram",
   isConfigured: (s) => Boolean(s.telegramBotToken && s.telegramChatId),
-  send: (text, s, t) =>
+  send: (msg, s, t) =>
     t.postJson(`https://api.telegram.org/bot${s.telegramBotToken}/sendMessage`, {
       chat_id: s.telegramChatId,
-      text,
+      text: msg.text,
     }),
 };
 
 const slack: Channel = {
   id: "slack",
   isConfigured: (s) => Boolean(s.slackWebhookUrl),
-  send: (text, s, t) => t.postJson(s.slackWebhookUrl, { text }),
+  send: (msg, s, t) => t.postJson(s.slackWebhookUrl, { text: msg.text }),
 };
 
 const email: Channel = {
   id: "email",
   isConfigured: (s) => Boolean(s.smtpHost && s.emailFrom && s.emailTo),
-  send: (text, s, t) =>
+  send: (msg, s, t) =>
     t.sendMail(
-      { to: s.emailTo, from: s.emailFrom, subject: "Drydock notification", text },
+      { to: s.emailTo, from: s.emailFrom, subject: "Drydock notification", text: msg.text },
       { host: s.smtpHost, port: s.smtpPort, user: s.smtpUser, pass: s.smtpPass },
     ),
 };
 
-const CHANNELS: readonly Channel[] = [telegram, slack, email];
+/**
+ * Generic "POST JSON to a URL" channel (issue #414). Unlike Slack's fixed
+ * `{ text }` shape, it emits a documented structured payload — `{ event, text }`
+ * — so any receiver (ntfy/Gotify/Pushover proxy, Home Assistant webhook, a small
+ * relay) can route on the event id. The optional shared secret rides in the
+ * {@link WEBHOOK_SECRET_HEADER} header so the receiver can verify the call is
+ * from Drydock; it never appears in the body or in delivery logs.
+ */
+const webhook: Channel = {
+  id: "webhook",
+  isConfigured: (s) => Boolean(s.webhookUrl),
+  send: (msg, s, t) =>
+    t.postJson(
+      s.webhookUrl,
+      { event: msg.event, text: msg.text },
+      s.webhookSecret ? { [WEBHOOK_SECRET_HEADER]: s.webhookSecret } : undefined,
+    ),
+};
+
+const CHANNELS: readonly Channel[] = [telegram, slack, email, webhook];
 
 /**
  * Hard upper bound (ms) on a single {@link dispatch} fan-out. `dispatch` is
@@ -85,6 +123,23 @@ const NOTIFY_SMTP_TIMEOUT_MS = 10_000;
 /** Channels that have enough configuration to attempt delivery. */
 function configuredChannels(s: Settings): Channel[] {
   return CHANNELS.filter((c) => c.isConfigured(s));
+}
+
+/**
+ * Scrub a delivery error before it is logged or surfaced to the UI. On top of
+ * the pattern-based {@link redactSecrets}, this masks the configured secret
+ * *values* verbatim: the webhook shared secret is arbitrary operator text no
+ * pattern would recognise, so a transport or library that echoes request context
+ * (e.g. the `X-Drydock-Secret` header) into its error could otherwise leak it.
+ * Driven off {@link SECRET_SETTING_KEYS} so it covers every stored credential.
+ */
+function redactForLog(text: string, s: Settings): string {
+  let out = text;
+  for (const key of SECRET_SETTING_KEYS) {
+    const value = s[key];
+    if (typeof value === "string" && value !== "") out = out.split(value).join("[REDACTED]");
+  }
+  return redactSecrets(out);
 }
 
 /**
@@ -125,25 +180,28 @@ export async function dispatch(
   if (!s.notifyEvents.includes(event)) return;
   const channels = configuredChannels(s);
   if (channels.length === 0) return;
-  await withTimeout(deliver(channels, text, s, transports), NOTIFY_DISPATCH_BUDGET_MS, () =>
-    console.error(
-      `[notify] dispatch for ${event} exceeded ${NOTIFY_DISPATCH_BUDGET_MS}ms; continuing in background`,
-    ),
+  await withTimeout(
+    deliver(channels, { event, text }, s, transports),
+    NOTIFY_DISPATCH_BUDGET_MS,
+    () =>
+      console.error(
+        `[notify] dispatch for ${event} exceeded ${NOTIFY_DISPATCH_BUDGET_MS}ms; continuing in background`,
+      ),
   );
 }
 
 /** Sequentially deliver to each channel, isolating and logging failures. */
 async function deliver(
   channels: Channel[],
-  text: string,
+  msg: NotifyMessage,
   s: Settings,
   transports: NotifyTransports,
 ): Promise<void> {
   for (const channel of channels) {
     try {
-      await channel.send(text, s, transports);
+      await channel.send(msg, s, transports);
     } catch (err) {
-      console.error(`[notify] ${channel.id} delivery failed`, redactSecrets(String(err)));
+      console.error(`[notify] ${channel.id} delivery failed`, redactForLog(String(err), s));
     }
   }
 }
@@ -168,14 +226,17 @@ export async function sendTest(
   for (const channel of configuredChannels(s)) {
     try {
       await channel.send(
-        "Drydock test notification — your channel is configured correctly.",
+        {
+          event: "test",
+          text: "Drydock test notification — your channel is configured correctly.",
+        },
         s,
         transports,
       );
       results.push({ channel: channel.id, ok: true });
     } catch (err) {
-      console.error(`[notify] ${channel.id} test failed`, redactSecrets(String(err)));
-      results.push({ channel: channel.id, ok: false, error: redactSecrets(errorMessage(err)) });
+      console.error(`[notify] ${channel.id} test failed`, redactForLog(String(err), s));
+      results.push({ channel: channel.id, ok: false, error: redactForLog(errorMessage(err), s) });
     }
   }
   return results;
@@ -185,10 +246,13 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-const postJson: NotifyTransports["postJson"] = async (url, body) => {
+const postJson: NotifyTransports["postJson"] = async (url, body, headers) => {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    // Caller-supplied headers (e.g. the webhook shared secret) merge on top of
+    // the JSON content type; the content type stays fixed since the body is
+    // always JSON.stringify'd here.
+    headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
     // Bound the request so a hung host cannot hold the socket open past the
     // timeout (issue #90); undici's headersTimeout alone is ~300s.

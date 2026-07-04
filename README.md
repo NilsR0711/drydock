@@ -172,7 +172,7 @@ reel — the **[full feature reference →](docs/FEATURES.md)** has every detail
 #### 💸 Cost, limits & ops
 - **Cost tracking** — per-job and aggregate spend, daily + per-job ceilings (`0` = off), CSV/JSON export.
 - **Proactive usage gauges** — warn *before* a job hits the provider's subscription/rate limit; park and auto-resume when it resets.
-- **Rate-limit budgeting · credential watchdog · webhooks · external notifications** (Telegram/Slack/email) · **crash-safe lease queue**.
+- **Rate-limit budgeting · credential watchdog · webhooks · external notifications** (Telegram/Slack/email/generic webhook) · **crash-safe lease queue**.
 - **Config export/import** — snapshot the global settings + every repo's automation profile to a versioned, secret-redacted JSON bundle and re-apply it on another machine, live (no downtime, no job history, no secrets).
 
 #### 🖥️ Surfaces
@@ -241,6 +241,29 @@ required. Optional environment variables:
 | `DRYDOCK_ALLOW_REMOTE` | _unset_ | `1` to permit a non-loopback `--host` bind (the dashboard has **no auth**) |
 
 <sub>See [`docs/FEATURES.md`](docs/FEATURES.md) and the **Settings** page for the full set of global and per-repo knobs (cost caps, timeouts, log rotation, notification channels, …).</sub>
+
+### Webhook notifications
+
+Beyond Telegram, Slack, and email, Drydock can **POST a structured JSON payload to any URL** for the
+[lifecycle events](docs/FEATURES.md#-external-notifications) you opt into — one payload that drives
+Discord, [ntfy](https://ntfy.sh), Gotify, Pushover, a Home Assistant webhook, or any small relay.
+Set **Webhook URL** (and optionally **Webhook secret**) under **Settings → Notification channels**.
+Each delivery looks like:
+
+```http
+POST <your webhook URL>
+content-type: application/json
+X-Drydock-Secret: <your secret>   # only sent when a secret is configured
+
+{ "event": "needs_human", "text": "🙋 Job needs a human — merge conflict" }
+```
+
+`event` is the machine-readable id you route on — one of `needs_human`, `job_failed`, `pr_opened`,
+`pr_merged`, `release_published`, `cost_limit`, `claude_limit`, `codex_limit`, `auth_expired`,
+`automation_paused` — and `text` is the same human message the other channels receive. The **Send
+test notification** button posts `{ "event": "test", … }` so you can wire up a receiver before the
+first real event. Delivery is best-effort and time-bounded, so a slow or unreachable receiver never
+blocks the loop, and the secret is redacted from logs and config exports.
 
 [issue #285]: https://github.com/NilsR0711/drydock/issues/285
 

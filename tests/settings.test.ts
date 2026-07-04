@@ -351,10 +351,17 @@ describe("redactSettingsSecrets", () => {
       slackWebhookUrl: "https://hooks.slack.com/services/T/B/secret",
       smtpPass: "hunter2",
       openrouterApiKey: "sk-or-v1-secret",
+      webhookUrl: "https://discord.com/api/webhooks/1/token-in-path",
+      webhookSecret: "whk-notify-secret",
     });
     for (const key of SECRET_SETTING_KEYS) {
       expect(redacted[key]).toBe(SETTINGS_REDACTION_PLACEHOLDER);
     }
+  });
+
+  it("treats the generic webhook URL and secret as credentials", () => {
+    expect(SECRET_SETTING_KEYS).toContain("webhookUrl");
+    expect(SECRET_SETTING_KEYS).toContain("webhookSecret");
   });
 
   it("leaves empty credential fields empty rather than masking them", () => {
