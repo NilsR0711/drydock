@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
 import type { DeploymentHealingSession, Job, Repo } from "@/lib/db/schema";
 import type { ForgeClient } from "@/lib/forge/types";
+import { logError } from "@/lib/log/logger";
 import type {
   DeploymentPlatformAdapter,
   DeploymentStatus,
@@ -9,6 +10,7 @@ import type {
 import {
   DEFAULT_DEPLOYMENT_HEAL_BUDGETS,
   type DeploymentHealBudgets,
+  getDeploymentHealingSession,
   recentDeploymentHealingSessions,
 } from "@/lib/orchestrator/deployment-healing";
 import {
@@ -18,9 +20,17 @@ import {
 import { createJob, transitionJob } from "@/lib/orchestrator/jobs";
 import { addRepo } from "@/lib/repos/service";
 
+// The driver imports logError directly; replace only that export so a swallowed
+// getLogs rejection is observable (issue #423) while the rest of the sink stays real.
+vi.mock("@/lib/log/logger", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/log/logger")>()),
+  logError: vi.fn(),
+}));
+
 let db: DB;
 beforeEach(() => {
   db = createDb(":memory:");
+  vi.mocked(logError).mockClear();
 });
 
 function mergedJob(repo: Repo, issue: number, pr: number): Job {
@@ -128,6 +138,37 @@ describe("driveDeploymentHealing — monitoring", () => {
     const rows = recentDeploymentHealingSessions(repo.id, db);
     expect(rows[0]?.status).toBe("repaired");
     expect(rows[0]?.followupPrNumber).toBe(77);
+  });
+
+  it("logs the failure but still opens the fix PR when log capture rejects", async () => {
+    const repo = addRepo({ path: "/r", name: "r", autoHealDeployments: true }, db);
+    mergedJob(repo, 1, 5);
+    const adapter = adapterStub("error");
+    (adapter.getLogs as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("log stream timed out"),
+    );
+    const openFixPr = vi.fn(
+      async (_r: Repo, _j: Job, _s: DeploymentHealingSession, _l: string) => 88,
+    );
+    await driveDeploymentHealing({
+      db,
+      forgeFor: () => forgeStub(),
+      adapterFor: async () => adapter,
+      openFixPr,
+      budgets,
+    });
+    // Healing still proceeds: fix PR opens with empty logs and the session is repaired.
+    expect(openFixPr).toHaveBeenCalledTimes(1);
+    expect(openFixPr.mock.calls[0]?.[3]).toBe("");
+    const rows = recentDeploymentHealingSessions(repo.id, db);
+    expect(rows[0]?.status).toBe("repaired");
+    const sessionId = rows[0]?.id;
+    expect(getDeploymentHealingSession(sessionId as number, db)?.logsExcerpt).toBeNull();
+    // But the swallowed failure is now traceable: session id + underlying error.
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining(`session ${sessionId}`),
+      expect.any(Error),
+    );
   });
 
   it("escalates when the fix PR cannot be opened", async () => {

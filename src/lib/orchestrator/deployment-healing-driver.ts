@@ -172,7 +172,10 @@ async function advanceSession(
   }
 
   // phase === "error": capture logs, then open a follow-up fix PR.
-  const rawLogs = await adapter.getLogs(ctx).catch(() => "");
+  const rawLogs = await adapter.getLogs(ctx).catch((err) => {
+    logError(`[deploy-heal] log fetch failed for session ${session.id}`, err);
+    return "";
+  });
   const logs = rawLogs.split("\n").slice(-budgets.maxLogLines).join("\n").trim();
   const failed = transitionDeploymentHealingSession(
     session.id,
