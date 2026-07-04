@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type Database from "better-sqlite3";
+import Database from "better-sqlite3";
 import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type DB } from "@/lib/db/client";
@@ -55,6 +55,20 @@ function openDb(): DB {
   const db = createDb(dbPath);
   openDbs.push(db);
   return db;
+}
+
+// Simulate an out-of-band edit — e.g. `sqlite3 ~/.drydock/... "DELETE FROM ..."`,
+// which defaults to `foreign_keys = OFF` — that orphans a child row. Drydock's
+// own write path never does this (its connection has FK enforcement on), but
+// the DB lives on the user's disk where external tooling can reach it.
+function orphanChildOutOfBand(): void {
+  const raw = new Database(dbPath);
+  try {
+    raw.pragma("foreign_keys = OFF");
+    raw.exec("DELETE FROM parents WHERE id = 1");
+  } finally {
+    raw.close();
+  }
 }
 
 function closeAll(): void {
@@ -127,5 +141,52 @@ describe("applyMigrations foreign-key handling", () => {
     expect(children).toHaveLength(1);
     const recorded = db2.all<{ name: string }>(sql`SELECT name FROM __migrations`);
     expect(recorded.map((r) => r.name)).toEqual(["0000_init.sql"]);
+  });
+
+  it("blames pre-existing corruption, not the pending migration, when the DB was already dirty", () => {
+    writeFileSync(join(migrationsDir, "0000_init.sql"), INIT_SQL);
+    const db1 = openDb();
+    db1.run(sql`INSERT INTO parents (id, name) VALUES (1, 'p')`);
+    db1.run(sql`INSERT INTO children (id, parent_id) VALUES (10, 1)`);
+    closeAll();
+
+    // Corrupt the DB before any new migration exists — the child now dangles.
+    orphanChildOutOfBand();
+
+    // A perfectly valid new migration is now pending. The whole-DB
+    // foreign_key_check would otherwise pin the pre-existing orphan on it.
+    writeFileSync(join(migrationsDir, "0001_rebuild.sql"), REBUILD_SQL);
+
+    let db: DB | undefined;
+    let error: Error | undefined;
+    try {
+      db = createDb(dbPath);
+    } catch (err) {
+      error = err as Error;
+    }
+    if (db) openDbs.push(db);
+
+    expect(error, "expected createDb to reject an already-corrupt database").toBeDefined();
+    // Named as pre-existing corruption, pointing at the offending table…
+    expect(error?.message).toMatch(/pre-existing/i);
+    expect(error?.message).toContain("children");
+    // …and NOT misattributed to the (blameless) migration file.
+    expect(error?.message).not.toMatch(/would leave/i);
+    expect(error?.message).not.toContain("0001_rebuild.sql");
+  });
+
+  it("does not newly reject an up-to-date database that already has pre-existing violations", () => {
+    writeFileSync(join(migrationsDir, "0000_init.sql"), INIT_SQL);
+    const db1 = openDb();
+    db1.run(sql`INSERT INTO parents (id, name) VALUES (1, 'p')`);
+    db1.run(sql`INSERT INTO children (id, parent_id) VALUES (10, 1)`);
+    closeAll();
+
+    orphanChildOutOfBand();
+
+    // No new migration files: the schema is already current. Opening must still
+    // succeed — the pre-existing check guards actual migration work only, so we
+    // never brick an install that runs fine today despite out-of-band edits.
+    expect(() => openDb()).not.toThrow();
   });
 });
