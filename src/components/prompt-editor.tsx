@@ -1,8 +1,8 @@
 "use client";
 
-import Editor, { DiffEditor } from "@monaco-editor/react";
+import Editor, { DiffEditor, loader } from "@monaco-editor/react";
 import { Eye, GitCompare, History, RotateCcw, Save, X } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,10 +12,54 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
+import { configureMonaco } from "@/lib/monaco/configure";
 import { loadTemplateAction, saveTemplateAction } from "@/lib/prompts/actions";
 import { TEMPLATE_NAMES } from "@/lib/prompts/defaults";
 import { renderTemplate, SUPPORTED_VARIABLES } from "@/lib/prompts/render";
 import { cn } from "@/lib/utils";
+
+function EditorLoading() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <Spinner size={20} className="text-muted-foreground" />
+    </div>
+  );
+}
+
+// Serve Monaco from the bundled `monaco-editor` package instead of the loader's
+// default jsdelivr CDN (issue #429). The package is browser-only — it touches the
+// global scope at import time — so it is pulled in through a client-only dynamic
+// import and configured exactly once. The editors below are gated on the returned
+// flag so the loader is always pointed at the bundle before `@monaco-editor/react`
+// initializes it (the point at which it would otherwise fetch from the CDN).
+let monacoConfigured = false;
+function useBundledMonaco(): boolean {
+  const [ready, setReady] = useState(monacoConfigured);
+  useEffect(() => {
+    if (monacoConfigured) {
+      setReady(true);
+      return;
+    }
+    let active = true;
+    void import("monaco-editor").then((monaco) => {
+      if (!monacoConfigured) {
+        configureMonaco(
+          loader,
+          monaco,
+          () =>
+            new Worker(new URL("monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url)),
+          self,
+        );
+        monacoConfigured = true;
+      }
+      if (active) setReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return ready;
+}
 
 interface RepoOption {
   id: number;
@@ -65,6 +109,7 @@ export function PromptEditor({
   const [saved, setSaved] = useState<number | null>(null);
   const [diffVersion, setDiffVersion] = useState<VersionInfo | null>(null);
   const { success, error } = useToast();
+  const monacoReady = useBundledMonaco();
 
   function load(nextRepo: number, nextName: string) {
     start(async () => {
@@ -177,17 +222,21 @@ export function PromptEditor({
                 </button>
               </div>
               <div className="h-72 overflow-hidden rounded-lg border border-card-border">
-                <DiffEditor
-                  language="markdown"
-                  original={diffVersion.content}
-                  modified={content}
-                  options={{
-                    minimap: { enabled: false },
-                    fontSize: 13,
-                    readOnly: true,
-                    renderSideBySide: true,
-                  }}
-                />
+                {monacoReady ? (
+                  <DiffEditor
+                    language="markdown"
+                    original={diffVersion.content}
+                    modified={content}
+                    options={{
+                      minimap: { enabled: false },
+                      fontSize: 13,
+                      readOnly: true,
+                      renderSideBySide: true,
+                    }}
+                  />
+                ) : (
+                  <EditorLoading />
+                )}
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setDiffVersion(null)}>
@@ -202,12 +251,16 @@ export function PromptEditor({
           ) : (
             <>
               <div className="h-72 overflow-hidden rounded-lg border border-card-border">
-                <Editor
-                  defaultLanguage="markdown"
-                  value={content}
-                  onChange={(v) => setContent(v ?? "")}
-                  options={{ minimap: { enabled: false }, fontSize: 13 }}
-                />
+                {monacoReady ? (
+                  <Editor
+                    defaultLanguage="markdown"
+                    value={content}
+                    onChange={(v) => setContent(v ?? "")}
+                    options={{ minimap: { enabled: false }, fontSize: 13 }}
+                  />
+                ) : (
+                  <EditorLoading />
+                )}
               </div>
               <div className="flex items-center justify-end gap-3">
                 {saved !== null && <span className="text-xs text-success">Saved v{saved}</span>}
