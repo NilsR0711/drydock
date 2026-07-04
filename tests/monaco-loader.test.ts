@@ -39,6 +39,9 @@ describe("configureMonaco (issue #429)", () => {
     const produced = host.MonacoEnvironment?.getWorker?.("1", "editorWorkerService");
     expect(produced).toBe(worker);
     expect(createWorker).toHaveBeenCalledTimes(1);
+    // The Monaco worker contract (workerId, label) is forwarded, so the factory
+    // can dispatch to a dedicated language worker if one is ever added.
+    expect(createWorker).toHaveBeenCalledWith("1", "editorWorkerService");
   });
 });
 
@@ -62,9 +65,13 @@ describe("Monaco is served from the bundle, never the jsdelivr CDN (issue #429)"
     // default resolves monaco from cdn.jsdelivr.net. Such a module must call
     // configureMonaco(...) or the CDN sneaks back in.
     const valueImport = /^\s*import(?!\s+type\b)[^\n]*from\s+["']@monaco-editor\/react["']/m;
+    // Strip comments so a commented-out `// configureMonaco(...)` can't satisfy
+    // the guard — the call has to be real code.
+    const stripComments = (s: string) =>
+      s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
     const offenders = collectSourceFiles(srcRoot).filter((file) => {
       const text = readFileSync(file, "utf8");
-      return valueImport.test(text) && !text.includes("configureMonaco(");
+      return valueImport.test(text) && !stripComments(text).includes("configureMonaco(");
     });
 
     expect(offenders).toEqual([]);

@@ -22,17 +22,21 @@ export interface MonacoWorkerHost {
  *  - hand the loader the bundled `monaco` instance so it never fetches from
  *    cdn.jsdelivr.net.
  *
- * The worker is created lazily (only when Monaco asks for one), so importing
- * this configuration never spawns a worker on its own.
+ * `workerId`/`label` are forwarded to `createWorker` so it can dispatch to a
+ * dedicated language worker if one is ever needed — matching Monaco's
+ * `Environment.getWorker` contract — even though the current markdown-only
+ * editor always uses the generic editor worker. The worker is created lazily
+ * (only when Monaco asks for one), so importing this configuration never spawns
+ * a worker on its own.
  */
 export function configureMonaco(
   loader: MonacoLoader,
   monaco: unknown,
-  createWorker: () => Worker,
+  createWorker: (workerId: string, label: string) => Worker,
   host: MonacoWorkerHost,
 ): void {
   host.MonacoEnvironment = {
-    getWorker: () => createWorker(),
+    getWorker: (workerId, label) => createWorker(workerId, label),
   };
   loader.config({ monaco });
 }
