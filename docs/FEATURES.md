@@ -441,7 +441,10 @@ Whenever a job parks for a human (timeout, cost cap, non-zero exit, ADR gate, em
 retries, merge conflict, …), Drydock makes it visible on the forge issue itself, not just the dashboard:
 it sets the repo's needs-human label, drops the queue label, and posts a comment with the reason. The
 comment is idempotent (a requeued job edits the same comment instead of stacking new ones) and every forge
-call is best-effort, so a forge hiccup never changes the parked job's outcome.
+call is best-effort, so a forge hiccup never changes the parked job's outcome. When one systemic event
+parks many jobs at once (expired credentials, a provider-limit misclassification), the needs-human screen
+multi-selects rows for **bulk requeue or abort** — one confirmation and one summary toast for the whole
+batch, with any per-job failures surfaced rather than swallowed — instead of one click per row.
 
 ### 🧵 Readable issue threads
 

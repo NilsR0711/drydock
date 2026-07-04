@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/lib/db/client";
 import {
   abortJobAction,
+  bulkAbortJobsAction,
+  bulkRequeueJobsAction,
   emergencyStopAction,
   requeueJobAction,
 } from "@/lib/orchestrator/job-actions";
@@ -107,6 +109,91 @@ describe("abortJobAction", () => {
     const result = await abortJobAction(job.id);
 
     expect(result.status).toBe("aborted");
+  });
+});
+
+describe("bulkRequeueJobsAction (issue #410)", () => {
+  function parkedJob(issueNumber: number) {
+    const db = getDb();
+    const job = createJob({ repoId, issueNumber }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "needs_human", {}, db);
+    return job;
+  }
+
+  it("requeues every selected parked job and reports them all as succeeded", async () => {
+    const db = getDb();
+    const a = parkedJob(30);
+    const b = parkedJob(31);
+    const c = parkedJob(32);
+
+    const result = await bulkRequeueJobsAction([a.id, b.id, c.id]);
+
+    expect(result.succeeded).toEqual([a.id, b.id, c.id]);
+    expect(result.failed).toEqual([]);
+    expect(getJob(a.id, db)?.status).toBe("queued");
+    expect(getJob(b.id, db)?.status).toBe("queued");
+    expect(getJob(c.id, db)?.status).toBe("queued");
+  });
+
+  it("surfaces per-job failures without aborting the whole batch", async () => {
+    const db = getDb();
+    const good = parkedJob(33);
+    const missing = 999_999;
+
+    const result = await bulkRequeueJobsAction([good.id, missing]);
+
+    expect(result.succeeded).toEqual([good.id]);
+    expect(result.failed).toEqual([{ id: missing, error: `job ${missing} not found` }]);
+    // The valid job was still requeued despite its neighbour failing.
+    expect(getJob(good.id, db)?.status).toBe("queued");
+  });
+
+  it("returns an empty result for an empty selection", async () => {
+    const result = await bulkRequeueJobsAction([]);
+
+    expect(result).toEqual({ succeeded: [], failed: [] });
+  });
+});
+
+describe("bulkAbortJobsAction (issue #410)", () => {
+  function parkedJob(issueNumber: number) {
+    const db = getDb();
+    const job = createJob({ repoId, issueNumber }, db);
+    transitionJob(job.id, "working", {}, db);
+    transitionJob(job.id, "needs_human", {}, db);
+    return job;
+  }
+
+  it("aborts every selected parked job and reports them all as succeeded", async () => {
+    const db = getDb();
+    const a = parkedJob(40);
+    const b = parkedJob(41);
+
+    const result = await bulkAbortJobsAction([a.id, b.id]);
+
+    expect(result.succeeded).toEqual([a.id, b.id]);
+    expect(result.failed).toEqual([]);
+    expect(getJob(a.id, db)?.status).toBe("aborted");
+    expect(getJob(b.id, db)?.status).toBe("aborted");
+  });
+
+  it("surfaces per-job failures without aborting the whole batch", async () => {
+    const db = getDb();
+    const good = parkedJob(42);
+    const missing = 888_888;
+
+    const result = await bulkAbortJobsAction([good.id, missing]);
+
+    expect(result.succeeded).toEqual([good.id]);
+    expect(result.failed).toEqual([{ id: missing, error: `job ${missing} not found` }]);
+    expect(getJob(good.id, db)?.status).toBe("aborted");
+  });
+
+  it("returns an empty result for an empty selection", async () => {
+    const result = await bulkAbortJobsAction([]);
+
+    expect(result).toEqual({ succeeded: [], failed: [] });
   });
 });
 
