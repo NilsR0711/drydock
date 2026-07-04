@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getBroker, type Subscriber } from "@/lib/stream/broker";
+import { parseEventPayload } from "@/lib/stream/event-payload";
 
 export const dynamic = "force-dynamic";
 
@@ -72,16 +73,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       // Replay persisted events — everything after the client's Last-Event-ID
       // on a resume, the last 200 on a fresh connect — then go live. A corrupt
       // persisted payload must not kill the whole stream, so parse each row
-      // defensively.
+      // defensively (shared with the detail pages, issue #419).
       for (const row of broker.replay(jobId, undefined, afterId)) {
-        let payload: unknown;
-        try {
-          payload = JSON.parse(row.payload);
-        } catch {
-          payload = { error: "unparseable event payload" };
-        }
         cursor = Math.max(cursor, row.id);
-        write({ id: row.id, type: row.type, payload });
+        write({ id: row.id, type: row.type, payload: parseEventPayload(row.payload) });
       }
       replaying = false;
       for (const event of buffered) deliver(event);

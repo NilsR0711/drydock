@@ -2,6 +2,7 @@ import { and, desc, eq, gt } from "drizzle-orm";
 import { type DB, getDb } from "@/lib/db/client";
 import { type JobEvent, jobEvents } from "@/lib/db/schema";
 import { redactSecrets } from "@/lib/log/redact";
+import { parseEventPayload } from "@/lib/stream/event-payload";
 import { globalSingleton } from "@/lib/util/global-singleton";
 
 export interface BrokerEvent {
@@ -69,13 +70,8 @@ export class LogBroker {
     const payload = redactSecrets(JSON.stringify(event.payload ?? {}));
     // Redaction rewrites the serialized payload, so the re-parse must never be
     // allowed to throw into the producer (publish runs synchronously inside the
-    // child stdout handler). Mirror the replay-side defense with a fallback.
-    let safePayload: unknown;
-    try {
-      safePayload = JSON.parse(payload);
-    } catch {
-      safePayload = { error: "unparseable event payload" };
-    }
+    // child stdout handler). Share the replay/detail-page defense (issue #419).
+    const safePayload = parseEventPayload(payload);
     const row = this.db
       .insert(jobEvents)
       .values({ jobId, type: event.type, payload })

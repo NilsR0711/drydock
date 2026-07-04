@@ -43,6 +43,7 @@ import { openJobsByIssue } from "@/lib/orchestrator/jobs";
 import { recentReleaseRuns } from "@/lib/release/release-service";
 import { repoAutomation } from "@/lib/repos/automation";
 import { getSettings } from "@/lib/settings/service";
+import { parseEventPayload } from "@/lib/stream/event-payload";
 import { listTrackedPrs } from "@/lib/tracked-prs/service";
 
 export const dynamic = "force-dynamic";
@@ -74,7 +75,7 @@ export default async function RepoWorkspacePage({ params }: { params: Promise<{ 
         .from(jobEvents)
         .where(eq(jobEvents.jobId, ws.activeJob.id))
         .all()
-        .map((e) => ({ id: e.id, type: e.type, payload: JSON.parse(e.payload), ts: e.ts }))
+        .map((e) => ({ id: e.id, type: e.type, payload: parseEventPayload(e.payload), ts: e.ts }))
     : [];
 
   // Per-repo stat counts. Issue-side counts come from the labelled issues; job
