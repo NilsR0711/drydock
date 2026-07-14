@@ -49,7 +49,7 @@ describe("detail pages — corrupt persisted event payload (issue #419)", () => 
 
     const viewer = findByType(tree, LogViewer);
     expect(viewer).toBeDefined();
-    const initial = (viewer?.props as { initial: { payload: unknown }[] }).initial;
+    const initial = ((viewer as ReactElement).props as { initial: { payload: unknown }[] }).initial;
     expect(initial).toHaveLength(2);
     expect(initial.map((e) => e.payload)).toEqual([{ text: "ok" }, FALLBACK]);
   });
@@ -59,7 +59,8 @@ describe("detail pages — corrupt persisted event payload (issue #419)", () => 
 
     const activity = findByType(tree, RepoActivity);
     expect(activity).toBeDefined();
-    const initialLog = (activity?.props as { initialLog: { payload: unknown }[] }).initialLog;
+    const initialLog = ((activity as ReactElement).props as { initialLog: { payload: unknown }[] })
+      .initialLog;
     expect(initialLog).toHaveLength(2);
     expect(initialLog.map((e) => e.payload)).toEqual([{ text: "ok" }, FALLBACK]);
   });
