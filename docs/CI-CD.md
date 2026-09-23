@@ -94,6 +94,12 @@ Because we already commit conventionally (`feat:`, `fix:`, `chore:` …), no ext
 discipline is needed. Commits that should appear in the changelog use `feat:` or
 `fix:`; everything else is grouped under "Miscellaneous".
 
+Production dependencies are baked into the published standalone bundle, so a
+bump only reaches npm users through a release. Dependabot therefore commits
+production-dependency updates as `fix(deps):` (releasable), while
+dev-dependency updates stay `chore(deps-dev):` and never cut a release on their
+own (`commit-message` in `.github/dependabot.yml`).
+
 When release-please reports that a release was created (`release_created`), it
 **dispatches** the **`npm-publish.yml`** workflow (via `gh workflow run`, a
 `workflow_dispatch` that is exempt from the `GITHUB_TOKEN` recursion guard) with
