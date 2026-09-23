@@ -46,8 +46,7 @@ function useBundledMonaco(): boolean {
         configureMonaco(
           loader,
           monaco,
-          () =>
-            new Worker(new URL("monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url)),
+          () => new Worker(new URL("monaco-editor/editor/editor.worker.js", import.meta.url)),
           self,
         );
         monacoConfigured = true;
