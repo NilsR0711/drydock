@@ -46,19 +46,19 @@ describe("platformSupportsCapability", () => {
   // the GitLab MR Discussions / Releases APIs (or removes a GitHub method) this
   // fails until the capability table is corrected — the UI can never claim a
   // capability the client lacks, nor hide one it has.
-  it.each([
-    "github",
-    "gitlab",
-  ] as const)("declares capabilities for %s that match its forge client's methods", (platform) => {
-    const forge = getForge({ path: ".", platform }) as unknown as Record<string, unknown>;
-    for (const capability of Object.keys(CAPABILITY_METHODS) as ForgeCapability[]) {
-      const implemented = CAPABILITY_METHODS[capability].every(
-        (m) => typeof forge[m] === "function",
-      );
-      expect(
-        platformSupportsCapability(platform, capability),
-        `${platform} ${capability}: declared support must equal method presence`,
-      ).toBe(implemented);
-    }
-  });
+  it.each(["github", "gitlab"] as const)(
+    "declares capabilities for %s that match its forge client's methods",
+    (platform) => {
+      const forge = getForge({ path: ".", platform }) as unknown as Record<string, unknown>;
+      for (const capability of Object.keys(CAPABILITY_METHODS) as ForgeCapability[]) {
+        const implemented = CAPABILITY_METHODS[capability].every(
+          (m) => typeof forge[m] === "function",
+        );
+        expect(
+          platformSupportsCapability(platform, capability),
+          `${platform} ${capability}: declared support must equal method presence`,
+        ).toBe(implemented);
+      }
+    },
+  );
 });
