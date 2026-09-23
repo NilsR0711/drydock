@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/NilsR0711/drydock/compare/v1.2.1...v1.2.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group across 1 directory with 9 updates ([#517](https://github.com/NilsR0711/drydock/issues/517)) ([25b3a48](https://github.com/NilsR0711/drydock/commit/25b3a48b86da7f5291b1a442f0bdf209e12ae78c))
+
 ## [1.2.1](https://github.com/NilsR0711/drydock/compare/v1.2.0...v1.2.1) (2026-07-14)
 
 
